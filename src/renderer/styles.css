@@ -260,6 +260,22 @@ nav .export {
 .button-row button {
   flex: 1;
 }
+.sync-result {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #34413c;
+  border-radius: 6px;
+  background: #101712;
+  font-size: 12px;
+}
+.sync-result strong {
+  color: #43d88d;
+}
+.sync-result small {
+  color: #7e8b9b;
+}
 .danger {
   width: 100%;
   color: #ff8793;

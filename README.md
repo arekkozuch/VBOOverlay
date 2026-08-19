@@ -55,9 +55,11 @@ Place a real `.vbo` in `samples/` or the repository root to enable the condition
 
 ## Video, GoPro, and synchronization
 
-FFprobe reports source duration, streams, resolution, codec, pixel format, frame rates, time base, audio, metadata streams, and likely variable frame rate. GoPro GPMF metadata is detected without preventing ordinary MP4/MOV import. GPMF payload extraction is not implemented yet, so auto-sync remains disabled in the UI and manual offset is always available.
+FFprobe reports source duration, streams, resolution, codec, pixel format, frame rates, time base, audio, metadata streams, and likely variable frame rate. GoPro GPMF metadata is detected without preventing ordinary MP4/MOV import. The main process reads only indexed `gpmd` packet ranges—never the entire multi-gigabyte video—then converts GPS, accelerometer, and gyroscope data into typed channels through the maintained `gopro-telemetry` parser.
 
-The independent GPS-speed sync strategy resamples signals, performs normalized cross-correlation over a configurable window, and reports confidence from peak strength, uniqueness, duration, and sample count. Drift is deliberately left at `timeScale = 1` until it can be estimated reliably.
+The independent GPS-speed sync strategy performs a full-session 1 Hz search followed by 10 Hz refinement, using normalized cross-correlation. It reports confidence from peak strength, uniqueness, duration, and sample count. The UI shows the candidate before applying it; manual correction remains available. Drift is deliberately left at `timeScale = 1` until it can be estimated reliably.
+
+The supplied 11,526,059,397-byte GoPro recording was validated as 3840×2160 HEVC at 59.94 fps with AAC audio and 1,536 GPMF packets. Integration extracted 15,374 GPS samples, retained 14,796 with a valid fix, and extracted 309,862 samples per accelerometer/gyroscope axis. It synchronized the recording to the supplied VBO at approximately `+90.2 s` with correlation above `0.97`. Both recordings are ignored by Git.
 
 ## Widgets and maps
 
@@ -75,11 +77,9 @@ Runtime detection prefers only encoders actually reported by FFmpeg (`hevc_video
 
 ## Current limitations and roadmap
 
-- A supplied real VBO and a legal real GoPro sample are needed for integration validation.
-- GoPro GPMF extraction and auto-sync UI wiring are pending.
 - HEVC streaming export, audio preservation, progress, and cancellation are pending.
 - MapLibre map display and tile caching are pending; track-outline rendering works offline.
 - VFR is detected and shown in the model, but a timing-safe VFR export path is not implemented.
 - Packaging/signing installers for macOS and Windows is not yet configured.
 
-Next work should prioritize real-file parser validation, GPMF extraction, and timing-correct HEVC export before appearance or roadmap features.
+Next work should prioritize timing-correct HEVC export before appearance or roadmap features.

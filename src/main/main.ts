@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc.js';
 import type { ProjectFile } from '../shared/models.js';
 import { serializeSession } from '../telemetry/core/session.js';
+import { loadGoProTelemetry } from '../telemetry/gopro/source.js';
+import { TelemetrySyncEngine } from '../telemetry/sync/sync.js';
 import { parseVbo } from '../telemetry/vbo/parser.js';
 import { inspectEnvironment } from './export/encoders.js';
 import { probeMedia } from './media/ffprobe.js';
@@ -19,6 +21,9 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 const mediaPaths = new Map<string, string>();
+let currentVideoPath: string | undefined;
+let currentVboPath: string | undefined;
+let goProCache: { path: string; result: ReturnType<typeof loadGoProTelemetry> } | undefined;
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -58,6 +63,8 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return null;
     const token = randomUUID();
     mediaPaths.set(token, result.filePaths[0]);
+    currentVideoPath = result.filePaths[0];
+    goProCache = undefined;
     return probeMedia(result.filePaths[0], `fet-media://${token}/video`);
   });
   ipcMain.handle(IPC.openVbo, async () => {
@@ -67,7 +74,25 @@ app.whenReady().then(() => {
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const path = result.filePaths[0];
+    currentVboPath = path;
     return { path, session: serializeSession(parseVbo(await readFile(path, 'utf8'))) };
+  });
+  ipcMain.handle(IPC.autoSync, async () => {
+    if (!currentVideoPath || !currentVboPath)
+      throw new Error('Open both a GoPro video and VBO before automatic synchronization.');
+    console.info('[sync] GPS speed synchronization started');
+    const vbo = parseVbo(await readFile(currentVboPath, 'utf8'));
+    if (!goProCache || goProCache.path !== currentVideoPath)
+      goProCache = { path: currentVideoPath, result: loadGoProTelemetry(currentVideoPath) };
+    const goPro = await goProCache.result;
+    console.info(
+      `[gopro] ${goPro.info.packetCount} packets, channels: ${goPro.info.availableChannels.join(', ')}`,
+    );
+    const result = new TelemetrySyncEngine().synchronize(goPro.session, vbo);
+    console.info(
+      `[sync] ${result.strategy}, offset ${result.offset.toFixed(3)}s, confidence ${(result.confidence * 100).toFixed(0)}%`,
+    );
+    return result;
   });
   ipcMain.handle(IPC.environment, inspectEnvironment);
   ipcMain.handle(IPC.openProject, async () => {

@@ -101,3 +101,24 @@ export interface EnvironmentInfo {
   ffprobeVersion: string;
   encoders: EncoderInfo[];
 }
+
+export interface GoProTelemetryInfo {
+  availableChannels: string[];
+  sampleCounts: Record<string, number>;
+  duration: number;
+  packetCount: number;
+}
+
+export interface SyncResult {
+  offset: number;
+  timeScale: number;
+  confidence: number;
+  strategy: string;
+  diagnostics: {
+    correlation: number;
+    peakUniqueness: number;
+    validSamples: number;
+    sampleRate: number;
+    coarseOffset?: number;
+  };
+}

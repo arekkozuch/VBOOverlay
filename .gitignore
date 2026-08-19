@@ -9,6 +9,7 @@ coverage/
 *.fetproject
 /*.vbo
 /samples/*.vbo
+*.rcz
 .env
 .env.*
 !.env.example

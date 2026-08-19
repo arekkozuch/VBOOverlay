@@ -19,6 +19,7 @@
   "dependencies": {
     "@vitejs/plugin-react": "6.0.5",
     "electron": "43.4.1",
+    "gopro-telemetry": "^1.2.11",
     "maplibre-gl": "6.4.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"

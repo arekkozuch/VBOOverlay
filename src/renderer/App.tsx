@@ -4,6 +4,7 @@ import type {
   MediaInfo,
   ProjectFile,
   SyncTransform,
+  SyncResult,
   WidgetInstance,
   WidgetScene,
   WidgetType,
@@ -81,6 +82,8 @@ export function App(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string>();
   const [projectPath, setProjectPath] = useState<string>();
   const [environment, setEnvironment] = useState<EnvironmentInfo>();
+  const [syncCandidate, setSyncCandidate] = useState<SyncResult>();
+  const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState('Open a video and VBO to begin.');
   const telemetryTime = videoToTelemetryTime(time, sync);
   const selected = scene.widgets.find(({ id }) => id === selectedId);
@@ -146,6 +149,22 @@ export function App(): React.JSX.Element {
       );
     } catch (error) {
       setMessage(`VBO error: ${String(error)}`);
+    }
+  }
+  async function autoSync(): Promise<void> {
+    setSyncing(true);
+    setSyncCandidate(undefined);
+    setMessage('Extracting GoPro telemetry and correlating GPS speed…');
+    try {
+      const result = await window.flappedEar.autoSync();
+      setSyncCandidate(result);
+      setMessage(
+        `Auto sync found offset ${result.offset >= 0 ? '+' : ''}${result.offset.toFixed(3)}s with ${(result.confidence * 100).toFixed(0)}% confidence.`,
+      );
+    } catch (error) {
+      setMessage(`Auto sync error: ${String(error)}`);
+    } finally {
+      setSyncing(false);
     }
   }
   async function openProject(): Promise<void> {
@@ -427,10 +446,34 @@ export function App(): React.JSX.Element {
           />
           <div className="button-row">
             <button onClick={() => setSync({ offset: 0, timeScale: 1 })}>Reset</button>
-            <button disabled title="Requires GoPro GPMF extraction">
-              Auto Sync
+            <button
+              disabled={!media?.hasGoProTelemetry || !session || syncing}
+              onClick={() => void autoSync()}
+            >
+              {syncing ? 'Syncing…' : 'Auto Sync'}
             </button>
           </div>
+          {syncCandidate && (
+            <div className="sync-result">
+              <strong>{syncCandidate.strategy}</strong>
+              <span>
+                Offset {syncCandidate.offset >= 0 ? '+' : ''}
+                {syncCandidate.offset.toFixed(3)}s
+              </span>
+              <span>Confidence {(syncCandidate.confidence * 100).toFixed(0)}%</span>
+              <small>Correlation {syncCandidate.diagnostics.correlation.toFixed(3)}</small>
+              <button
+                onClick={() =>
+                  setSync({
+                    offset: syncCandidate.offset,
+                    timeScale: syncCandidate.timeScale,
+                  })
+                }
+              >
+                Apply
+              </button>
+            </div>
+          )}
           <h2>Live telemetry</h2>
           <dl>
             <dt>Speed</dt>

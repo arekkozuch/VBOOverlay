@@ -3,6 +3,7 @@ import type {
   MediaInfo,
   ProjectFile,
   SerializedTelemetrySession,
+  SyncResult,
 } from './models.js';
 
 export interface OpenVboResult {
@@ -21,6 +22,7 @@ export interface FlappedEarApi {
   inspectEnvironment(): Promise<EnvironmentInfo>;
   openProject(): Promise<ProjectOpenResult | null>;
   saveProject(project: ProjectFile, path?: string): Promise<string | null>;
+  autoSync(): Promise<SyncResult>;
 }
 
 export const IPC = {
@@ -29,4 +31,5 @@ export const IPC = {
   environment: 'system:environment',
   openProject: 'project:open',
   saveProject: 'project:save',
+  autoSync: 'telemetry:auto-sync',
 } as const;

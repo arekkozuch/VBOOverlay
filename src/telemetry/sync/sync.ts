@@ -1,3 +1,5 @@
+import type { TelemetrySession } from '../core/session.js';
+
 export interface SampledSignal {
   timestamps: Float64Array;
   values: Float32Array;
@@ -12,6 +14,7 @@ export interface SyncCandidate {
     peakUniqueness: number;
     validSamples: number;
     sampleRate: number;
+    coarseOffset?: number;
   };
 }
 export interface SyncStrategy {
@@ -56,6 +59,7 @@ export class GpsSpeedSync implements SyncStrategy {
   constructor(
     private readonly searchWindow = 30,
     private readonly sampleRate = 10,
+    private readonly centerOffset = 0,
   ) {}
   canRun(a: SampledSignal, b: SampledSignal): boolean {
     return a.values.length >= 20 && b.values.length >= 20;
@@ -65,7 +69,11 @@ export class GpsSpeedSync implements SyncStrategy {
       throw new Error('Insufficient usable GPS speed samples for synchronization.');
     const step = 1 / this.sampleRate;
     const results: Array<{ offset: number; score: number; samples: number }> = [];
-    for (let offset = -this.searchWindow; offset <= this.searchWindow + step / 2; offset += step) {
+    for (
+      let offset = this.centerOffset - this.searchWindow;
+      offset <= this.centerOffset + this.searchWindow + step / 2;
+      offset += step
+    ) {
       const a: number[] = [],
         b: number[] = [];
       for (let time = video.timestamps[0]!; time <= video.timestamps.at(-1)!; time += step) {
@@ -80,7 +88,9 @@ export class GpsSpeedSync implements SyncStrategy {
     }
     results.sort((left, right) => right.score - left.score);
     const best = results[0]!;
-    const separated = results.filter((item) => Math.abs(item.offset - best.offset) >= 1);
+    // Exclude the broad autocorrelation shoulder around the winning peak.
+    // Smooth vehicle-speed signals naturally score similarly one second apart.
+    const separated = results.filter((item) => Math.abs(item.offset - best.offset) >= 5);
     const second = separated[0]?.score ?? -1;
     const uniqueness = Math.max(0, Math.min(1, (best.score - second) / 0.25));
     const durationScore = Math.min(1, best.samples / (this.sampleRate * 20));
@@ -97,6 +107,39 @@ export class GpsSpeedSync implements SyncStrategy {
         validSamples: best.samples,
         sampleRate: this.sampleRate,
       },
+    };
+  }
+}
+
+export class TelemetrySyncEngine {
+  synchronize(video: TelemetrySession, telemetry: TelemetrySession): SyncCandidate {
+    const videoName = video.aliases.speed;
+    const telemetryName = telemetry.aliases.speed;
+    const videoSpeed = videoName ? video.channels.get(videoName) : undefined;
+    const telemetrySpeed = telemetryName ? telemetry.channels.get(telemetryName) : undefined;
+    if (!videoSpeed || !telemetrySpeed)
+      throw new Error('GPS speed is not available in both telemetry sources.');
+    const videoSignal = { timestamps: videoSpeed.timestamps, values: videoSpeed.values };
+    const telemetrySignal = {
+      timestamps: telemetrySpeed.timestamps,
+      values: telemetrySpeed.values,
+    };
+
+    // Prefer offsets that keep the shorter signal fully inside the longer one.
+    // Fall back to all overlapping offsets when neither timeline contains the other.
+    let minimum = telemetrySpeed.timestamps[0]! - videoSpeed.timestamps[0]!;
+    let maximum = telemetrySpeed.timestamps.at(-1)! - videoSpeed.timestamps.at(-1)!;
+    if (maximum < minimum) {
+      minimum = telemetrySpeed.timestamps[0]! - videoSpeed.timestamps.at(-1)!;
+      maximum = telemetrySpeed.timestamps.at(-1)! - videoSpeed.timestamps[0]!;
+    }
+    const center = (minimum + maximum) / 2;
+    const window = Math.max(1, (maximum - minimum) / 2);
+    const coarse = new GpsSpeedSync(window, 1, center).calculate(videoSignal, telemetrySignal);
+    const fine = new GpsSpeedSync(5, 10, coarse.offset).calculate(videoSignal, telemetrySignal);
+    return {
+      ...fine,
+      diagnostics: { ...fine.diagnostics, coarseOffset: coarse.offset },
     };
   }
 }

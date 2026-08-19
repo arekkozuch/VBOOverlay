@@ -11,5 +11,6 @@ const api: FlappedEarApi = {
     ipcRenderer.invoke(IPC.openProject) as ReturnType<FlappedEarApi['openProject']>,
   saveProject: (project: ProjectFile, path?: string) =>
     ipcRenderer.invoke(IPC.saveProject, project, path) as ReturnType<FlappedEarApi['saveProject']>,
+  autoSync: () => ipcRenderer.invoke(IPC.autoSync) as ReturnType<FlappedEarApi['autoSync']>,
 };
 contextBridge.exposeInMainWorld('flappedEar', api);
