@@ -59,6 +59,11 @@ function bar(
   context.fillRect(x, y - 6, barWidth * Math.min(1, Math.max(0, (value ?? 0) / 100)), 12);
 }
 
+function widgetChannel(widget: WidgetInstance, setting: string, automatic: string): string {
+  const configured = widget.settings[setting];
+  return typeof configured === 'string' && configured ? configured : automatic;
+}
+
 export function renderWidgetScene(
   canvas: HTMLCanvasElement,
   scene: WidgetScene,
@@ -82,7 +87,9 @@ export function renderWidgetScene(
     panel(context, widget, width, height);
     const session = input.session;
     if (widget.type === 'speed') {
-      let speed = session ? valueAt(session, 'speed', input.telemetryTime) : undefined;
+      let speed = session
+        ? valueAt(session, widgetChannel(widget, 'source', 'speed'), input.telemetryTime)
+        : undefined;
       const mph = widget.settings.unit === 'mph';
       if (speed !== undefined && mph) speed *= 0.621371;
       text(
@@ -95,7 +102,9 @@ export function renderWidgetScene(
       );
       text(context, mph ? 'mph' : 'km/h', width / 2, height * 0.78, 13, 'center');
     } else if (widget.type === 'rpm') {
-      const rpm = session ? valueAt(session, 'rpm', input.telemetryTime, 'nearest') : undefined;
+      const rpm = session
+        ? valueAt(session, widgetChannel(widget, 'source', 'rpm'), input.telemetryTime, 'nearest')
+        : undefined;
       text(
         context,
         `${rpm === undefined ? '--' : Math.round(rpm)} RPM`,
@@ -106,7 +115,12 @@ export function renderWidgetScene(
       );
     } else if (widget.type === 'heartRate') {
       const heartRate = session
-        ? valueAt(session, 'heartRate', input.telemetryTime, 'nearest')
+        ? valueAt(
+            session,
+            widgetChannel(widget, 'source', 'heartRate'),
+            input.telemetryTime,
+            'nearest',
+          )
         : undefined;
       context.fillStyle = '#ff4f68';
       context.font = `700 ${Math.min(28, height * 0.4)}px sans-serif`;
@@ -118,26 +132,37 @@ export function renderWidgetScene(
         height / 2,
       );
     } else if (widget.type === 'pedals') {
+      const acceleratorSource = widgetChannel(widget, 'acceleratorSource', 'throttle');
       bar(
         context,
-        'THROTTLE',
-        session ? valueAt(session, 'throttle', input.telemetryTime) : undefined,
+        acceleratorSource.toLowerCase().includes('accelerator') ? 'ACCELERATOR' : 'THROTTLE',
+        session ? valueAt(session, acceleratorSource, input.telemetryTime) : undefined,
         height * 0.35,
         width,
       );
       bar(
         context,
         'BRAKE',
-        session ? valueAt(session, 'brake', input.telemetryTime) : undefined,
+        session
+          ? valueAt(session, widgetChannel(widget, 'brakeSource', 'brake'), input.telemetryTime)
+          : undefined,
         height * 0.68,
         width,
       );
     } else if (widget.type === 'gForce') {
       const lateral = session
-        ? (valueAt(session, 'lateralAcceleration', input.telemetryTime) ?? 0)
+        ? (valueAt(
+            session,
+            widgetChannel(widget, 'lateralSource', 'lateralAcceleration'),
+            input.telemetryTime,
+          ) ?? 0)
         : 0;
       const longitudinal = session
-        ? (valueAt(session, 'longitudinalAcceleration', input.telemetryTime) ?? 0)
+        ? (valueAt(
+            session,
+            widgetChannel(widget, 'longitudinalSource', 'longitudinalAcceleration'),
+            input.telemetryTime,
+          ) ?? 0)
         : 0;
       context.strokeStyle = '#82909f';
       context.beginPath();

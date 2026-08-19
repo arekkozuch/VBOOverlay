@@ -68,6 +68,43 @@ function formatTime(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${remainder.toFixed(3).padStart(6, '0')}`;
 }
 
+function ChannelSelect({
+  label,
+  setting,
+  automatic,
+  widget,
+  session,
+  onChange,
+}: {
+  label: string;
+  setting: string;
+  automatic: string;
+  widget: WidgetInstance;
+  session?: TelemetrySession;
+  onChange(value: string): void;
+}): React.JSX.Element {
+  const automaticChannel = session?.aliases[automatic as keyof typeof session.aliases];
+  const selected = widget.settings[setting];
+  return (
+    <label className="channel-select">
+      {label}
+      <select
+        value={typeof selected === 'string' ? selected : ''}
+        disabled={!session}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Automatic{automaticChannel ? ` (${automaticChannel})` : ''}</option>
+        {session &&
+          [...session.channels.keys()].map((channel) => (
+            <option key={channel} value={channel}>
+              {channel}
+            </option>
+          ))}
+      </select>
+    </label>
+  );
+}
+
 export function App(): React.JSX.Element {
   const video = useRef<HTMLVideoElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -142,6 +179,8 @@ export function App(): React.JSX.Element {
         widget.id === id ? { ...widget, ...changes } : widget,
       ),
     }));
+  const updateWidgetSetting = (widget: WidgetInstance, setting: string, value: string) =>
+    updateWidget(widget.id, { settings: { ...widget.settings, [setting]: value } });
   const project = (): ProjectFile => ({ ...emptyProject(), videoPath, vboPath, sync, scene });
 
   async function openVideo(): Promise<void> {
@@ -439,20 +478,90 @@ export function App(): React.JSX.Element {
                 />
               </label>
               {selected.type === 'speed' && (
-                <label>
-                  Units
-                  <select
-                    value={String(selected.settings.unit)}
-                    onChange={(event) =>
-                      updateWidget(selected.id, {
-                        settings: { ...selected.settings, unit: event.target.value },
-                      })
-                    }
-                  >
-                    <option value="km/h">km/h</option>
-                    <option value="mph">mph</option>
-                  </select>
-                </label>
+                <>
+                  <ChannelSelect
+                    label="Speed source"
+                    setting="source"
+                    automatic="speed"
+                    widget={selected}
+                    session={session}
+                    onChange={(value) => updateWidgetSetting(selected, 'source', value)}
+                  />
+                  <label>
+                    Units
+                    <select
+                      value={String(selected.settings.unit)}
+                      onChange={(event) =>
+                        updateWidget(selected.id, {
+                          settings: { ...selected.settings, unit: event.target.value },
+                        })
+                      }
+                    >
+                      <option value="km/h">km/h</option>
+                      <option value="mph">mph</option>
+                    </select>
+                  </label>
+                </>
+              )}
+              {selected.type === 'rpm' && (
+                <ChannelSelect
+                  label="RPM source"
+                  setting="source"
+                  automatic="rpm"
+                  widget={selected}
+                  session={session}
+                  onChange={(value) => updateWidgetSetting(selected, 'source', value)}
+                />
+              )}
+              {selected.type === 'heartRate' && (
+                <ChannelSelect
+                  label="Heart-rate source"
+                  setting="source"
+                  automatic="heartRate"
+                  widget={selected}
+                  session={session}
+                  onChange={(value) => updateWidgetSetting(selected, 'source', value)}
+                />
+              )}
+              {selected.type === 'pedals' && (
+                <>
+                  <ChannelSelect
+                    label="Accelerator source"
+                    setting="acceleratorSource"
+                    automatic="throttle"
+                    widget={selected}
+                    session={session}
+                    onChange={(value) => updateWidgetSetting(selected, 'acceleratorSource', value)}
+                  />
+                  <ChannelSelect
+                    label="Brake source"
+                    setting="brakeSource"
+                    automatic="brake"
+                    widget={selected}
+                    session={session}
+                    onChange={(value) => updateWidgetSetting(selected, 'brakeSource', value)}
+                  />
+                </>
+              )}
+              {selected.type === 'gForce' && (
+                <>
+                  <ChannelSelect
+                    label="Lateral source"
+                    setting="lateralSource"
+                    automatic="lateralAcceleration"
+                    widget={selected}
+                    session={session}
+                    onChange={(value) => updateWidgetSetting(selected, 'lateralSource', value)}
+                  />
+                  <ChannelSelect
+                    label="Longitudinal source"
+                    setting="longitudinalSource"
+                    automatic="longitudinalAcceleration"
+                    widget={selected}
+                    session={session}
+                    onChange={(value) => updateWidgetSetting(selected, 'longitudinalSource', value)}
+                  />
+                </>
               )}
               <label className="check">
                 <input

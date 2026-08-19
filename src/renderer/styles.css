@@ -246,6 +246,11 @@ nav .export {
 .inspector label input[type='range'] {
   padding: 0;
 }
+.inspector .channel-select {
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-top: 12px;
+}
 .inspector .check {
   display: flex;
 }
