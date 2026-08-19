@@ -63,7 +63,7 @@ The supplied 11,526,059,397-byte GoPro recording was validated as 3840×2160 HEV
 
 ## Widgets and maps
 
-The shared canvas renderer implements Speed (km/h or mph), RPM, VBO Heart Rate, real throttle/brake bars, 2D G-force, and a projected track outline with moving position. Widgets can be added, selected, dragged, scaled, hidden, and deleted.
+The shared canvas renderer implements Speed (km/h or mph), RPM, VBO Heart Rate, real accelerator/brake bars with numeric values, 2D G-force with resultant magnitude, a projected track outline with moving position, and a Custom Value widget. Every value widget can bind to an original numeric VBO column; custom values also support editable labels, suffixes, precision, and multipliers. Widgets can be added, selected, dragged, scaled, hidden, and deleted. The preview, transport, and timeline can be expanded into fullscreen mode.
 
 A MapLibre-compatible provider abstraction supports no map, configurable XYZ raster sources, and style URLs. The public OpenStreetMap adapter is intended only for light interactive use; bulk export must use caching and a suitable provider. Remote-map rendering is not enabled in the current editor.
 

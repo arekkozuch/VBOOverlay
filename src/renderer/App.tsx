@@ -24,6 +24,7 @@ const WIDGET_LABELS: Record<WidgetType, string> = {
   pedals: 'FE Pedals',
   gForce: 'FE G-Force',
   track: 'FE Track',
+  customValue: 'FE Custom Value',
 };
 const DEFAULT_SIZES: Record<WidgetType, [number, number]> = {
   speed: [0.15, 0.16],
@@ -32,6 +33,7 @@ const DEFAULT_SIZES: Record<WidgetType, [number, number]> = {
   pedals: [0.25, 0.13],
   gForce: [0.14, 0.19],
   track: [0.2, 0.28],
+  customValue: [0.2, 0.13],
 };
 
 function newWidget(type: WidgetType, index: number): WidgetInstance {
@@ -47,7 +49,12 @@ function newWidget(type: WidgetType, index: number): WidgetInstance {
     rotation: 0,
     opacity: 1,
     visible: true,
-    settings: type === 'speed' ? { unit: 'km/h' } : {},
+    settings:
+      type === 'speed'
+        ? { unit: 'km/h' }
+        : type === 'customValue'
+          ? { label: 'VALUE', unit: '', decimals: 1, multiplier: 1 }
+          : {},
   };
 }
 const initialScene: WidgetScene = {
@@ -108,6 +115,7 @@ function ChannelSelect({
 export function App(): React.JSX.Element {
   const video = useRef<HTMLVideoElement>(null);
   const stage = useRef<HTMLDivElement>(null);
+  const previewArea = useRef<HTMLElement>(null);
   const resumeAfterScrub = useRef(false);
   const [media, setMedia] = useState<MediaInfo>();
   const [session, setSession] = useState<TelemetrySession>();
@@ -124,6 +132,7 @@ export function App(): React.JSX.Element {
   const [syncCandidate, setSyncCandidate] = useState<SyncResult>();
   const [syncing, setSyncing] = useState(false);
   const [stageSize, setStageSize] = useState({ width: 1, height: 1 });
+  const [fullscreen, setFullscreen] = useState(false);
   const [message, setMessage] = useState('Open a video and VBO to begin.');
   const telemetryTime = videoToTelemetryTime(time, sync);
   const videoAspect =
@@ -171,6 +180,12 @@ export function App(): React.JSX.Element {
     });
     observer.observe(element);
     return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const updateFullscreen = () =>
+      setFullscreen(document.fullscreenElement === previewArea.current);
+    document.addEventListener('fullscreenchange', updateFullscreen);
+    return () => document.removeEventListener('fullscreenchange', updateFullscreen);
   }, []);
 
   const updateWidget = (id: string, changes: Partial<WidgetInstance>) =>
@@ -275,6 +290,10 @@ export function App(): React.JSX.Element {
     if (video.current.paused) void video.current.play();
     else video.current.pause();
   }
+  async function toggleFullscreen(): Promise<void> {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await previewArea.current?.requestFullscreen();
+  }
 
   return (
     <main className="app-shell">
@@ -331,7 +350,7 @@ export function App(): React.JSX.Element {
           <button onClick={() => void openVideo()}>Open Video</button>
           <button onClick={() => void openVbo()}>Open VBO</button>
         </aside>
-        <section className="stage-column">
+        <section className="stage-column" ref={previewArea}>
           <div className="stage" ref={stage}>
             <div className="video-frame" style={previewSize}>
               {media ? (
@@ -396,6 +415,14 @@ export function App(): React.JSX.Element {
               }}
             />
             <time>{formatTime(duration)}</time>
+            <button
+              className="fullscreen-button"
+              onClick={() => void toggleFullscreen()}
+              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen preview'}
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen preview'}
+            >
+              {fullscreen ? '⊙' : '⛶'}
+            </button>
           </div>
           <div className="timeline-info">
             <div>
@@ -533,6 +560,16 @@ export function App(): React.JSX.Element {
                     session={session}
                     onChange={(value) => updateWidgetSetting(selected, 'acceleratorSource', value)}
                   />
+                  <label>
+                    Accelerator label
+                    <input
+                      value={String(selected.settings.acceleratorLabel ?? '')}
+                      placeholder="Automatic"
+                      onChange={(event) =>
+                        updateWidgetSetting(selected, 'acceleratorLabel', event.target.value)
+                      }
+                    />
+                  </label>
                   <ChannelSelect
                     label="Brake source"
                     setting="brakeSource"
@@ -541,6 +578,16 @@ export function App(): React.JSX.Element {
                     session={session}
                     onChange={(value) => updateWidgetSetting(selected, 'brakeSource', value)}
                   />
+                  <label>
+                    Brake label
+                    <input
+                      value={String(selected.settings.brakeLabel ?? '')}
+                      placeholder="BRAKE"
+                      onChange={(event) =>
+                        updateWidgetSetting(selected, 'brakeLabel', event.target.value)
+                      }
+                    />
+                  </label>
                 </>
               )}
               {selected.type === 'gForce' && (
@@ -561,6 +608,71 @@ export function App(): React.JSX.Element {
                     session={session}
                     onChange={(value) => updateWidgetSetting(selected, 'longitudinalSource', value)}
                   />
+                </>
+              )}
+              {selected.type === 'customValue' && (
+                <>
+                  <ChannelSelect
+                    label="Telemetry source"
+                    setting="source"
+                    automatic=""
+                    widget={selected}
+                    session={session}
+                    onChange={(value) => updateWidgetSetting(selected, 'source', value)}
+                  />
+                  <label>
+                    Display label
+                    <input
+                      value={String(selected.settings.label ?? '')}
+                      onChange={(event) =>
+                        updateWidgetSetting(selected, 'label', event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    Units / suffix
+                    <input
+                      value={String(selected.settings.unit ?? '')}
+                      placeholder="°C, %, bar…"
+                      onChange={(event) =>
+                        updateWidgetSetting(selected, 'unit', event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    Decimal places
+                    <input
+                      type="number"
+                      min="0"
+                      max="6"
+                      step="1"
+                      value={Number(selected.settings.decimals ?? 1)}
+                      onChange={(event) =>
+                        updateWidget(selected.id, {
+                          settings: {
+                            ...selected.settings,
+                            decimals: Math.max(0, Math.min(6, Number(event.target.value))),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Multiplier
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={Number(selected.settings.multiplier ?? 1)}
+                      onChange={(event) =>
+                        updateWidget(selected.id, {
+                          settings: {
+                            ...selected.settings,
+                            multiplier: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
                 </>
               )}
               <label className="check">

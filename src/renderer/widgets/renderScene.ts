@@ -49,14 +49,17 @@ function bar(
   value: number | undefined,
   y: number,
   width: number,
+  color: string,
 ): void {
   text(context, label, 12, y, 11);
   const x = 82,
-    barWidth = width - x - 12;
+    valueWidth = 44,
+    barWidth = width - x - valueWidth - 10;
   context.fillStyle = '#29313b';
   context.fillRect(x, y - 6, barWidth, 12);
-  context.fillStyle = label === 'BRAKE' ? '#f25f5c' : '#31d17c';
+  context.fillStyle = color;
   context.fillRect(x, y - 6, barWidth * Math.min(1, Math.max(0, (value ?? 0) / 100)), 12);
+  text(context, value === undefined ? '--' : `${Math.round(value)}%`, width - 8, y, 11, 'right');
 }
 
 function widgetChannel(widget: WidgetInstance, setting: string, automatic: string): string {
@@ -133,21 +136,35 @@ export function renderWidgetScene(
       );
     } else if (widget.type === 'pedals') {
       const acceleratorSource = widgetChannel(widget, 'acceleratorSource', 'throttle');
+      const configuredAcceleratorLabel = widget.settings.acceleratorLabel;
+      const acceleratorLabel =
+        typeof configuredAcceleratorLabel === 'string' && configuredAcceleratorLabel
+          ? configuredAcceleratorLabel
+          : acceleratorSource.toLowerCase().includes('accelerator')
+            ? 'ACCELERATOR'
+            : 'THROTTLE';
+      const configuredBrakeLabel = widget.settings.brakeLabel;
+      const brakeLabel =
+        typeof configuredBrakeLabel === 'string' && configuredBrakeLabel
+          ? configuredBrakeLabel
+          : 'BRAKE';
       bar(
         context,
-        acceleratorSource.toLowerCase().includes('accelerator') ? 'ACCELERATOR' : 'THROTTLE',
+        acceleratorLabel,
         session ? valueAt(session, acceleratorSource, input.telemetryTime) : undefined,
         height * 0.35,
         width,
+        '#31d17c',
       );
       bar(
         context,
-        'BRAKE',
+        brakeLabel,
         session
           ? valueAt(session, widgetChannel(widget, 'brakeSource', 'brake'), input.telemetryTime)
           : undefined,
         height * 0.68,
         width,
+        '#f25f5c',
       );
     } else if (widget.type === 'gForce') {
       const lateral = session
@@ -165,6 +182,13 @@ export function renderWidgetScene(
           ) ?? 0)
         : 0;
       context.strokeStyle = '#82909f';
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(width * 0.15, height / 2);
+      context.lineTo(width * 0.85, height / 2);
+      context.moveTo(width / 2, height * 0.15);
+      context.lineTo(width / 2, height * 0.85);
+      context.stroke();
       context.beginPath();
       context.arc(width / 2, height / 2, Math.min(width, height) * 0.35, 0, Math.PI * 2);
       context.stroke();
@@ -178,6 +202,8 @@ export function renderWidgetScene(
         Math.PI * 2,
       );
       context.fill();
+      const combined = Math.sqrt(lateral * lateral + longitudinal * longitudinal);
+      text(context, `|G| ${combined.toFixed(2)} g`, width / 2, height * 0.92, 12, 'center');
     } else if (widget.type === 'track' && track?.points.length) {
       const padding = 14;
       context.strokeStyle = '#57e6a0';
@@ -203,6 +229,24 @@ export function renderWidgetScene(
         );
         context.fill();
       }
+    } else if (widget.type === 'customValue') {
+      const source = widgetChannel(widget, 'source', '');
+      const rawValue = session ? valueAt(session, source, input.telemetryTime) : undefined;
+      const multiplier = Number(widget.settings.multiplier ?? 1);
+      const decimals = Math.max(0, Math.min(6, Number(widget.settings.decimals ?? 1)));
+      const value = rawValue === undefined ? undefined : rawValue * multiplier;
+      const label = String((widget.settings.label ?? source) || 'VALUE');
+      const unit = String(widget.settings.unit ?? '');
+      text(context, label, width / 2, height * 0.22, 11, 'center');
+      text(
+        context,
+        value === undefined || !Number.isFinite(value) ? '--' : value.toFixed(decimals),
+        width / 2,
+        height * 0.58,
+        Math.min(36, height * 0.36),
+        'center',
+      );
+      if (unit) text(context, unit, width / 2, height * 0.84, 12, 'center');
     }
     context.restore();
   }

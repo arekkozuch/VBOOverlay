@@ -128,6 +128,11 @@ nav .export {
   grid-template-rows: minmax(0, 1fr) 58px 78px;
   background: #0b0d10;
 }
+.stage-column:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #050608;
+}
 .stage {
   display: flex;
   align-items: center;
@@ -197,6 +202,11 @@ nav .export {
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   color: #b5bec9;
+}
+.fullscreen-button {
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 1;
 }
 .timeline-info {
   display: grid;

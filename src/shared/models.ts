@@ -60,7 +60,8 @@ export interface SyncTransform {
   timeScale: number;
 }
 
-export type WidgetType = 'speed' | 'rpm' | 'heartRate' | 'pedals' | 'gForce' | 'track';
+export type WidgetType =
+  'speed' | 'rpm' | 'heartRate' | 'pedals' | 'gForce' | 'track' | 'customValue';
 
 export interface WidgetInstance {
   id: string;
