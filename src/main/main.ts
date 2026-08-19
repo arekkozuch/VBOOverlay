@@ -2,7 +2,6 @@ import electron from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc.js';
 import type { ProjectFile } from '../shared/models.js';
 import { serializeSession } from '../telemetry/core/session.js';
@@ -11,8 +10,9 @@ import { TelemetrySyncEngine } from '../telemetry/sync/sync.js';
 import { parseVbo } from '../telemetry/vbo/parser.js';
 import { inspectEnvironment } from './export/encoders.js';
 import { probeMedia } from './media/ffprobe.js';
+import { serveMedia } from './media/protocol.js';
 
-const { app, BrowserWindow, dialog, ipcMain, net, protocol } = electron;
+const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -50,18 +50,11 @@ function validProject(value: unknown): value is ProjectFile {
 }
 
 app.whenReady().then(() => {
-  protocol.handle('fet-media', (request) => {
+  protocol.handle('fet-media', async (request) => {
     const token = new URL(request.url).hostname;
     const path = mediaPaths.get(token);
     if (!path) return new Response('Not found', { status: 404 });
-    // Chromium issues byte-range requests for seeking and may re-request the
-    // current range when its video surface changes size. Dropping the Range
-    // header makes a large local video fall back to a full 200 response and
-    // leaves the media element unable to resume after a window resize.
-    return net.fetch(pathToFileURL(path).href, {
-      method: request.method,
-      headers: request.headers,
-    });
+    return serveMedia(request, path);
   });
   ipcMain.handle(IPC.openVideo, async () => {
     const result = await dialog.showOpenDialog({

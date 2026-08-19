@@ -132,13 +132,12 @@ nav .export {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 22px;
+  overflow: hidden;
   min-height: 0;
+  min-width: 0;
 }
 .video-frame {
-  aspect-ratio: 16/9;
-  width: 100%;
-  max-height: 100%;
+  flex: 0 0 auto;
   position: relative;
   background: #050608;
   box-shadow: 0 10px 40px #000;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   EnvironmentInfo,
   MediaInfo,
@@ -70,6 +70,8 @@ function formatTime(seconds: number): string {
 
 export function App(): React.JSX.Element {
   const video = useRef<HTMLVideoElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const resumeAfterScrub = useRef(false);
   const [media, setMedia] = useState<MediaInfo>();
   const [session, setSession] = useState<TelemetrySession>();
   const [videoPath, setVideoPath] = useState<string>();
@@ -84,8 +86,17 @@ export function App(): React.JSX.Element {
   const [environment, setEnvironment] = useState<EnvironmentInfo>();
   const [syncCandidate, setSyncCandidate] = useState<SyncResult>();
   const [syncing, setSyncing] = useState(false);
+  const [stageSize, setStageSize] = useState({ width: 1, height: 1 });
   const [message, setMessage] = useState('Open a video and VBO to begin.');
   const telemetryTime = videoToTelemetryTime(time, sync);
+  const videoAspect =
+    media?.video.width && media.video.height ? media.video.width / media.video.height : 16 / 9;
+  const availableStageWidth = Math.max(1, stageSize.width - 44);
+  const availableStageHeight = Math.max(1, stageSize.height - 44);
+  const previewSize =
+    availableStageWidth / availableStageHeight > videoAspect
+      ? { width: availableStageHeight * videoAspect, height: availableStageHeight }
+      : { width: availableStageWidth, height: availableStageWidth / videoAspect };
   const selected = scene.widgets.find(({ id }) => id === selectedId);
   const telemetrySummary = useMemo(
     () => ({
@@ -111,6 +122,19 @@ export function App(): React.JSX.Element {
     if (playing) frame = requestAnimationFrame(update);
     return () => cancelAnimationFrame(frame);
   }, [playing]);
+  useLayoutEffect(() => {
+    const element = stage.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry)
+        setStageSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const updateWidget = (id: string, changes: Partial<WidgetInstance>) =>
     setScene((current) => ({
@@ -197,6 +221,16 @@ export function App(): React.JSX.Element {
     setTime(value);
     if (video.current) video.current.currentTime = value;
   }
+  function beginScrub(): void {
+    if (video.current && !video.current.paused) {
+      resumeAfterScrub.current = true;
+      video.current.pause();
+    }
+  }
+  function finishScrub(): void {
+    if (resumeAfterScrub.current && video.current) void video.current.play();
+    resumeAfterScrub.current = false;
+  }
   function togglePlayback(): void {
     if (!video.current) return;
     if (video.current.paused) void video.current.play();
@@ -259,13 +293,18 @@ export function App(): React.JSX.Element {
           <button onClick={() => void openVbo()}>Open VBO</button>
         </aside>
         <section className="stage-column">
-          <div className="stage">
-            <div className="video-frame">
+          <div className="stage" ref={stage}>
+            <div className="video-frame" style={previewSize}>
               {media ? (
                 <video
                   ref={video}
                   src={media.mediaUrl}
-                  onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+                  preload="metadata"
+                  onLoadedMetadata={(event) => {
+                    const mediaDuration = event.currentTarget.duration;
+                    if (Number.isFinite(mediaDuration) && mediaDuration > 0)
+                      setDuration(mediaDuration);
+                  }}
                   onPlay={() => setPlaying(true)}
                   onPause={() => setPlaying(false)}
                   onSeeked={(event) => setTime(event.currentTarget.currentTime)}
@@ -305,7 +344,17 @@ export function App(): React.JSX.Element {
               max={duration || 1}
               step="0.001"
               value={Math.min(time, duration || 1)}
+              onPointerDown={beginScrub}
               onChange={(event) => seek(Number(event.target.value))}
+              onPointerUp={finishScrub}
+              onPointerCancel={finishScrub}
+              onBlur={finishScrub}
+              onKeyDown={(event) => {
+                if (event.key.startsWith('Arrow')) beginScrub();
+              }}
+              onKeyUp={(event) => {
+                if (event.key.startsWith('Arrow')) finishScrub();
+              }}
             />
             <time>{formatTime(duration)}</time>
           </div>
