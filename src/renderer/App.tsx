@@ -269,6 +269,13 @@ export function App(): React.JSX.Element {
                   onPlay={() => setPlaying(true)}
                   onPause={() => setPlaying(false)}
                   onSeeked={(event) => setTime(event.currentTarget.currentTime)}
+                  onError={(event) => {
+                    const mediaError = event.currentTarget.error;
+                    setPlaying(false);
+                    setMessage(
+                      `Video playback error${mediaError ? ` (${mediaError.code})` : ''}: ${mediaError?.message || 'unknown media error'}`,
+                    );
+                  }}
                 />
               ) : (
                 <div className="empty-stage">

@@ -53,7 +53,15 @@ app.whenReady().then(() => {
   protocol.handle('fet-media', (request) => {
     const token = new URL(request.url).hostname;
     const path = mediaPaths.get(token);
-    return path ? net.fetch(pathToFileURL(path).href) : new Response('Not found', { status: 404 });
+    if (!path) return new Response('Not found', { status: 404 });
+    // Chromium issues byte-range requests for seeking and may re-request the
+    // current range when its video surface changes size. Dropping the Range
+    // header makes a large local video fall back to a full 200 response and
+    // leaves the media element unable to resume after a window resize.
+    return net.fetch(pathToFileURL(path).href, {
+      method: request.method,
+      headers: request.headers,
+    });
   });
   ipcMain.handle(IPC.openVideo, async () => {
     const result = await dialog.showOpenDialog({
