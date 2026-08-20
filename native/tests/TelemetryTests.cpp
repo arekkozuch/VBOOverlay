@@ -22,6 +22,7 @@ private slots:
     void toleratesMalformedRows();
     void rejectsMissingSections();
     void interpolatesByTime();
+    void samplesTelemetryRanges();
     void convertsArcMinuteCoordinates();
     void parsesOptionalRealVbo();
     void persistsWidgetScenes();
@@ -134,6 +135,19 @@ void TelemetryTests::interpolatesByTime()
     QCOMPARE(session.valueAt("speed", 9).value(), 30.0);
     QVERIFY(!session.valueAt("rpm", 1));
     QCOMPARE(videoToTelemetryTime(10, {2.5, 1.01}), 12.6);
+}
+
+void TelemetryTests::samplesTelemetryRanges()
+{
+    const auto session = VboParser::parse(
+        u"[column names]\ntime speed\n[data]\n0 0\n1 10\n2 20\n3 30\n4 40");
+    const QVector<QPointF> points = session.sampledRange("speed", 1.0, 3.0, 5);
+    QCOMPARE(points.size(), 5);
+    QCOMPARE(points.front(), QPointF(1.0, 10.0));
+    QCOMPARE(points[2], QPointF(2.0, 20.0));
+    QCOMPARE(points.back(), QPointF(3.0, 30.0));
+    QVERIFY(session.sampledRange("missing", 0.0, 1.0, 10).isEmpty());
+    QVERIFY(session.sampledRange("speed", 0.0, 1.0, 1).isEmpty());
 }
 
 void TelemetryTests::convertsArcMinuteCoordinates()

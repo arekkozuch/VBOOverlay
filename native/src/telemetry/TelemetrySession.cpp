@@ -52,6 +52,33 @@ QStringList TelemetrySession::channelNames() const
     return names;
 }
 
+QVector<QPointF> TelemetrySession::sampledRange(
+    const QString &channelName,
+    double rangeStart,
+    double rangeEnd,
+    const int maximumPoints) const
+{
+    if (!std::isfinite(rangeStart) || !std::isfinite(rangeEnd) || maximumPoints < 2) {
+        return {};
+    }
+    if (rangeStart > rangeEnd) {
+        std::swap(rangeStart, rangeEnd);
+    }
+    const int count = std::max(2, maximumPoints);
+    const double span = rangeEnd - rangeStart;
+    QVector<QPointF> result;
+    result.reserve(count);
+    for (int index = 0; index < count; ++index) {
+        const double ratio = static_cast<double>(index) / static_cast<double>(count - 1);
+        const double timestamp = rangeStart + span * ratio;
+        const auto value = valueAt(channelName, timestamp);
+        if (value && std::isfinite(*value)) {
+            result.append(QPointF(timestamp, *value));
+        }
+    }
+    return result;
+}
+
 double videoToTelemetryTime(const double videoTime, const SyncTransform &transform)
 {
     return videoTime * transform.timeScale + transform.offset;

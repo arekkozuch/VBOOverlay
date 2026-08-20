@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QPointF>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -38,6 +39,11 @@ public:
         InterpolationMode mode = InterpolationMode::Linear) const;
 
     [[nodiscard]] QStringList channelNames() const;
+    [[nodiscard]] QVector<QPointF> sampledRange(
+        const QString &channelName,
+        double startTime,
+        double endTime,
+        int maximumPoints) const;
 };
 
 [[nodiscard]] double videoToTelemetryTime(double videoTime, const SyncTransform &transform);

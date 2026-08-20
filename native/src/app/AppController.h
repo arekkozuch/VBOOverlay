@@ -35,6 +35,8 @@ class AppController final : public QObject {
     Q_PROPERTY(WidgetModel *widgetModel READ widgetModel CONSTANT)
     Q_PROPERTY(QVariantList trackPoints READ trackPoints NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY liveValuesChanged)
+    Q_PROPERTY(QStringList analysisChannels READ analysisChannels WRITE setAnalysisChannels NOTIFY analysisChanged)
+    Q_PROPERTY(bool analysisVisible READ analysisVisible WRITE setAnalysisVisible NOTIFY analysisChanged)
     Q_PROPERTY(int windowX READ windowX CONSTANT)
     Q_PROPERTY(int windowY READ windowY CONSTANT)
     Q_PROPERTY(int windowWidth READ windowWidth CONSTANT)
@@ -61,6 +63,8 @@ public:
     [[nodiscard]] WidgetModel *widgetModel();
     [[nodiscard]] QVariantList trackPoints() const;
     [[nodiscard]] QVariantMap currentTrackPoint() const;
+    [[nodiscard]] QStringList analysisChannels() const;
+    [[nodiscard]] bool analysisVisible() const;
     [[nodiscard]] int windowX() const;
     [[nodiscard]] int windowY() const;
     [[nodiscard]] int windowWidth() const;
@@ -71,6 +75,9 @@ public:
     Q_INVOKABLE void clearProject();
     Q_INVOKABLE QString valueText(const QString &channelName, int decimals = 2) const;
     Q_INVOKABLE QVariant telemetryValue(const QString &channelName) const;
+    Q_INVOKABLE QVariantMap telemetrySeries(
+        const QString &channelName, double videoStart, double videoEnd, int maximumPoints) const;
+    Q_INVOKABLE void toggleAnalysisChannel(const QString &channelName);
     Q_INVOKABLE void openProject(const QUrl &url);
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void autoSync();
@@ -80,6 +87,8 @@ public slots:
     void setPlaybackTime(double seconds);
     void setSyncOffset(double seconds);
     void setTimeScale(double scale);
+    void setAnalysisChannels(const QStringList &channels);
+    void setAnalysisVisible(bool visible);
 
 signals:
     void videoSourceChanged();
@@ -90,6 +99,7 @@ signals:
     void syncingChanged();
     void syncCandidateChanged();
     void liveValuesChanged();
+    void analysisChanged();
 
 private:
     struct AutoSyncResult {
@@ -106,6 +116,7 @@ private:
     void saveSessionSettings();
     void saveWidgetSettings();
     void restoreSources();
+    void reconcileAnalysisChannels();
 
     QSettings m_settings;
     QUrl m_videoSource;
@@ -120,6 +131,8 @@ private:
     SyncTransform m_sync;
     QFutureWatcher<AutoSyncResult> m_syncWatcher;
     QVariantMap m_syncCandidate;
+    QStringList m_analysisChannels;
+    bool m_analysisVisible = true;
 };
 
 } // namespace FlappedEar

@@ -7,10 +7,12 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QtConcurrent>
 #include <QtGlobal>
 #include <cmath>
+#include <utility>
 
 namespace FlappedEar {
 
@@ -20,6 +22,8 @@ AppController::AppController(QObject *parent)
 {
     m_sync.offset = m_settings.value("sync/offset", 0.0).toDouble();
     m_sync.timeScale = m_settings.value("sync/timeScale", 1.0).toDouble();
+    m_analysisChannels = m_settings.value("analysis/channels").toStringList();
+    m_analysisVisible = m_settings.value("analysis/visible", true).toBool();
     const QJsonDocument savedWidgets =
         QJsonDocument::fromJson(m_settings.value("editor/widgets").toByteArray());
     if (!savedWidgets.isObject() || savedWidgets.object().value("schemaVersion").toInt() != 2
@@ -85,6 +89,8 @@ QVariantMap AppController::currentTrackPoint() const
         *m_session, videoToTelemetryTime(m_playbackTime, m_sync), m_trackGeometry);
     return point ? QVariantMap{{"x", point->x()}, {"y", point->y()}} : QVariantMap();
 }
+QStringList AppController::analysisChannels() const { return m_analysisChannels; }
+bool AppController::analysisVisible() const { return m_analysisVisible; }
 int AppController::windowX() const { return m_settings.value("window/x", -1).toInt(); }
 int AppController::windowY() const { return m_settings.value("window/y", -1).toInt(); }
 int AppController::windowWidth() const { return m_settings.value("window/width", 1440).toInt(); }
@@ -122,6 +128,7 @@ void AppController::loadVbo(const QUrl &url)
         }
         m_telemetryPath = QFileInfo(path).absoluteFilePath();
         m_settings.setValue("sources/vbo", m_telemetryPath);
+        reconcileAnalysisChannels();
         emit telemetryChanged();
         emit syncCandidateChanged();
         emit liveValuesChanged();
@@ -140,6 +147,7 @@ void AppController::clearProject()
     m_session.reset();
     m_trackGeometry = {};
     m_trackPoints.clear();
+    setAnalysisChannels({});
     m_playbackTime = 0.0;
     m_sync = {};
     m_syncCandidate.clear();
@@ -177,6 +185,59 @@ QVariant AppController::telemetryValue(const QString &channelName) const
     return value ? QVariant(*value) : QVariant();
 }
 
+QVariantMap AppController::telemetrySeries(
+    const QString &channelName,
+    const double videoStart,
+    const double videoEnd,
+    const int maximumPoints) const
+{
+    if (!m_session || channelName.isEmpty() || !std::isfinite(videoStart)
+        || !std::isfinite(videoEnd) || maximumPoints < 2) {
+        return {};
+    }
+    const double telemetryStart = videoToTelemetryTime(videoStart, m_sync);
+    const double telemetryEnd = videoToTelemetryTime(videoEnd, m_sync);
+    const QVector<QPointF> samples = m_session->sampledRange(
+        channelName, telemetryStart, telemetryEnd, qBound(2, maximumPoints, 2000));
+    if (samples.isEmpty()) {
+        return {};
+    }
+    double minimum = samples.front().y();
+    double maximum = minimum;
+    for (const QPointF &sample : samples) {
+        minimum = std::min(minimum, sample.y());
+        maximum = std::max(maximum, sample.y());
+    }
+    const double telemetrySpan = telemetryEnd - telemetryStart;
+    QVariantList points;
+    points.reserve(samples.size());
+    for (const QPointF &sample : samples) {
+        const double normalizedTime = telemetrySpan == 0.0
+            ? 0.0
+            : (sample.x() - telemetryStart) / telemetrySpan;
+        points.append(QVariantMap{{"x", normalizedTime}, {"y", sample.y()}});
+    }
+    const QString resolved = m_session->aliases.value(channelName, channelName);
+    const auto channel = m_session->channels.constFind(resolved);
+    return {
+        {"points", points},
+        {"minimum", minimum},
+        {"maximum", maximum},
+        {"unit", channel == m_session->channels.cend() ? QString() : channel->unit},
+    };
+}
+
+void AppController::toggleAnalysisChannel(const QString &channelName)
+{
+    QStringList channels = m_analysisChannels;
+    if (channels.contains(channelName)) {
+        channels.removeAll(channelName);
+    } else if (!channelName.isEmpty() && channels.size() < 4) {
+        channels.append(channelName);
+    }
+    setAnalysisChannels(channels);
+}
+
 void AppController::openProject(const QUrl &url)
 {
     QFile file(url.toLocalFile());
@@ -204,6 +265,17 @@ void AppController::openProject(const QUrl &url)
     if (!vboPath.isEmpty()) {
         loadVbo(QUrl::fromLocalFile(vboPath));
     }
+    const QJsonObject analysis = project.value("analysis").toObject();
+    if (analysis.value("channels").isArray()) {
+        QStringList channels;
+        for (const QJsonValue &value : analysis.value("channels").toArray()) {
+            channels.append(value.toString());
+        }
+        setAnalysisChannels(channels);
+    }
+    if (analysis.contains("visible")) {
+        setAnalysisVisible(analysis.value("visible").toBool(true));
+    }
     m_settings.setValue("project/path", file.fileName());
     setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(file).fileName()));
 }
@@ -226,6 +298,10 @@ void AppController::saveProject(const QUrl &url)
     project.insert(
         "sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}});
     project.insert("scene", QJsonObject{{"widgets", m_widgetModel.toJson()}});
+    project.insert(
+        "analysis",
+        QJsonObject{{"channels", QJsonArray::fromStringList(m_analysisChannels)},
+                    {"visible", m_analysisVisible}});
     if (!project.contains("mapSettings")) {
         project.insert("mapSettings", QJsonObject{{"providerId", "none"}});
     }
@@ -311,6 +387,36 @@ void AppController::setTimeScale(const double scale)
     emit liveValuesChanged();
 }
 
+void AppController::setAnalysisChannels(const QStringList &channels)
+{
+    QStringList normalized;
+    for (const QString &channel : channels) {
+        if (!channel.isEmpty() && !normalized.contains(channel)
+            && (!m_session || m_session->channels.contains(channel))) {
+            normalized.append(channel);
+        }
+        if (normalized.size() == 4) {
+            break;
+        }
+    }
+    if (normalized == m_analysisChannels) {
+        return;
+    }
+    m_analysisChannels = normalized;
+    m_settings.setValue("analysis/channels", m_analysisChannels);
+    emit analysisChanged();
+}
+
+void AppController::setAnalysisVisible(const bool visible)
+{
+    if (visible == m_analysisVisible) {
+        return;
+    }
+    m_analysisVisible = visible;
+    m_settings.setValue("analysis/visible", visible);
+    emit analysisChanged();
+}
+
 QVariant AppController::semanticValue(const QString &alias) const
 {
     if (!m_session) {
@@ -363,10 +469,43 @@ void AppController::restoreSources()
             m_trackPoints.append(point);
         }
         m_telemetryPath = vboPath;
+        reconcileAnalysisChannels();
         m_statusText = QStringLiteral("Previous native session restored.");
     } catch (const std::exception &error) {
         m_statusText = QStringLiteral("Could not restore VBO: %1").arg(error.what());
     }
+}
+
+void AppController::reconcileAnalysisChannels()
+{
+    if (!m_session) {
+        return;
+    }
+    QStringList channels;
+    for (const QString &channel : std::as_const(m_analysisChannels)) {
+        if (m_session->channels.contains(channel) && !channels.contains(channel)) {
+            channels.append(channel);
+        }
+    }
+    for (const QString &alias : {QStringLiteral("speed"), QStringLiteral("rpm"),
+                                 QStringLiteral("throttle"), QStringLiteral("brake")}) {
+        const QString resolved = m_session->aliases.value(alias);
+        if (!resolved.isEmpty() && !channels.contains(resolved)) {
+            channels.append(resolved);
+        }
+        if (channels.size() >= 3) {
+            break;
+        }
+    }
+    for (const QString &channel : m_session->channelNames()) {
+        if (channels.size() >= 3) {
+            break;
+        }
+        if (!channels.contains(channel)) {
+            channels.append(channel);
+        }
+    }
+    setAnalysisChannels(channels);
 }
 
 } // namespace FlappedEar

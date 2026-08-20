@@ -162,6 +162,13 @@ ApplicationWindow {
                 shortcut: StandardKey.FullScreen
                 onTriggered: window.toggleFullScreen()
             }
+            Action {
+                text: qsTr("Telemetry Analysis")
+                checkable: true
+                checked: appController.analysisVisible
+                shortcut: "Ctrl+Shift+A"
+                onTriggered: appController.analysisVisible = checked
+            }
         }
     }
 
@@ -860,6 +867,13 @@ ApplicationWindow {
                             }
                         }
                     }
+                    AnalysisPanel {
+                        visible: !window.fullScreenPreview && appController.analysisVisible
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 230
+                        mediaDuration: mediaPlayer.duration
+                        onSeekRequested: milliseconds => mediaPlayer.position = milliseconds
+                    }
                     Rectangle {
                         visible: !window.fullScreenPreview
                         Layout.fillWidth: true
@@ -917,6 +931,12 @@ ApplicationWindow {
                                 color: "#6f7e90"
                                 font.family: "Menlo"
                                 font.pixelSize: 10
+                            }
+                            FeButton {
+                                compact: true
+                                accent: appController.analysisVisible
+                                text: qsTr("GRAPH")
+                                onClicked: appController.analysisVisible = !appController.analysisVisible
                             }
                             FeButton {
                                 width: 38
