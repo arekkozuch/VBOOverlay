@@ -37,6 +37,12 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY liveValuesChanged)
     Q_PROPERTY(QStringList analysisChannels READ analysisChannels WRITE setAnalysisChannels NOTIFY analysisChanged)
     Q_PROPERTY(bool analysisVisible READ analysisVisible WRITE setAnalysisVisible NOTIFY analysisChanged)
+    Q_PROPERTY(int analysisWindowX READ analysisWindowX CONSTANT)
+    Q_PROPERTY(int analysisWindowY READ analysisWindowY CONSTANT)
+    Q_PROPERTY(int analysisWindowWidth READ analysisWindowWidth CONSTANT)
+    Q_PROPERTY(int analysisWindowHeight READ analysisWindowHeight CONSTANT)
+    Q_PROPERTY(int analysisSidebarWidth READ analysisSidebarWidth CONSTANT)
+    Q_PROPERTY(int analysisVideoHeight READ analysisVideoHeight CONSTANT)
     Q_PROPERTY(int windowX READ windowX CONSTANT)
     Q_PROPERTY(int windowY READ windowY CONSTANT)
     Q_PROPERTY(int windowWidth READ windowWidth CONSTANT)
@@ -65,6 +71,12 @@ public:
     [[nodiscard]] QVariantMap currentTrackPoint() const;
     [[nodiscard]] QStringList analysisChannels() const;
     [[nodiscard]] bool analysisVisible() const;
+    [[nodiscard]] int analysisWindowX() const;
+    [[nodiscard]] int analysisWindowY() const;
+    [[nodiscard]] int analysisWindowWidth() const;
+    [[nodiscard]] int analysisWindowHeight() const;
+    [[nodiscard]] int analysisSidebarWidth() const;
+    [[nodiscard]] int analysisVideoHeight() const;
     [[nodiscard]] int windowX() const;
     [[nodiscard]] int windowY() const;
     [[nodiscard]] int windowWidth() const;
@@ -82,6 +94,8 @@ public:
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void autoSync();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
+    Q_INVOKABLE void saveAnalysisWindowState(
+        int x, int y, int width, int height, int sidebarWidth, int videoHeight);
 
 public slots:
     void setPlaybackTime(double seconds);

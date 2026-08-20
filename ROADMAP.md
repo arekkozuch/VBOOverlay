@@ -50,7 +50,8 @@ Foundation delivered:
 - [x] Docked multi-channel chart panel using the shared synchronized playhead.
 - [x] Full-resolution live values with bounded plot sampling for long sessions.
 - [x] Chart scrubbing, compact track position, channel selection, and project/session persistence.
-- [ ] Detachable analysis window, chart zoom/range selection, annotations, and configurable axes.
+- [x] Detachable analysis window with independently resizable video, track, and chart panes.
+- [ ] Chart zoom/range selection, annotations, and configurable axes.
 
 - Add a collapsible bottom analysis panel with a detachable-window action and persistent panel/window
   geometry.

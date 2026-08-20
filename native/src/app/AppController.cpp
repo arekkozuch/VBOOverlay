@@ -91,6 +91,12 @@ QVariantMap AppController::currentTrackPoint() const
 }
 QStringList AppController::analysisChannels() const { return m_analysisChannels; }
 bool AppController::analysisVisible() const { return m_analysisVisible; }
+int AppController::analysisWindowX() const { return m_settings.value("analysis/windowX", -1).toInt(); }
+int AppController::analysisWindowY() const { return m_settings.value("analysis/windowY", -1).toInt(); }
+int AppController::analysisWindowWidth() const { return m_settings.value("analysis/windowWidth", 1240).toInt(); }
+int AppController::analysisWindowHeight() const { return m_settings.value("analysis/windowHeight", 760).toInt(); }
+int AppController::analysisSidebarWidth() const { return m_settings.value("analysis/sidebarWidth", 360).toInt(); }
+int AppController::analysisVideoHeight() const { return m_settings.value("analysis/videoHeight", 360).toInt(); }
 int AppController::windowX() const { return m_settings.value("window/x", -1).toInt(); }
 int AppController::windowY() const { return m_settings.value("window/y", -1).toInt(); }
 int AppController::windowWidth() const { return m_settings.value("window/width", 1440).toInt(); }
@@ -352,6 +358,23 @@ void AppController::saveWindowState(const int x, const int y, const int width, c
     m_settings.setValue("window/y", y);
     m_settings.setValue("window/width", width);
     m_settings.setValue("window/height", height);
+    m_settings.sync();
+}
+
+void AppController::saveAnalysisWindowState(
+    const int x,
+    const int y,
+    const int width,
+    const int height,
+    const int sidebarWidth,
+    const int videoHeight)
+{
+    m_settings.setValue("analysis/windowX", x);
+    m_settings.setValue("analysis/windowY", y);
+    m_settings.setValue("analysis/windowWidth", width);
+    m_settings.setValue("analysis/windowHeight", height);
+    m_settings.setValue("analysis/sidebarWidth", sidebarWidth);
+    m_settings.setValue("analysis/videoHeight", videoHeight);
     m_settings.sync();
 }
 

@@ -68,6 +68,7 @@ qt_add_qml_module(flappedear_native
     QML_FILES
         qml/ColorField.qml
         qml/AnalysisPanel.qml
+        qml/AnalysisWindow.qml
         qml/FeButton.qml
         qml/FeCheckBox.qml
         qml/FeComboBox.qml
@@ -77,6 +78,7 @@ qt_add_qml_module(flappedear_native
         qml/InspectorPanel.qml
         qml/Main.qml
         qml/SectionTitle.qml
+        qml/TrackMapPanel.qml
         qml/WidgetOverlay.qml
 )
 

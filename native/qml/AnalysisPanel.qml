@@ -60,235 +60,171 @@ Rectangle {
             }
         }
 
-        RowLayout {
+        Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 10
+            radius: 8
+            color: "#070b10"
+            border.color: "#1c2631"
+            clip: true
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                radius: 8
-                color: "#070b10"
-                border.color: "#1c2631"
-                clip: true
+            SplitView {
+                id: chartSplit
+                anchors.fill: parent
+                anchors.margins: 6
+                orientation: Qt.Vertical
+                handle: Rectangle {
+                    implicitHeight: 5
+                    color: SplitHandle.pressed ? "#55e6a5" : SplitHandle.hovered ? "#334556" : "#14202a"
+                }
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 6
-                    spacing: 2
+                Repeater {
+                    model: appController.analysisChannels
 
-                    Repeater {
-                        model: appController.analysisChannels
+                    Item {
+                        id: chartRow
+                        required property int index
+                        required property var modelData
+                        SplitView.fillWidth: true
+                        SplitView.preferredHeight: Math.max(54, chartSplit.height / Math.max(1, appController.analysisChannels.length))
+                        SplitView.minimumHeight: 42
+                        property string channelName: String(modelData)
+                        property color lineColor: root.plotColors[index % root.plotColors.length]
+                        property var series: {
+                            appController.syncOffset;
+                            appController.timeScale;
+                            appController.telemetryDuration;
+                            return appController.telemetrySeries(channelName, 0, root.durationSeconds, Math.max(100, Math.round(width * 1.5)));
+                        }
 
                         Item {
-                            id: chartRow
-                            required property int index
-                            required property var modelData
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            property string channelName: String(modelData)
-                            property color lineColor: root.plotColors[index % root.plotColors.length]
-                            property var series: {
-                                appController.syncOffset;
-                                appController.timeScale;
-                                appController.telemetryDuration;
-                                return appController.telemetrySeries(channelName, 0, root.durationSeconds, Math.max(100, Math.round(width * 1.5)));
+                            anchors.fill: parent
+
+                            Column {
+                                id: channelInfo
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(112, parent.width * 0.18)
+                                spacing: 0
+                                Label {
+                                    width: channelInfo.width
+                                    text: chartRow.channelName
+                                    color: chartRow.lineColor
+                                    font.pixelSize: 9
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideMiddle
+                                }
+                                Row {
+                                    spacing: 5
+                                    Label {
+                                        text: {
+                                            appController.playbackTime;
+                                            return appController.valueText(chartRow.channelName, 2);
+                                        }
+                                        color: "#e4ebf3"
+                                        font.family: "Menlo"
+                                        font.pixelSize: 11
+                                    }
+                                    Label {
+                                        text: chartRow.series.unit || ""
+                                        color: "#687789"
+                                        font.pixelSize: 8
+                                    }
+                                }
+                            }
+                            Label {
+                                anchors.left: parent.left
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 1
+                                text: "×"
+                                color: removeMouse.containsMouse ? "#ff8090" : "#647386"
+                                font.pixelSize: 11
+                                MouseArea {
+                                    id: removeMouse
+                                    anchors.fill: parent
+                                    anchors.margins: -5
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: appController.toggleAnalysisChannel(chartRow.channelName)
+                                }
                             }
 
                             Item {
-                                anchors.fill: parent
+                                id: plotArea
+                                anchors.left: channelInfo.right
+                                anchors.leftMargin: 8
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
 
-                                Column {
-                                    id: channelInfo
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: Math.min(112, parent.width * 0.18)
-                                    spacing: 0
-                                    Label {
-                                        width: channelInfo.width
-                                        text: chartRow.channelName
-                                        color: chartRow.lineColor
-                                        font.pixelSize: 9
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideMiddle
-                                    }
-                                    Row {
-                                        spacing: 5
-                                        Label {
-                                            text: {
-                                                appController.playbackTime;
-                                                return appController.valueText(chartRow.channelName, 2);
-                                            }
-                                            color: "#e4ebf3"
-                                            font.family: "Menlo"
-                                            font.pixelSize: 11
-                                        }
-                                        Label {
-                                            text: chartRow.series.unit || ""
-                                            color: "#687789"
-                                            font.pixelSize: 8
-                                        }
-                                    }
-                                }
-                                Label {
-                                    anchors.left: parent.left
-                                    anchors.bottom: parent.bottom
-                                    anchors.bottomMargin: 1
-                                    text: "×"
-                                    color: removeMouse.containsMouse ? "#ff8090" : "#647386"
-                                    font.pixelSize: 11
-                                    MouseArea {
-                                        id: removeMouse
-                                        anchors.fill: parent
-                                        anchors.margins: -5
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: appController.toggleAnalysisChannel(chartRow.channelName)
-                                    }
-                                }
-
-                                Item {
-                                    id: plotArea
-                                    anchors.left: channelInfo.right
-                                    anchors.leftMargin: 8
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
-
-                                    Canvas {
-                                        id: chartCanvas
-                                        anchors.fill: parent
-                                        property var plotSeries: chartRow.series
-                                        onPlotSeriesChanged: requestPaint()
-                                        onWidthChanged: requestPaint()
-                                        onHeightChanged: requestPaint()
-                                        onPaint: {
-                                            const context = getContext("2d");
-                                            context.reset();
-                                            context.strokeStyle = "#18232e";
-                                            context.lineWidth = 1;
-                                            for (let grid = 1; grid < 4; ++grid) {
-                                                const x = width * grid / 4;
-                                                context.beginPath();
-                                                context.moveTo(x, 0);
-                                                context.lineTo(x, height);
-                                                context.stroke();
-                                            }
-                                            const points = plotSeries.points || [];
-                                            if (points.length < 2)
-                                                return;
-                                            const low = Number(plotSeries.minimum || 0);
-                                            const high = Number(plotSeries.maximum || 0);
-                                            const span = Math.max(0.000001, high - low);
-                                            context.strokeStyle = chartRow.lineColor;
-                                            context.lineWidth = 1.6;
-                                            context.lineJoin = "round";
+                                Canvas {
+                                    id: chartCanvas
+                                    anchors.fill: parent
+                                    property var plotSeries: chartRow.series
+                                    onPlotSeriesChanged: requestPaint()
+                                    onWidthChanged: requestPaint()
+                                    onHeightChanged: requestPaint()
+                                    onPaint: {
+                                        const context = getContext("2d");
+                                        context.reset();
+                                        context.strokeStyle = "#18232e";
+                                        context.lineWidth = 1;
+                                        for (let grid = 1; grid < 4; ++grid) {
+                                            const x = width * grid / 4;
                                             context.beginPath();
-                                            for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
-                                                const x = Number(points[pointIndex].x) * width;
-                                                const y = height - 3 - (Number(points[pointIndex].y) - low) / span * Math.max(1, height - 6);
-                                                if (pointIndex === 0)
-                                                    context.moveTo(x, y);
-                                                else
-                                                    context.lineTo(x, y);
-                                            }
+                                            context.moveTo(x, 0);
+                                            context.lineTo(x, height);
                                             context.stroke();
                                         }
-                                    }
-                                    Rectangle {
-                                        x: Math.max(0, Math.min(parent.width - width, appController.playbackTime / root.durationSeconds * parent.width))
-                                        width: 1
-                                        height: parent.height
-                                        color: "#f3f6fa"
-                                        opacity: 0.8
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onPressed: mouse => root.seekAt(mouse.x / width)
-                                        onPositionChanged: mouse => {
-                                            if (pressed)
-                                                root.seekAt(mouse.x / width);
+                                        const points = plotSeries.points || [];
+                                        if (points.length < 2)
+                                            return;
+                                        const low = Number(plotSeries.minimum || 0);
+                                        const high = Number(plotSeries.maximum || 0);
+                                        const span = Math.max(0.000001, high - low);
+                                        context.strokeStyle = chartRow.lineColor;
+                                        context.lineWidth = 1.6;
+                                        context.lineJoin = "round";
+                                        context.beginPath();
+                                        for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
+                                            const x = Number(points[pointIndex].x) * width;
+                                            const y = height - 3 - (Number(points[pointIndex].y) - low) / span * Math.max(1, height - 6);
+                                            if (pointIndex === 0)
+                                                context.moveTo(x, y);
+                                            else
+                                                context.lineTo(x, y);
                                         }
+                                        context.stroke();
+                                    }
+                                }
+                                Rectangle {
+                                    x: Math.max(0, Math.min(parent.width - width, appController.playbackTime / root.durationSeconds * parent.width))
+                                    width: 1
+                                    height: parent.height
+                                    color: "#f3f6fa"
+                                    opacity: 0.8
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onPressed: mouse => root.seekAt(mouse.x / width)
+                                    onPositionChanged: mouse => {
+                                        if (pressed)
+                                            root.seekAt(mouse.x / width);
                                     }
                                 }
                             }
                         }
-                    }
-
-                    Label {
-                        visible: appController.analysisChannels.length === 0
-                        Layout.alignment: Qt.AlignCenter
-                        text: appController.channelNames.length ? qsTr("Add a telemetry channel to begin analysis") : qsTr("Open a VBO file to inspect telemetry")
-                        color: "#657386"
-                        font.pixelSize: 11
                     }
                 }
             }
 
-            Rectangle {
-                Layout.preferredWidth: 180
-                Layout.fillHeight: true
-                radius: 8
-                color: "#070b10"
-                border.color: "#1c2631"
-
-                Label {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.margins: 8
-                    text: qsTr("TRACK POSITION")
-                    color: "#687789"
-                    font.pixelSize: 8
-                    font.letterSpacing: 1
-                }
-                Item {
-                    id: mapArea
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    anchors.topMargin: 24
-                    property var currentPoint: {
-                        appController.playbackTime;
-                        return appController.currentTrackPoint;
-                    }
-                    Canvas {
-                        id: trackCanvas
-                        anchors.fill: parent
-                        onPaint: {
-                            const context = getContext("2d");
-                            context.reset();
-                            const points = appController.trackPoints;
-                            if (points.length < 2)
-                                return;
-                            context.strokeStyle = "#3b4b5b";
-                            context.lineWidth = 2;
-                            context.lineCap = "round";
-                            context.lineJoin = "round";
-                            context.beginPath();
-                            context.moveTo(Number(points[0].x) * width, Number(points[0].y) * height);
-                            for (let index = 1; index < points.length; ++index)
-                                context.lineTo(Number(points[index].x) * width, Number(points[index].y) * height);
-                            context.stroke();
-                        }
-                        Connections {
-                            target: appController
-                            function onTelemetryChanged() {
-                                trackCanvas.requestPaint();
-                            }
-                        }
-                    }
-                    Rectangle {
-                        visible: mapArea.currentPoint.x !== undefined
-                        width: 8
-                        height: 8
-                        radius: 4
-                        color: "#55e6a5"
-                        border.color: "#d9fff0"
-                        x: Number(mapArea.currentPoint.x || 0) * mapArea.width - width / 2
-                        y: Number(mapArea.currentPoint.y || 0) * mapArea.height - height / 2
-                    }
-                }
+            Label {
+                anchors.centerIn: parent
+                visible: appController.analysisChannels.length === 0
+                text: appController.channelNames.length ? qsTr("Add a telemetry channel to begin analysis") : qsTr("Open a VBO file to inspect telemetry")
+                color: "#657386"
+                font.pixelSize: 11
             }
         }
     }

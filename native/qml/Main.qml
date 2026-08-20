@@ -426,6 +426,16 @@ ApplicationWindow {
         onPositionChanged: appController.playbackTime = position / 1000.0
     }
 
+    AnalysisWindow {
+        id: analysisWindow
+        videoSource: appController.videoSource
+        playbackPosition: mediaPlayer.position
+        playbackRunning: mediaPlayer.playbackState === MediaPlayer.PlayingState
+        mediaDuration: mediaPlayer.duration
+        onSeekRequested: milliseconds => mediaPlayer.position = milliseconds
+        onTogglePlaybackRequested: mediaPlayer.playbackState === MediaPlayer.PlayingState ? mediaPlayer.pause() : mediaPlayer.play()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -867,13 +877,6 @@ ApplicationWindow {
                             }
                         }
                     }
-                    AnalysisPanel {
-                        visible: !window.fullScreenPreview && appController.analysisVisible
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 230
-                        mediaDuration: mediaPlayer.duration
-                        onSeekRequested: milliseconds => mediaPlayer.position = milliseconds
-                    }
                     Rectangle {
                         visible: !window.fullScreenPreview
                         Layout.fillWidth: true
@@ -935,7 +938,7 @@ ApplicationWindow {
                             FeButton {
                                 compact: true
                                 accent: appController.analysisVisible
-                                text: qsTr("GRAPH")
+                                text: qsTr("ANALYSIS")
                                 onClicked: appController.analysisVisible = !appController.analysisVisible
                             }
                             FeButton {
