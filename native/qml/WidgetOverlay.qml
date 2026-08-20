@@ -138,6 +138,19 @@ Item {
                 anchors.fill: parent
                 anchors.margins: widgetItem.pad
 
+                Image {
+                    anchors.centerIn: parent
+                    visible: widgetItem.widgetType === "brandLogo"
+                    width: parent.width * Math.max(0.1, Math.min(1, Number(widgetItem.widgetSettings.logoScale ?? 1)))
+                    height: parent.height * Math.max(0.1, Math.min(1, Number(widgetItem.widgetSettings.logoScale ?? 1)))
+                    source: "qrc:/flappedear/resources/branding/app-logo.png"
+                    sourceSize.width: 512
+                    sourceSize.height: 512
+                    fillMode: Image.PreserveAspectFit
+                    opacity: Number(widgetItem.widgetSettings.logoOpacity ?? 0.85)
+                    mipmap: true
+                }
+
                 Column {
                     anchors.centerIn: parent
                     visible: widgetItem.widgetType === "speed"

@@ -220,6 +220,7 @@ void TelemetryTests::providesCustomizableArchetypes()
         {"retroPedal", {"source", "minValue", "maxValue", "fillColor", "emptyColor"}},
         {"retroSpeedArc", {"source", "minValue", "maxValue", "segments", "lowColor"}},
         {"retroNameplate", {"topSource", "bottomSource", "topText", "bottomText"}},
+        {"brandLogo", {"logoOpacity", "logoScale"}},
     };
     for (auto iterator = specialized.cbegin(); iterator != specialized.cend(); ++iterator) {
         const int index = model.addWidget(iterator.key());

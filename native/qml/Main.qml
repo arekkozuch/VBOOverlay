@@ -101,6 +101,11 @@ ApplicationWindow {
             "label": "Nameplate",
             "type": "retroNameplate",
             "icon": "ID"
+        },
+        {
+            "label": "Logo",
+            "type": "brandLogo",
+            "icon": "FE"
         }
     ]
 
@@ -432,9 +437,13 @@ ApplicationWindow {
                 spacing: 12
 
                 Image {
-                    width: 38
-                    height: 38
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    Layout.maximumWidth: 28
+                    Layout.maximumHeight: 28
                     source: "qrc:/flappedear/resources/branding/app-logo.png"
+                    sourceSize.width: 56
+                    sourceSize.height: 56
                     fillMode: Image.PreserveAspectFit
                     mipmap: true
                 }
@@ -999,9 +1008,13 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 12
                 Image {
-                    width: 46
-                    height: 46
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 34
+                    Layout.maximumWidth: 34
+                    Layout.maximumHeight: 34
                     source: "qrc:/flappedear/resources/branding/app-logo.png"
+                    sourceSize.width: 68
+                    sourceSize.height: 68
                     fillMode: Image.PreserveAspectFit
                     mipmap: true
                 }

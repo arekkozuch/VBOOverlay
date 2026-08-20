@@ -97,6 +97,10 @@
       "showBackground": false, "showBorder": false, "padding": 0,
       "topSource": "", "bottomSource": "", "topText": "DRIVER", "bottomText": "39.4",
       "topDecimals": 0, "bottomDecimals": 1, "topColor": "#111111", "bottomColor": "#f4f4f4"
+    },
+    "brandLogo": {
+      "showBackground": false, "showBorder": false, "padding": 0,
+      "logoOpacity": 0.85, "logoScale": 1
     }
   },
   "templates": [

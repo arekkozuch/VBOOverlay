@@ -161,16 +161,17 @@ Rectangle {
                         }
 
                         SectionTitle {
+                            visible: root.selectedWidget.type !== "brandLogo"
                             text: qsTr("Telemetry & format")
                         }
                         Label {
-                            visible: root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate"
+                            visible: root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             text: qsTr("Source channel")
                             color: "#8b98a8"
                             font.pixelSize: 11
                         }
                         FeComboBox {
-                            visible: root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate"
+                            visible: root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             model: root.channelModel()
                             currentIndex: Math.max(0, model.indexOf(root.settings.source || qsTr("Automatic")))
@@ -178,7 +179,7 @@ Rectangle {
                         }
 
                         GridLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             columns: 2
                             columnSpacing: 8
@@ -276,7 +277,7 @@ Rectangle {
                             }
                         }
                         RowLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             FeCheckBox {
                                 text: qsTr("Show unit")
                                 checked: root.settings.showUnit ?? true
@@ -1250,6 +1251,41 @@ Rectangle {
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        ColumnLayout {
+                            visible: root.selectedWidget.type === "brandLogo"
+                            Layout.fillWidth: true
+                            spacing: 7
+                            SectionTitle {
+                                text: qsTr("Logo")
+                            }
+                            Label {
+                                text: qsTr("Logo opacity  %1%").arg((Number(root.settings.logoOpacity ?? 0.85) * 100).toFixed(0))
+                                color: "#8b98a8"
+                                font.pixelSize: 11
+                            }
+                            FeSlider {
+                                Layout.fillWidth: true
+                                from: 0
+                                to: 1
+                                stepSize: 0.01
+                                value: Number(root.settings.logoOpacity ?? 0.85)
+                                onMoved: root.setSetting("logoOpacity", value)
+                            }
+                            Label {
+                                text: qsTr("Logo scale  %1%").arg((Number(root.settings.logoScale ?? 1) * 100).toFixed(0))
+                                color: "#8b98a8"
+                                font.pixelSize: 11
+                            }
+                            FeSlider {
+                                Layout.fillWidth: true
+                                from: 0.1
+                                to: 1
+                                stepSize: 0.01
+                                value: Number(root.settings.logoScale ?? 1)
+                                onMoved: root.setSetting("logoScale", value)
                             }
                         }
 
