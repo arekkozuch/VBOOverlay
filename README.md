@@ -1,8 +1,65 @@
 # FlappedEar Telemetry
 
-FlappedEar Telemetry is an early cross-platform Electron editor for placing time-synchronized motorsport telemetry over video. Version 0.1 currently provides secure MP4/MOV and VBO import, FFprobe media inspection, timeline scrubbing, manual synchronization, live telemetry values, draggable/scalable widgets, track geometry, and versioned project files.
+FlappedEar Telemetry is a motorsport telemetry overlay editor. The current Electron version is a functional prototype and behavior reference; production development is moving to a Qt 6/C++/QML native application for macOS and Windows. See [ROADMAP.md](ROADMAP.md) for the migration and agreed feature work, including support for GoPro recordings split into multiple video chapters.
 
-## Architecture
+The prototype provides secure MP4/MOV and VBO import, FFprobe media inspection, timeline scrubbing, manual synchronization, configurable live telemetry values, draggable/scalable widgets, track geometry, autosaved editor preferences, and versioned project files.
+
+## Native rewrite
+
+The production implementation is under `native/` and uses Qt 6, C++20, QML, Qt Multimedia, CMake,
+and Qt Test. It currently includes:
+
+- a native macOS/Windows application target with native menus and dialogs;
+- Qt Multimedia video playback, aspect-correct overlay placement, timeline scrubbing, audio, and
+  fullscreen mode;
+- the ported typed telemetry session, central video-to-telemetry transform, binary-search
+  interpolation, and dynamic VBO parser;
+- persisted video/VBO sources, window state, offset, and time scale through native platform settings;
+- live display of every numeric VBO channel plus initial Speed, RPM, and Heart Rate overlays.
+- a persistent, `.fetproject`-compatible widget scene with add, select, drag, resize, rotate,
+  duplicate, hide, delete, style, and per-channel binding controls;
+- native Speed, RPM, Heart Rate, Pedals, G-Force, Custom Value, GPS track, arc gauge,
+  analog dial gauge, and four-channel telemetry overlay widgets;
+- bounded native GoPro GPMF packet reads, GPS9/GPS5 decoding, and background GPS-speed auto sync
+  with persisted offset and confidence diagnostics.
+- a fully custom Qt Quick design system and three-pane editor rather than platform-default Qt
+  controls;
+- comprehensive per-widget data, formatting, geometry, typography, color, range, and type-specific
+  controls;
+- data-defined widget archetypes and nine built-in scenes—Track Day, Minimal, Broadcast, Performance,
+  Circuit Pro, Endurance, Drag Strip, Clean HUD, and a late-2000s-inspired Grand Prix layout—in
+  `native/resources/widget-templates.json`;
+- custom layout capture plus `.fettemplate` import/export and deletion. User templates persist in
+  the platform application-data directory and retain widget geometry, channel bindings, styling,
+  and animation cues;
+- per-widget timed appearances with multiple cues, playhead-based placement, fade-in/out timing,
+  and Fade, Pop, or Slide Up entrance effects for broadcast-style inserts;
+- a focused welcome screen for selecting the clip, optional VBO, or a saved project before entering
+  the editor; development restores can still continue directly into the studio.
+
+Build and test on macOS:
+
+```bash
+cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt
+cmake --build build-native --parallel
+ctest --test-dir build-native --output-on-failure
+open "build-native/native/FlappedEar Telemetry.app"
+```
+
+Run the compatibility suite against a private real VBO without adding its path to source control:
+
+```bash
+FLAPPEDEAR_REAL_GOPRO=/absolute/path/video.mp4 \
+FLAPPEDEAR_REAL_VBO=/absolute/path/session.vbo \
+  ./build-native/native/tests/flappedear_native_tests
+```
+
+The development `.app` is approximately 712 KB and links to the installed Qt development runtime. A
+preliminary dependency-deployment measurement was 126 MB with Qt 6.11 multimedia and QML included,
+compared with approximately 328 MB for the Electron prototype. A repeatable, trimmed self-contained
+package is not complete yet; release optimization, signing, and notarization remain pending.
+
+## Electron prototype architecture
 
 - `src/main`: Electron lifecycle, constrained file dialogs, FFprobe integration, encoder detection, and project persistence.
 - `src/preload`: the small typed IPC bridge; no generic filesystem or shell access is exposed.
@@ -47,6 +104,18 @@ npm test
 npm run build
 ```
 
+Desktop packages:
+
+```bash
+# macOS .app bundle in release/mac*/
+npm run package:mac
+
+# Portable Windows application folder in release/win-unpacked/
+npm run package:win
+```
+
+The Windows target intentionally produces an unpacked portable folder rather than an installer. Build Windows releases on Windows for the most reliable result. Neither package includes source GoPro, VBO, RCZ, or project recordings. FFmpeg and FFprobe must remain available on the target machine's `PATH`.
+
 ## VBO support
 
 The parser discovers sections, metadata, columns, numeric channels, missing values, clock-style or elapsed timestamps, and aliases for speed, RPM, pedals, heart rate, GPS, and acceleration. Data is loaded once into typed arrays; timeline lookup uses binary search with `previous`, `nearest`, and `linear` modes. Time is always expressed in seconds, never frames.
@@ -63,7 +132,7 @@ The supplied 11,526,059,397-byte GoPro recording was validated as 3840×2160 HEV
 
 ## Widgets and maps
 
-The shared canvas renderer implements Speed (km/h or mph), RPM, VBO Heart Rate, real accelerator/brake bars with numeric values, 2D G-force with resultant magnitude, a projected track outline with moving position, and a Custom Value widget. Every value widget can bind to an original numeric VBO column; custom values also support editable labels, suffixes, precision, and multipliers. Widgets can be added, selected, dragged, scaled, hidden, and deleted. The preview, transport, and timeline can be expanded into fullscreen mode.
+The shared canvas renderer implements Speed (km/h or mph), RPM, VBO Heart Rate, real accelerator/brake bars with numeric values, 2D G-force with resultant magnitude, a projected track outline with moving position, and a Custom Value widget. Every value widget can bind to an original numeric VBO column; custom values also support editable labels, suffixes, precision, and multipliers. Widgets can be added, selected, dragged, resized, rotated, duplicated, styled, hidden, and deleted. Background strength, panel/text/accent colors, opacity, and optional titles are configurable. The live telemetry panel can contain any number of recorded numeric channels with independent labels, units, and precision. The preview, transport, and timeline can be expanded into fullscreen mode.
 
 A MapLibre-compatible provider abstraction supports no map, configurable XYZ raster sources, and style URLs. The public OpenStreetMap adapter is intended only for light interactive use; bulk export must use caching and a suitable provider. Remote-map rendering is not enabled in the current editor.
 
@@ -73,13 +142,22 @@ Runtime detection prefers only encoders actually reported by FFmpeg (`hevc_video
 
 ## Project files
 
-`.fetproject` files are versioned JSON containing source paths, sync transform, widget scene, map settings, and export settings. Opening a project restores its settings; source files must currently be reopened through the secure dialogs before previewing.
+Native `.fetproject` files use the clean v2 JSON schema and contain source paths, sync transform,
+widget scene (including animation cues), map settings, and export settings. Widget layouts, styling,
+sync, and source choices are also autosaved locally, so they survive an app restart. Pre-release
+Electron/native-v1 layout compatibility is intentionally not retained because the application has
+not yet shipped.
 
 ## Current limitations and roadmap
 
+- The current Electron package is not the production distribution architecture; native Qt migration
+  is planned in `ROADMAP.md`.
+- A video source currently contains only one file. Multi-chapter GoPro recordings are an explicit
+  native-roadmap item.
 - HEVC streaming export, audio preservation, progress, and cancellation are pending.
 - MapLibre map display and tile caching are pending; track-outline rendering works offline.
 - VFR is detected and shown in the model, but a timing-safe VFR export path is not implemented.
-- Packaging/signing installers for macOS and Windows is not yet configured.
+- Packages are currently unsigned. macOS Gatekeeper distribution and code signing are not configured.
 
-Next work should prioritize timing-correct HEVC export before appearance or roadmap features.
+Next native milestones are timing-correct HEVC export and the multi-chapter GoPro timeline described
+in `ROADMAP.md`.

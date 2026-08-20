@@ -4,7 +4,17 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-electron', 'node_modules', 'coverage', 'eslint.config.js'] },
+  {
+    ignores: [
+      'dist',
+      'dist-electron',
+      'build-native',
+      'native-dist',
+      'node_modules',
+      'coverage',
+      'eslint.config.js',
+    ],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

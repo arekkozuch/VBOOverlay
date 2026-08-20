@@ -81,15 +81,27 @@ export interface WidgetScene {
   widgets: WidgetInstance[];
 }
 
+export interface LiveTelemetryItem {
+  id: string;
+  channel: string;
+  label: string;
+  unit: string;
+  decimals: number;
+}
+
 export interface ProjectFile {
   version: 1;
   videoPath?: string;
   vboPath?: string;
   sync: SyncTransform;
   scene: WidgetScene;
+  liveTelemetry?: LiveTelemetryItem[];
   mapSettings: { providerId: string; styleUrl?: string };
   exportSettings: { quality: 'fast' | 'high' | 'maximum' };
 }
+
+export type MenuAction =
+  'new-project' | 'open-project' | 'save-project' | 'save-project-as' | 'open-video' | 'open-vbo';
 
 export interface EncoderInfo {
   name: string;

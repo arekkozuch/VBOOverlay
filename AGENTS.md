@@ -2,6 +2,12 @@
 
 ## Engineering rules
 
+- Treat the Electron application as a prototype and behavior reference. New production architecture
+  uses Qt 6, C++, and QML as recorded in `ROADMAP.md`.
+- Preserve `.fetproject` compatibility and behavioral test fixtures during the native migration.
+- Use C++20, Qt Test, CMake targets, compiler warnings, and explicit ownership in native code.
+- Model multiple GoPro chunks as one ordered, time-based media timeline; never reset telemetry time
+  at a clip boundary.
 - Do not rewrite working architecture without a concrete reason.
 - Keep telemetry parsing independent from React.
 - Keep video and media code independent from widget UI.

@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   EnvironmentInfo,
+  LiveTelemetryItem,
   MediaInfo,
+  MenuAction,
   ProjectFile,
   SyncTransform,
   SyncResult,
@@ -16,6 +18,9 @@ import {
   type TelemetrySession,
 } from '../telemetry/core/session';
 import { OverlayCanvas } from './widgets/OverlayCanvas';
+import { parseEditorPreferences, serializeEditorPreferences } from './editor/preferences';
+
+const PREFERENCES_KEY = 'flappedear.editor-preferences.v1';
 
 const WIDGET_LABELS: Record<WidgetType, string> = {
   speed: 'FE Speed',
@@ -60,10 +65,16 @@ function newWidget(type: WidgetType, index: number): WidgetInstance {
 const initialScene: WidgetScene = {
   widgets: [newWidget('speed', 0), newWidget('rpm', 1), newWidget('heartRate', 2)],
 };
+const defaultLiveTelemetry = (): LiveTelemetryItem[] => [
+  { id: crypto.randomUUID(), channel: 'speed', label: 'Speed', unit: 'km/h', decimals: 1 },
+  { id: crypto.randomUUID(), channel: 'rpm', label: 'RPM', unit: '', decimals: 0 },
+  { id: crypto.randomUUID(), channel: 'heartRate', label: 'Heart rate', unit: 'BPM', decimals: 0 },
+];
 const emptyProject = (): ProjectFile => ({
   version: 1,
   sync: { offset: 0, timeScale: 1 },
   scene: initialScene,
+  liveTelemetry: defaultLiveTelemetry(),
   mapSettings: { providerId: 'none' },
   exportSettings: { quality: 'high' },
 });
@@ -113,6 +124,10 @@ function ChannelSelect({
 }
 
 export function App(): React.JSX.Element {
+  const savedPreferences = useMemo(
+    () => parseEditorPreferences(window.localStorage.getItem(PREFERENCES_KEY)),
+    [],
+  );
   const video = useRef<HTMLVideoElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const previewArea = useRef<HTMLElement>(null);
@@ -121,8 +136,13 @@ export function App(): React.JSX.Element {
   const [session, setSession] = useState<TelemetrySession>();
   const [videoPath, setVideoPath] = useState<string>();
   const [vboPath, setVboPath] = useState<string>();
-  const [scene, setScene] = useState<WidgetScene>(initialScene);
-  const [sync, setSync] = useState<SyncTransform>({ offset: 0, timeScale: 1 });
+  const [scene, setScene] = useState<WidgetScene>(savedPreferences?.scene ?? initialScene);
+  const [sync, setSync] = useState<SyncTransform>(
+    savedPreferences?.sync ?? { offset: 0, timeScale: 1 },
+  );
+  const [liveTelemetry, setLiveTelemetry] = useState<LiveTelemetryItem[]>(
+    savedPreferences?.liveTelemetry ?? defaultLiveTelemetry(),
+  );
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -144,14 +164,6 @@ export function App(): React.JSX.Element {
       ? { width: availableStageHeight * videoAspect, height: availableStageHeight }
       : { width: availableStageWidth, height: availableStageWidth / videoAspect };
   const selected = scene.widgets.find(({ id }) => id === selectedId);
-  const telemetrySummary = useMemo(
-    () => ({
-      speed: session ? valueAt(session, 'speed', telemetryTime) : undefined,
-      rpm: session ? valueAt(session, 'rpm', telemetryTime) : undefined,
-      heartRate: session ? valueAt(session, 'heartRate', telemetryTime) : undefined,
-    }),
-    [session, telemetryTime],
-  );
 
   useEffect(() => {
     void window.flappedEar
@@ -159,6 +171,12 @@ export function App(): React.JSX.Element {
       .then(setEnvironment)
       .catch((error) => setMessage(String(error)));
   }, []);
+  useEffect(() => {
+    window.localStorage.setItem(
+      PREFERENCES_KEY,
+      serializeEditorPreferences({ version: 1, scene, sync, liveTelemetry }),
+    );
+  }, [scene, sync, liveTelemetry]);
   useEffect(() => {
     let frame = 0;
     const update = () => {
@@ -194,9 +212,34 @@ export function App(): React.JSX.Element {
         widget.id === id ? { ...widget, ...changes } : widget,
       ),
     }));
-  const updateWidgetSetting = (widget: WidgetInstance, setting: string, value: string) =>
-    updateWidget(widget.id, { settings: { ...widget.settings, [setting]: value } });
-  const project = (): ProjectFile => ({ ...emptyProject(), videoPath, vboPath, sync, scene });
+  const updateWidgetSetting = (
+    widget: WidgetInstance,
+    setting: string,
+    value: string | number | boolean,
+  ) => updateWidget(widget.id, { settings: { ...widget.settings, [setting]: value } });
+  const project = (): ProjectFile => ({
+    ...emptyProject(),
+    videoPath,
+    vboPath,
+    sync,
+    scene,
+    liveTelemetry,
+  });
+
+  function newProject(): void {
+    setMedia(undefined);
+    setSession(undefined);
+    setVideoPath(undefined);
+    setVboPath(undefined);
+    setProjectPath(undefined);
+    setSelectedId(undefined);
+    setSync({ offset: 0, timeScale: 1 });
+    setScene({ widgets: [] });
+    setLiveTelemetry(defaultLiveTelemetry());
+    setTime(0);
+    setDuration(0);
+    setMessage('New project created. Your editor preferences continue to autosave.');
+  }
 
   async function openVideo(): Promise<void> {
     try {
@@ -254,7 +297,23 @@ export function App(): React.JSX.Element {
       setVboPath(result.project.vboPath);
       setSync(result.project.sync);
       setScene(result.project.scene);
-      setMessage('Project opened. Re-open source media to restore previews.');
+      setLiveTelemetry(result.project.liveTelemetry ?? defaultLiveTelemetry());
+      if (result.media) {
+        setMedia(result.media);
+        setVideoPath(result.media.path);
+        setDuration(result.media.duration);
+      }
+      if (result.telemetry) {
+        const hydrated = hydrateSession(result.telemetry.session);
+        setSession(hydrated);
+        setVboPath(result.telemetry.path);
+        if (!result.media) setDuration(hydrated.duration);
+      }
+      setMessage(
+        result.warnings.length
+          ? `Project opened with ${result.warnings.length} source warning(s): ${result.warnings.join(' ')}`
+          : 'Project and source media restored.',
+      );
     } catch (error) {
       setMessage(`Project error: ${String(error)}`);
     }
@@ -295,6 +354,17 @@ export function App(): React.JSX.Element {
     else await previewArea.current?.requestFullscreen();
   }
 
+  useEffect(() =>
+    window.flappedEar.onMenuAction((action: MenuAction) => {
+      if (action === 'new-project') newProject();
+      else if (action === 'open-project') void openProject();
+      else if (action === 'save-project') void saveProject();
+      else if (action === 'save-project-as') void saveProject(true);
+      else if (action === 'open-video') void openVideo();
+      else if (action === 'open-vbo') void openVbo();
+    }),
+  );
+
   return (
     <main className="app-shell">
       <header>
@@ -306,17 +376,7 @@ export function App(): React.JSX.Element {
           </div>
         </div>
         <nav>
-          <button
-            onClick={() => {
-              setMedia(undefined);
-              setSession(undefined);
-              setProjectPath(undefined);
-              setSync({ offset: 0, timeScale: 1 });
-              setScene(initialScene);
-            }}
-          >
-            New
-          </button>
+          <button onClick={newProject}>New</button>
           <button onClick={() => void openProject()}>Open Project</button>
           <button onClick={() => void saveProject()}>Save</button>
           <button onClick={() => void saveProject(true)}>Save As</button>
@@ -456,6 +516,14 @@ export function App(): React.JSX.Element {
                 <input value={WIDGET_LABELS[selected.type]} disabled />
               </label>
               <label>
+                Display title
+                <input
+                  value={String(selected.settings.title ?? '')}
+                  placeholder="Widget default"
+                  onChange={(event) => updateWidgetSetting(selected, 'title', event.target.value)}
+                />
+              </label>
+              <label>
                 X
                 <input
                   type="number"
@@ -492,6 +560,49 @@ export function App(): React.JSX.Element {
                 <output>{selected.scale.toFixed(2)}×</output>
               </label>
               <label>
+                Width
+                <input
+                  type="number"
+                  min=".04"
+                  max="1"
+                  step=".01"
+                  value={selected.width}
+                  onChange={(event) =>
+                    updateWidget(selected.id, {
+                      width: Math.max(0.04, Math.min(1, Number(event.target.value))),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Height
+                <input
+                  type="number"
+                  min=".04"
+                  max="1"
+                  step=".01"
+                  value={selected.height}
+                  onChange={(event) =>
+                    updateWidget(selected.id, {
+                      height: Math.max(0.04, Math.min(1, Number(event.target.value))),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Rotation
+                <input
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value={selected.rotation}
+                  onChange={(event) =>
+                    updateWidget(selected.id, { rotation: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label>
                 Opacity
                 <input
                   type="range"
@@ -501,6 +612,52 @@ export function App(): React.JSX.Element {
                   value={selected.opacity}
                   onChange={(event) =>
                     updateWidget(selected.id, { opacity: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                Background
+                <input
+                  aria-label="Widget background color"
+                  type="color"
+                  value={String(selected.settings.backgroundColor ?? '#080b10')}
+                  onChange={(event) =>
+                    updateWidgetSetting(selected, 'backgroundColor', event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Panel strength
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step=".05"
+                  value={Number(selected.settings.backgroundOpacity ?? 0.72)}
+                  onChange={(event) =>
+                    updateWidgetSetting(selected, 'backgroundOpacity', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Text color
+                <input
+                  aria-label="Widget text color"
+                  type="color"
+                  value={String(selected.settings.textColor ?? '#f7fafc')}
+                  onChange={(event) =>
+                    updateWidgetSetting(selected, 'textColor', event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Accent color
+                <input
+                  aria-label="Widget accent color"
+                  type="color"
+                  value={String(selected.settings.accentColor ?? '#45d6ff')}
+                  onChange={(event) =>
+                    updateWidgetSetting(selected, 'accentColor', event.target.value)
                   }
                 />
               </label>
@@ -684,6 +841,21 @@ export function App(): React.JSX.Element {
                 Visible
               </label>
               <button
+                onClick={() => {
+                  const copy = {
+                    ...selected,
+                    id: crypto.randomUUID(),
+                    x: Math.min(0.95, selected.x + 0.03),
+                    y: Math.min(0.95, selected.y + 0.03),
+                    settings: { ...selected.settings },
+                  };
+                  setScene((current) => ({ widgets: [...current.widgets, copy] }));
+                  setSelectedId(copy.id);
+                }}
+              >
+                Duplicate widget
+              </button>
+              <button
                 className="danger"
                 onClick={() => {
                   setScene((current) => ({
@@ -752,22 +924,123 @@ export function App(): React.JSX.Element {
             </div>
           )}
           <h2>Live telemetry</h2>
-          <dl>
-            <dt>Speed</dt>
-            <dd>
-              {telemetrySummary.speed === undefined
-                ? '—'
-                : `${telemetrySummary.speed.toFixed(1)} km/h`}
-            </dd>
-            <dt>RPM</dt>
-            <dd>{telemetrySummary.rpm === undefined ? '—' : Math.round(telemetrySummary.rpm)}</dd>
-            <dt>Heart rate</dt>
-            <dd>
-              {telemetrySummary.heartRate === undefined
-                ? '—'
-                : `${Math.round(telemetrySummary.heartRate)} BPM`}
-            </dd>
-          </dl>
+          <div className="live-list">
+            {liveTelemetry.map((item) => {
+              const value = session ? valueAt(session, item.channel, telemetryTime) : undefined;
+              return (
+                <details key={item.id} className="live-item">
+                  <summary>
+                    <span>{item.label || item.channel}</span>
+                    <strong>
+                      {value === undefined || !Number.isFinite(value)
+                        ? '—'
+                        : `${value.toFixed(item.decimals)}${item.unit ? ` ${item.unit}` : ''}`}
+                    </strong>
+                  </summary>
+                  <label className="channel-select">
+                    Source
+                    <select
+                      value={item.channel}
+                      disabled={!session}
+                      onChange={(event) =>
+                        setLiveTelemetry((current) =>
+                          current.map((entry) =>
+                            entry.id === item.id
+                              ? { ...entry, channel: event.target.value }
+                              : entry,
+                          ),
+                        )
+                      }
+                    >
+                      {!session && <option value={item.channel}>{item.channel}</option>}
+                      {session && !session.channels.has(item.channel) && (
+                        <option value={item.channel}>
+                          {item.label} (automatic:{' '}
+                          {session.aliases[item.channel as keyof typeof session.aliases] ??
+                            item.channel}
+                          )
+                        </option>
+                      )}
+                      {session &&
+                        [...session.channels.keys()].map((channel) => (
+                          <option key={channel} value={channel}>
+                            {channel}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    Label
+                    <input
+                      value={item.label}
+                      onChange={(event) =>
+                        setLiveTelemetry((current) =>
+                          current.map((entry) =>
+                            entry.id === item.id ? { ...entry, label: event.target.value } : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Unit
+                    <input
+                      value={item.unit}
+                      onChange={(event) =>
+                        setLiveTelemetry((current) =>
+                          current.map((entry) =>
+                            entry.id === item.id ? { ...entry, unit: event.target.value } : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Decimals
+                    <input
+                      type="number"
+                      min="0"
+                      max="6"
+                      value={item.decimals}
+                      onChange={(event) =>
+                        setLiveTelemetry((current) =>
+                          current.map((entry) =>
+                            entry.id === item.id
+                              ? {
+                                  ...entry,
+                                  decimals: Math.max(0, Math.min(6, Number(event.target.value))),
+                                }
+                              : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    className="danger compact"
+                    onClick={() =>
+                      setLiveTelemetry((current) => current.filter((entry) => entry.id !== item.id))
+                    }
+                  >
+                    Remove
+                  </button>
+                </details>
+              );
+            })}
+            <button
+              disabled={!session?.channels.size}
+              onClick={() => {
+                const channel = session ? [...session.channels.keys()][0] : undefined;
+                if (!channel) return;
+                setLiveTelemetry((current) => [
+                  ...current,
+                  { id: crypto.randomUUID(), channel, label: channel, unit: '', decimals: 1 },
+                ]);
+              }}
+            >
+              + Add live value
+            </button>
+          </div>
         </aside>
       </section>
       <footer>

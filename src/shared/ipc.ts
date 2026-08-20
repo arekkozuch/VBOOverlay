@@ -1,5 +1,6 @@
 import type {
   EnvironmentInfo,
+  MenuAction,
   MediaInfo,
   ProjectFile,
   SerializedTelemetrySession,
@@ -14,6 +15,9 @@ export interface OpenVboResult {
 export interface ProjectOpenResult {
   path: string;
   project: ProjectFile;
+  media?: MediaInfo;
+  telemetry?: OpenVboResult;
+  warnings: string[];
 }
 
 export interface FlappedEarApi {
@@ -23,6 +27,7 @@ export interface FlappedEarApi {
   openProject(): Promise<ProjectOpenResult | null>;
   saveProject(project: ProjectFile, path?: string): Promise<string | null>;
   autoSync(): Promise<SyncResult>;
+  onMenuAction(listener: (action: MenuAction) => void): () => void;
 }
 
 export const IPC = {
@@ -32,4 +37,5 @@ export const IPC = {
   openProject: 'project:open',
   saveProject: 'project:save',
   autoSync: 'telemetry:auto-sync',
+  menuAction: 'menu:action',
 } as const;

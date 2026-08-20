@@ -256,6 +256,10 @@ nav .export {
 .inspector label input[type='range'] {
   padding: 0;
 }
+.inspector label input[type='color'] {
+  height: 30px;
+  padding: 2px;
+}
 .inspector .channel-select {
   grid-template-columns: 1fr;
   gap: 4px;
@@ -294,6 +298,40 @@ nav .export {
   width: 100%;
   color: #ff8793;
   margin-top: 9px;
+}
+.danger.compact {
+  margin-top: 4px;
+  padding: 5px 8px;
+}
+.live-list {
+  display: grid;
+  gap: 7px;
+}
+.live-list > button {
+  width: 100%;
+}
+.live-item {
+  border: 1px solid #303843;
+  border-radius: 6px;
+  background: #101319;
+  padding: 7px;
+}
+.live-item summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.live-item summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8f9baa;
+}
+.live-item summary strong {
+  color: #e7edf4;
+  font-variant-numeric: tabular-nums;
 }
 .inspector dl {
   display: grid;
