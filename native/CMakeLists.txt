@@ -27,10 +27,22 @@ qt_add_resources(flappedear_core "flappedear_templates"
         resources/widget-templates.json
 )
 
+set(FLAPPEDEAR_PLATFORM_ICON)
+if(APPLE)
+    set(FLAPPEDEAR_APP_ICON resources/branding/FlappedEar.icns)
+    set_source_files_properties(${FLAPPEDEAR_APP_ICON} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+    list(APPEND FLAPPEDEAR_PLATFORM_ICON ${FLAPPEDEAR_APP_ICON})
+elseif(WIN32)
+    list(APPEND FLAPPEDEAR_PLATFORM_ICON resources/branding/app-icon.rc)
+endif()
+
 qt_add_executable(flappedear_native MACOSX_BUNDLE
     src/app/AppController.cpp
     src/app/AppController.h
     src/main.cpp
+    ${FLAPPEDEAR_PLATFORM_ICON}
 )
 target_compile_features(flappedear_native PRIVATE cxx_std_20)
 target_link_libraries(flappedear_native PRIVATE
@@ -43,6 +55,12 @@ target_link_libraries(flappedear_native PRIVATE
     Qt6::Multimedia
 )
 target_compile_options(flappedear_native PRIVATE -Wall -Wextra -Wpedantic)
+
+qt_add_resources(flappedear_native "flappedear_branding"
+    PREFIX "/flappedear"
+    FILES
+        resources/branding/app-logo.png
+)
 
 qt_add_qml_module(flappedear_native
     URI FlappedEar
@@ -67,6 +85,7 @@ set_target_properties(flappedear_native PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.flappedear.telemetry"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "0.2.0"
     MACOSX_BUNDLE_BUNDLE_VERSION "1"
+    MACOSX_BUNDLE_ICON_FILE "FlappedEar.icns"
     WIN32_EXECUTABLE TRUE
 )
 

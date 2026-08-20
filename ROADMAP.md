@@ -31,6 +31,7 @@ Current implementation status:
 - [x] Per-widget timed visibility cues with fade and entrance effects.
 - [x] GoPro GPS5/GPS9 GPMF extraction and automatic GPS-speed synchronization port.
 - [x] Removal of the obsolete Electron/React prototype and Node build chain.
+- [x] Custom telemetry branding and native macOS/Windows application icon assets.
 - [ ] HEVC export, progress, cancellation, and output validation.
 - [ ] Windows build and runtime validation.
 - [ ] Repeatable self-contained packaging below the agreed size budget; preliminary macOS dependency
@@ -71,7 +72,6 @@ Support recordings split by the camera into multiple MP4/MOV chunks as one conti
 
 ## Deferred distribution work
 
-- Custom application icon and platform branding.
 - macOS Developer ID signing and notarization.
 - Windows code signing.
 - Installers and automatic updates.

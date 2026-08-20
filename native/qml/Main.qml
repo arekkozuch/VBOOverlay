@@ -431,19 +431,12 @@ ApplicationWindow {
                 anchors.rightMargin: 18
                 spacing: 12
 
-                Rectangle {
+                Image {
                     width: 38
                     height: 38
-                    radius: 11
-                    color: "#55e6a5"
-                    Label {
-                        anchors.centerIn: parent
-                        text: "FE"
-                        color: "#07140f"
-                        font.family: "Helvetica Neue"
-                        font.pixelSize: 13
-                        font.weight: Font.Bold
-                    }
+                    source: "qrc:/flappedear/resources/branding/app-logo.png"
+                    fillMode: Image.PreserveAspectFit
+                    mipmap: true
                 }
                 ColumnLayout {
                     spacing: -1
@@ -1005,18 +998,12 @@ ApplicationWindow {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 12
-                Rectangle {
+                Image {
                     width: 46
                     height: 46
-                    radius: 14
-                    color: "#55e6a5"
-                    Label {
-                        anchors.centerIn: parent
-                        text: "FE"
-                        color: "#07140f"
-                        font.pixelSize: 15
-                        font.weight: Font.Bold
-                    }
+                    source: "qrc:/flappedear/resources/branding/app-logo.png"
+                    fillMode: Image.PreserveAspectFit
+                    mipmap: true
                 }
                 ColumnLayout {
                     spacing: -2

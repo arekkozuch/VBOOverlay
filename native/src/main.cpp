@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -12,6 +13,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("FlappedEar");
     QCoreApplication::setOrganizationDomain("flappedear.com");
     QCoreApplication::setApplicationName("FlappedEar Telemetry");
+    app.setWindowIcon(QIcon(QStringLiteral(":/flappedear/resources/branding/app-logo.png")));
     FlappedEar::AppController controller;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("appController", &controller);
