@@ -23,6 +23,7 @@ ApplicationWindow {
     palette.highlightedText: "#07140f"
 
     property bool fullScreenPreview: false
+    property int editorVisibility: Window.Windowed
     property bool welcomeVisible: !appController.videoName
     property int selectedWidgetIndex: -1
     property var selectedWidgetIndices: []
@@ -110,6 +111,11 @@ ApplicationWindow {
     ]
 
     onClosing: appController.saveWindowState(x, y, width, height)
+    onVisibilityChanged: {
+        const systemFullScreen = window.visibility === Window.FullScreen;
+        if (fullScreenPreview !== systemFullScreen)
+            fullScreenPreview = systemFullScreen;
+    }
 
     menuBar: MenuBar {
         Menu {
@@ -173,8 +179,20 @@ ApplicationWindow {
     }
 
     function toggleFullScreen() {
-        fullScreenPreview = !fullScreenPreview;
-        visibility = fullScreenPreview ? Window.FullScreen : Window.Windowed;
+        if (fullScreenPreview || visibility === Window.FullScreen)
+            exitFullScreen();
+        else
+            enterFullScreen();
+    }
+    function enterFullScreen() {
+        if (visibility !== Window.FullScreen)
+            editorVisibility = visibility === Window.Maximized ? Window.Maximized : Window.Windowed;
+        fullScreenPreview = true;
+        visibility = Window.FullScreen;
+    }
+    function exitFullScreen() {
+        fullScreenPreview = false;
+        visibility = editorVisibility === Window.Maximized ? Window.Maximized : Window.Windowed;
     }
     function formatTime(milliseconds) {
         const seconds = Math.max(0, milliseconds / 1000);
@@ -262,6 +280,12 @@ ApplicationWindow {
         return selectedWidgetIndex >= 0 && !!appController.widgetModel.widget(selectedWidgetIndex).groupId;
     }
 
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        enabled: window.fullScreenPreview || window.visibility === Window.FullScreen
+        onActivated: window.exitFullScreen()
+    }
     Shortcut {
         sequence: "Delete"
         context: Qt.WindowShortcut
@@ -825,6 +849,7 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 cursorShape: Qt.ArrowCursor
                                 onClicked: window.clearWidgetSelection()
+                                onDoubleClicked: window.toggleFullScreen()
                             }
                             ColumnLayout {
                                 anchors.centerIn: parent
@@ -874,6 +899,7 @@ ApplicationWindow {
                                 selectedIndex: window.selectedWidgetIndex
                                 selectedIndices: window.selectedWidgetIndices
                                 onSelectionRequested: (index, additive) => window.selectWidget(index, additive)
+                                onFullScreenRequested: window.toggleFullScreen()
                             }
                         }
                     }

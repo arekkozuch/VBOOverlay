@@ -7,6 +7,7 @@ Item {
     property int selectedIndex: -1
     property var selectedIndices: []
     signal selectionRequested(int index, bool additive)
+    signal fullScreenRequested
 
     Repeater {
         model: appController.widgetModel
@@ -1121,6 +1122,7 @@ Item {
                 drag.maximumX: root.width - widgetItem.width
                 drag.maximumY: root.height - widgetItem.height
                 onPressed: mouse => root.selectionRequested(widgetItem.index, !!(mouse.modifiers & Qt.ShiftModifier))
+                onDoubleClicked: root.fullScreenRequested()
                 onReleased: appController.widgetModel.moveWidget(widgetItem.index, widgetItem.x / root.width, widgetItem.y / root.height)
             }
             Rectangle {
