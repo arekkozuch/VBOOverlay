@@ -96,27 +96,30 @@ Rectangle {
                                 return appController.telemetrySeries(channelName, 0, root.durationSeconds, Math.max(100, Math.round(width * 1.5)));
                             }
 
-                            RowLayout {
+                            Item {
                                 anchors.fill: parent
-                                spacing: 6
 
-                                ColumnLayout {
-                                    Layout.preferredWidth: 126
-                                    Layout.fillHeight: true
+                                Column {
+                                    id: channelInfo
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(112, parent.width * 0.18)
                                     spacing: 0
                                     Label {
-                                        Layout.fillWidth: true
+                                        width: channelInfo.width
                                         text: chartRow.channelName
                                         color: chartRow.lineColor
                                         font.pixelSize: 9
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideMiddle
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 4
+                                    Row {
+                                        spacing: 5
                                         Label {
-                                            text: appController.valueText(chartRow.channelName, 2)
+                                            text: {
+                                                appController.playbackTime;
+                                                return appController.valueText(chartRow.channelName, 2);
+                                            }
                                             color: "#e4ebf3"
                                             font.family: "Menlo"
                                             font.pixelSize: 11
@@ -126,29 +129,32 @@ Rectangle {
                                             color: "#687789"
                                             font.pixelSize: 8
                                         }
-                                        Item {
-                                            Layout.fillWidth: true
-                                        }
-                                        Label {
-                                            text: "×"
-                                            color: removeMouse.containsMouse ? "#ff8090" : "#647386"
-                                            font.pixelSize: 13
-                                            MouseArea {
-                                                id: removeMouse
-                                                anchors.fill: parent
-                                                anchors.margins: -6
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: appController.toggleAnalysisChannel(chartRow.channelName)
-                                            }
-                                        }
+                                    }
+                                }
+                                Label {
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 1
+                                    text: "×"
+                                    color: removeMouse.containsMouse ? "#ff8090" : "#647386"
+                                    font.pixelSize: 11
+                                    MouseArea {
+                                        id: removeMouse
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: appController.toggleAnalysisChannel(chartRow.channelName)
                                     }
                                 }
 
                                 Item {
                                     id: plotArea
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
+                                    anchors.left: channelInfo.right
+                                    anchors.leftMargin: 8
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
 
                                     Canvas {
                                         id: chartCanvas
