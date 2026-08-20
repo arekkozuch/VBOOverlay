@@ -21,6 +21,8 @@
 - Use strict TypeScript and avoid `any`.
 - Keep Electron IPC typed and narrow. Never expose generic filesystem, shell, or process APIs.
 - Do not commit API keys, secrets, user paths, generated video, or build artifacts.
+- Finish every completed implementation or fix with a focused local commit and a descriptive commit
+  message. Do not push or synchronize it unless the user explicitly asks.
 - Add no unrelated dependencies. Verify current versions, compatibility, maintenance, and licenses first.
 - Do not implement roadmap features unless requested.
 - Do not claim functionality works without running the relevant command or integration fixture.
