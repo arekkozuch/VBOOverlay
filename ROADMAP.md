@@ -4,14 +4,13 @@ This file tracks agreed product work. It is intentionally separate from implemen
 
 ## Production platform: native desktop
 
-The Electron application is now a functional prototype and behavior reference. The production
-application will use **Qt 6 with C++ and QML** so macOS and Windows share one native codebase without
-shipping Chromium and Node.js.
+The application uses **Qt 6 with C++ and QML** so macOS and Windows share one native codebase. The
+earlier Electron prototype has been removed from the repository.
 
 Migration requirements:
 
-- Preserve the current VBO parsing, time-based interpolation, synchronization mathematics, and test
-  fixtures as behavioral specifications. The unused prototype widget/project schema may evolve.
+- Preserve VBO parsing, time-based interpolation, synchronization mathematics, and test fixtures as
+  behavioral specifications.
 - Use Qt Multimedia for preview and FFmpeg/FFprobe for media inspection and HEVC export where Qt's
   platform APIs are insufficient.
 - Render preview and export from the same native scene definitions.
@@ -21,7 +20,7 @@ Migration requirements:
 - Use a clean, versioned native `.fetproject` schema; pre-release prototype compatibility is not a
   requirement.
 
-Current native migration status:
+Current implementation status:
 
 - [x] Qt 6/CMake application and test targets.
 - [x] Time-based telemetry session, interpolation, sync transform, and VBO parser port.
@@ -31,6 +30,7 @@ Current native migration status:
 - [x] Persistent custom templates with import/export and multiple built-in use-case layouts.
 - [x] Per-widget timed visibility cues with fade and entrance effects.
 - [x] GoPro GPS5/GPS9 GPMF extraction and automatic GPS-speed synchronization port.
+- [x] Removal of the obsolete Electron/React prototype and Node build chain.
 - [ ] HEVC export, progress, cancellation, and output validation.
 - [ ] Windows build and runtime validation.
 - [ ] Repeatable self-contained packaging below the agreed size budget; preliminary macOS dependency

@@ -1,10 +1,5 @@
-node_modules/
-dist/
-dist-electron/
-release/
 build-native/
 native-dist/
-coverage/
 .DS_Store
 *.log
 *.mp4
@@ -13,6 +8,3 @@ coverage/
 /*.vbo
 /samples/*.vbo
 *.rcz
-.env
-.env.*
-!.env.example
