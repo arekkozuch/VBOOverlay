@@ -24,7 +24,7 @@
 - Do not implement roadmap features unless requested.
 - Do not claim functionality works without running the relevant command or integration fixture.
 - Preserve ordinary video import when GoPro metadata is absent or malformed.
-- Treat VFR as a timing concern and warn until a validated VFR export exists.
+- Treat VFR as a timing concern: warn about input cadence and preserve the validated CFR conversion policy.
 
 ## Safety and correctness invariants
 
@@ -38,6 +38,8 @@
   `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
   safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
+- Final exports are CFR at one authoritative rational export rate. Preserve that exact rate across
+  overlay staging, source conversion, progress, and validation; do not reconstruct it from doubles.
 - Cloud CI is intentionally disabled. Local build/tests are the current required gate, and real-media
   validation must be reported separately from synthetic tests.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke

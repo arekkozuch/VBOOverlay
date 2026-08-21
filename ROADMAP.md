@@ -16,8 +16,8 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 
 ## Correctness / release hardening
 
-- [ ] Define and enforce an explicit final CFR/VFR policy. The final composition is currently timestamp-driven; it does not explicitly force CFR.
-- [ ] Expand final-media validation, including VFR behavior and non-zero audio start times.
+- [x] Enforce final CFR at the effective rational export rate, including deterministic VFR-to-CFR, non-zero range, and audio-timeline coverage.
+- [ ] Expand final-media validation across a broader real-media matrix.
 - [ ] Validate rotation, sample aspect ratio, color, HDR, and 10-bit media policy.
 - [ ] Establish process-tree termination guarantees for FFmpeg/ffprobe.
 - [ ] Add disk-space preflight and temporary-file management policy.

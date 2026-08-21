@@ -55,4 +55,4 @@ Each source operation begins a new source generation and uses normalized source 
 
 `MediaProbe` reads source and output metadata; `EncoderDetector` tests usable HEVC encoders; `TelemetryFrameRenderer` mounts `TelemetryScene.qml` offscreen through `QQuickRenderControl` and QRhi; and `ExportEngine` runs the two-stage FFmpeg pipeline. `ExportOutputTransaction` creates and owns a same-directory staging output, validates it through the worker, and commits it to the selected target only after success.
 
-The detailed pipeline and its current timing limitation are in [export-pipeline.md](export-pipeline.md). Target-file transaction guarantees are in [export-output-safety.md](export-output-safety.md).
+The detailed pipeline and timing contract are in [export-pipeline.md](export-pipeline.md). Target-file transaction guarantees are in [export-output-safety.md](export-output-safety.md).

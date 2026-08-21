@@ -13,7 +13,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates.
 - Synchronized telemetry analysis, including charts and a track view.
-- HEVC/AAC MP4 export, optional custom source ranges, progress, cancellation, and verbose diagnostics.
+- CFR HEVC/AAC MP4 export at the effective rational export rate, optional custom source ranges, progress, cancellation, and verbose diagnostics.
 - Asynchronous video/VBO loading, transactional project loading, and stale asynchronous-result rejection.
 - Crash-safe export-output handling and atomic project saving.
 
@@ -51,7 +51,7 @@ Telemetry has strict no-data semantics: public lookup never returns `NaN` or inf
 
 ## Export
 
-Export stages a frame-cadenced telemetry overlay before timestamp-driven final composition, and it validates the staged overlay and final MP4 before committing the target file. See [docs/export-pipeline.md](docs/export-pipeline.md) and [docs/export-output-safety.md](docs/export-output-safety.md).
+Export stages a frame-cadenced telemetry overlay, converts the source onto that same CFR cadence before composition, and validates the staged overlay and final MP4 before committing the target file. See [docs/export-pipeline.md](docs/export-pipeline.md) and [docs/export-output-safety.md](docs/export-output-safety.md).
 
 ## Private integration tests
 
@@ -67,7 +67,6 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 
 ## Current limitations
 
-- Final CFR enforcement and VFR-output validation are incomplete; VFR-looking inputs are warned about.
 - Windows runtime validation is pending.
 - Packaging and signing are pending.
 - A source currently contains one video file; multi-chapter timelines are not implemented.

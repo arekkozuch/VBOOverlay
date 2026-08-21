@@ -29,8 +29,8 @@ Private VBO and GoPro media are ignored by Git and must remain local. A VBO-only
 - GPS9 GPMF decoding and malformed-GPMF handling.
 - Widget, group, cue, template, and track-geometry behavior.
 - Project atomic-save behavior, dirty-state actions, failed async source loads, and transactional project loading.
-- Export-output transaction safety, export progress/diagnostics parsing, media probing, and HEVC encoder detection.
-- Synthetic FFmpeg integrations for non-zero-range composition and completed-overlay frame identity.
+- Export-output transaction safety, export progress/diagnostics parsing, media probing, exact rational rate comparison, and HEVC encoder detection.
+- Synthetic FFmpeg integrations for non-zero-range video/audio timelines, non-zero source stream PTS, VFR-to-CFR conversion, CFR packet/frame counts, and completed-overlay frame identity.
 
 Unit and synthetic integration tests do not replace manual real-media validation. The latter should identify the fixture class, platform, source range, output properties, and any untested behavior.
 
