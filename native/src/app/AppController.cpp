@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QTimer>
 #include <QtConcurrent>
 #include <QtGlobal>
 #include <cmath>
@@ -72,6 +73,24 @@ AppController::AppController(QObject *parent)
                       .arg(result.gpsSampleCount));
     });
     restoreSources();
+}
+
+AppController::~AppController()
+{
+    if (!exporting()) {
+        return;
+    }
+    QFile cancellationFile(m_exportCancelPath);
+    if (cancellationFile.open(QIODevice::WriteOnly)) {
+        cancellationFile.close();
+    }
+    m_exportProcess->terminate();
+    if (!m_exportProcess->waitForFinished(5'000)) {
+        m_exportProcess->kill();
+        m_exportProcess->waitForFinished(5'000);
+    }
+    QFile::remove(m_exportProgressInfo.value("outputPath").toString());
+    QFile::remove(m_exportCancelPath);
 }
 
 QUrl AppController::videoSource() const { return m_videoSource; }
@@ -505,9 +524,6 @@ bool AppController::startExport(
     m_exportProgressVisible = true;
     m_exportState = QStringLiteral("starting");
     m_exportProcess = std::make_unique<QProcess>(this);
-    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("QT_QUICK_BACKEND"), QStringLiteral("software"));
-    m_exportProcess->setProcessEnvironment(environment);
     m_exportProcess->setProcessChannelMode(QProcess::SeparateChannels);
     connect(m_exportProcess.get(), &QProcess::readyReadStandardOutput, this, &AppController::handleExportOutput);
     connect(
@@ -546,6 +562,31 @@ void AppController::cancelExport()
     m_exportState = QStringLiteral("cancelling");
     m_exportProgressInfo.insert("stage", QStringLiteral("cancelling"));
     emit exportChanged();
+}
+
+void AppController::cancelExportAndQuit()
+{
+    if (!exporting()) {
+        QCoreApplication::quit();
+        return;
+    }
+    m_quitAfterExport = true;
+    cancelExport();
+    // A worker that cannot react to the cancellation file must not keep the
+    // application alive indefinitely. Its process teardown also terminates
+    // its FFmpeg child.
+    QTimer::singleShot(7'000, this, [this] {
+        if (!exporting()) {
+            return;
+        }
+        m_exportProcess->terminate();
+        QTimer::singleShot(3'000, this, [this] {
+            if (exporting()) {
+                m_exportProcess->kill();
+                QFile::remove(m_exportProgressInfo.value("outputPath").toString());
+            }
+        });
+    });
 }
 
 void AppController::dismissExportProgress()
@@ -607,6 +648,11 @@ void AppController::handleExportOutput()
                 {"elapsedMilliseconds", event.value("elapsedMilliseconds").toInteger()},
                 {"renderMilliseconds", event.value("renderMilliseconds").toInteger()},
                 {"renderNanoseconds", event.value("renderNanoseconds").toInteger()},
+                {"polishNanoseconds", event.value("polishNanoseconds").toInteger()},
+                {"syncRenderNanoseconds", event.value("syncRenderNanoseconds").toInteger()},
+                {"readbackNanoseconds", event.value("readbackNanoseconds").toInteger()},
+                {"cpuCopyNanoseconds", event.value("cpuCopyNanoseconds").toInteger()},
+                {"ffmpegWriteNanoseconds", event.value("ffmpegWriteNanoseconds").toInteger()},
                 {"renderedFrames", event.value("renderedFrames").toInteger()},
             };
         }
@@ -643,6 +689,9 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
     m_exportProcess.reset();
     m_exportConfig.reset();
     emit exportChanged();
+    if (m_quitAfterExport) {
+        QCoreApplication::quit();
+    }
 }
 
 void AppController::saveWindowState(const int x, const int y, const int width, const int height)

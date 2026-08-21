@@ -110,11 +110,34 @@ ApplicationWindow {
         }
     ]
 
-    onClosing: appController.saveWindowState(x, y, width, height)
+    onClosing: close => {
+        if (appController.exporting) {
+            close.accepted = false
+            exportQuitDialog.open()
+            return
+        }
+        appController.saveWindowState(x, y, width, height)
+    }
     onVisibilityChanged: {
         const systemFullScreen = window.visibility === Window.FullScreen;
         if (fullScreenPreview !== systemFullScreen)
             fullScreenPreview = systemFullScreen;
+    }
+
+    Dialog {
+        id: exportQuitDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Export is still running")
+        standardButtons: Dialog.Yes | Dialog.No
+        contentItem: Label {
+            width: 330
+            text: qsTr("Cancel export and quit?")
+            wrapMode: Text.WordWrap
+            color: "#e8edf4"
+        }
+        onAccepted: appController.cancelExportAndQuit()
     }
 
     menuBar: MenuBar {

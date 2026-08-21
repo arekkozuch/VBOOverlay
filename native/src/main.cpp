@@ -68,7 +68,54 @@ int exportTest(const QString &inputPath, const QString &outputPath)
         qCritical().noquote() << result.error;
         return EXIT_FAILURE;
     }
-    qInfo().noquote() << QStringLiteral("HEVC export completed: %1 frames.").arg(result.renderedFrames);
+    qInfo().noquote() << QStringLiteral(
+        "HEVC export completed: %1 frames in %2 ms (%3 fps); render=%4 ms, polish=%5 ms, "
+        "syncRender=%6 ms, readback=%7 ms, cpuCopy=%8 ms, ffmpegWrite=%9 ms.")
+                             .arg(result.renderedFrames).arg(result.elapsedMilliseconds)
+                             .arg(result.renderedFrames * 1000.0 / qMax<qint64>(1, result.elapsedMilliseconds), 0, 'f', 2)
+                             .arg(result.renderMilliseconds)
+                             .arg(result.polishNanoseconds / 1'000'000)
+                             .arg(result.syncRenderNanoseconds / 1'000'000)
+                             .arg(result.readbackNanoseconds / 1'000'000)
+                             .arg(result.cpuCopyNanoseconds / 1'000'000)
+                             .arg(result.ffmpegWriteNanoseconds / 1'000'000);
+    return EXIT_SUCCESS;
+}
+
+int benchmarkRender(const QSize size, const int frames)
+{
+    const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parse(
+        u"[column names]\ntime speed\n[data]\n0 0\n10 100");
+    FlappedEar::WidgetModel widgets;
+    widgets.resetDefaults();
+    FlappedEar::TelemetryFrameRenderer renderer;
+    if (!renderer.initialize(&widgets, &session, nullptr, FlappedEar::SyncTransform{}, size)) {
+        qCritical().noquote() << renderer.errorString();
+        return EXIT_FAILURE;
+    }
+    QElapsedTimer elapsed;
+    elapsed.start();
+    for (int frame = 0; frame < frames; ++frame) {
+        if (renderer.renderFrame(static_cast<double>(frame) / 60.0).isNull()) {
+            qCritical().noquote() << renderer.errorString();
+            return EXIT_FAILURE;
+        }
+    }
+    const auto metrics = renderer.timingMetrics();
+    const double milliseconds = elapsed.nsecsElapsed() / 1'000'000.0;
+    const auto perFrame = [frames](const qint64 nanoseconds) {
+        return nanoseconds / 1'000'000.0 / qMax(1, frames);
+    };
+    qInfo().noquote() << QStringLiteral(
+        "Renderer benchmark: backend=Qt Quick RHI graphicsApi=%1 resolution=%2x%3 frames=%4 "
+        "elapsedMs=%5 fps=%6 totalMsPerFrame=%7 polishMsPerFrame=%8 syncRenderMsPerFrame=%9 readbackMsPerFrame=%10")
+                             .arg(renderer.graphicsApiName()).arg(size.width()).arg(size.height())
+                             .arg(frames).arg(milliseconds, 0, 'f', 1)
+                             .arg(frames * 1000.0 / milliseconds, 0, 'f', 2)
+                             .arg(milliseconds / frames, 0, 'f', 2)
+                             .arg(perFrame(metrics.polishNanoseconds), 0, 'f', 2)
+                             .arg(perFrame(metrics.syncRenderNanoseconds), 0, 'f', 2)
+                             .arg(perFrame(metrics.readbackNanoseconds), 0, 'f', 2);
     return EXIT_SUCCESS;
 }
 
@@ -166,6 +213,11 @@ int exportWorker(const QString &configPath)
                           {"elapsedMilliseconds", result.elapsedMilliseconds},
                           {"renderMilliseconds", result.renderMilliseconds},
                           {"renderNanoseconds", result.renderNanoseconds},
+                          {"polishNanoseconds", result.polishNanoseconds},
+                          {"syncRenderNanoseconds", result.syncRenderNanoseconds},
+                          {"readbackNanoseconds", result.readbackNanoseconds},
+                          {"cpuCopyNanoseconds", result.cpuCopyNanoseconds},
+                          {"ffmpegWriteNanoseconds", result.ffmpegWriteNanoseconds},
                           {"renderedFrames", static_cast<qint64>(result.renderedFrames)}});
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
@@ -182,7 +234,8 @@ int main(int argc, char *argv[])
     const bool renderStillMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--render-still";
     const bool exportTestMode = argc == 4 && QString::fromLocal8Bit(argv[1]) == "--export-test";
     const bool exportWorkerMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--export-worker";
-    if (renderStillMode || exportTestMode || exportWorkerMode) {
+    const bool benchmarkRenderMode = argc == 5 && QString::fromLocal8Bit(argv[1]) == "--benchmark-render";
+    if (qEnvironmentVariableIntValue("FLAPPEDEAR_EXPORT_SOFTWARE") == 1) {
         qputenv("QT_QUICK_BACKEND", "software");
     }
     QQuickStyle::setStyle(QStringLiteral("Basic"));
@@ -199,6 +252,19 @@ int main(int argc, char *argv[])
     }
     if (exportWorkerMode) {
         return exportWorker(QString::fromLocal8Bit(argv[2]));
+    }
+    if (benchmarkRenderMode) {
+        bool widthOk = false;
+        bool heightOk = false;
+        bool framesOk = false;
+        const int width = QString::fromLocal8Bit(argv[2]).toInt(&widthOk);
+        const int height = QString::fromLocal8Bit(argv[3]).toInt(&heightOk);
+        const int frames = QString::fromLocal8Bit(argv[4]).toInt(&framesOk);
+        if (!widthOk || !heightOk || !framesOk || width <= 0 || height <= 0 || frames <= 0) {
+            qCritical() << "Usage: --benchmark-render <width> <height> <frames>";
+            return EXIT_FAILURE;
+        }
+        return benchmarkRender(QSize(width, height), frames);
     }
     FlappedEar::AppController controller;
     QQmlApplicationEngine engine;

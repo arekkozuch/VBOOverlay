@@ -63,6 +63,7 @@ class AppController final : public QObject {
 
 public:
     explicit AppController(QObject *parent = nullptr);
+    ~AppController() override;
 
     [[nodiscard]] QUrl videoSource() const;
     [[nodiscard]] QString videoName() const;
@@ -125,6 +126,7 @@ public:
         double rangeStart,
         double rangeEnd);
     Q_INVOKABLE void cancelExport();
+    Q_INVOKABLE void cancelExportAndQuit();
     Q_INVOKABLE void dismissExportProgress();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
@@ -194,6 +196,7 @@ private:
     QVariantMap m_exportMetrics;
     QVariantMap m_exportProgressInfo;
     bool m_exportProgressVisible = false;
+    bool m_quitAfterExport = false;
     QVariantMap m_syncCandidate;
     QStringList m_analysisChannels;
     bool m_analysisVisible = true;

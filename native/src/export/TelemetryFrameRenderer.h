@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QSize>
 #include <QString>
+#include <QtTypes>
 #include <memory>
 
 class QQmlEngine;
@@ -20,6 +21,13 @@ class WidgetModel;
 // QML/scene-graph objects themselves.
 class TelemetryFrameRenderer final {
 public:
+    struct TimingMetrics {
+        qsizetype frames = 0;
+        qint64 polishNanoseconds = 0;
+        qint64 syncRenderNanoseconds = 0;
+        qint64 readbackNanoseconds = 0;
+    };
+
     TelemetryFrameRenderer();
     ~TelemetryFrameRenderer();
 
@@ -34,13 +42,17 @@ public:
         QSize outputSize);
     [[nodiscard]] QImage renderFrame(double sourceVideoTime);
     [[nodiscard]] QString errorString() const;
+    [[nodiscard]] QString graphicsApiName() const;
+    [[nodiscard]] TimingMetrics timingMetrics() const;
 
 private:
+    class Impl;
+
     TelemetryRenderContext m_context;
     QSize m_outputSize;
     QString m_error;
     std::unique_ptr<QQmlEngine> m_engine;
-    std::unique_ptr<QQuickWindow> m_window;
+    std::unique_ptr<Impl> m_impl;
     QQuickItem *m_rootItem = nullptr;
 };
 

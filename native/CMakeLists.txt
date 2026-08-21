@@ -1,4 +1,4 @@
-find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Qml Quick QuickControls2 Multimedia Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui GuiPrivate Qml Quick QuickControls2 Multimedia Test)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -41,6 +41,9 @@ qt_add_library(flappedear_core STATIC
 target_compile_features(flappedear_core PUBLIC cxx_std_20)
 target_include_directories(flappedear_core PUBLIC src)
 target_link_libraries(flappedear_core PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+# QRhi is a Qt Gui private API. Keep it implementation-only: no public headers
+# in flappedear_core expose QRhi types.
+target_link_libraries(flappedear_core PRIVATE Qt6::GuiPrivate)
 flappedear_enable_warnings(flappedear_core)
 
 qt_add_resources(flappedear_core "flappedear_templates"

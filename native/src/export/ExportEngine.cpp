@@ -16,14 +16,18 @@ namespace {
 
 QByteArray rgbaBytes(const QImage &image, const QSize &size)
 {
-    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
-    QByteArray bytes;
-    bytes.reserve(size.width() * size.height() * 4);
-    for (int row = 0; row < size.height(); ++row) {
-        bytes.append(
-            reinterpret_cast<const char *>(rgba.constScanLine(row)), size.width() * 4);
+    if (image.format() == QImage::Format_RGBA8888 && image.size() == size
+        && image.bytesPerLine() == size.width() * 4) {
+        return QByteArray::fromRawData(
+            reinterpret_cast<const char *>(image.constBits()), size.width() * size.height() * 4);
     }
-    return bytes;
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    QByteArray packed(size.width() * size.height() * 4, Qt::Uninitialized);
+    char *destination = packed.data();
+    for (int row = 0; row < size.height(); ++row) {
+        memcpy(destination + row * size.width() * 4, rgba.constScanLine(row), size.width() * 4);
+    }
+    return packed;
 }
 
 QString rateString(const MediaRational &rate)
@@ -168,7 +172,12 @@ ExportResult ExportEngine::exportVideo(
                 ffmpeg.waitForFinished();
                 return result;
             }
+            QElapsedTimer copyTimer;
+            copyTimer.start();
             const QByteArray bytes = rgbaBytes(image, outputSize);
+            result.cpuCopyNanoseconds += copyTimer.nsecsElapsed();
+            QElapsedTimer writeTimer;
+            writeTimer.start();
             if (ffmpeg.write(bytes) != bytes.size() || !ffmpeg.waitForBytesWritten(30'000)) {
                 result.error = QStringLiteral("Could not stream overlay frame to FFmpeg: %1")
                                    .arg(ffmpeg.errorString());
@@ -176,6 +185,7 @@ ExportResult ExportEngine::exportVideo(
                 ffmpeg.waitForFinished();
                 return result;
             }
+            result.ffmpegWriteNanoseconds += writeTimer.nsecsElapsed();
             ++result.renderedFrames;
             if (settings.progressCallback
                 && !settings.progressCallback(result.renderedFrames, frames, presentationTime)) {
@@ -217,6 +227,10 @@ ExportResult ExportEngine::exportVideo(
             return result;
         }
         result.success = true;
+        const TelemetryFrameRenderer::TimingMetrics rendererMetrics = renderer.timingMetrics();
+        result.polishNanoseconds = rendererMetrics.polishNanoseconds;
+        result.syncRenderNanoseconds = rendererMetrics.syncRenderNanoseconds;
+        result.readbackNanoseconds = rendererMetrics.readbackNanoseconds;
     } catch (const std::exception &error) {
         result.error = QString::fromUtf8(error.what());
     }

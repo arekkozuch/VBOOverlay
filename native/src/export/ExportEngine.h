@@ -34,6 +34,11 @@ struct ExportResult {
     qint64 elapsedMilliseconds = 0;
     qint64 renderMilliseconds = 0;
     qint64 renderNanoseconds = 0;
+    qint64 polishNanoseconds = 0;
+    qint64 syncRenderNanoseconds = 0;
+    qint64 readbackNanoseconds = 0;
+    qint64 cpuCopyNanoseconds = 0;
+    qint64 ffmpegWriteNanoseconds = 0;
     bool cancelled = false;
 };
 
