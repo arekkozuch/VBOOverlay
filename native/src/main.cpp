@@ -107,7 +107,8 @@ int exportWorker(const QString &configPath)
         settings.outputPath = config.value("outputPath").toString();
         settings.outputSize = input.videoSize;
         settings.frameRate = input.averageFrameRate;
-        settings.endTime = input.duration;
+        settings.startTime = config.value("startTime").toDouble();
+        settings.endTime = config.value("endTime").toDouble(input.duration);
         settings.quality = config.value("quality").toString("high");
         settings.audioEnabled = config.value("audioEnabled").toBool(true);
         settings.cancellationFilePath = config.value("cancelPath").toString();
@@ -133,7 +134,11 @@ int exportWorker(const QString &configPath)
             return EXIT_FAILURE;
         }
         writeExportEvent({{"state", "finished"}, {"current", static_cast<qint64>(result.renderedFrames)},
-                          {"total", static_cast<qint64>(result.renderedFrames)}});
+                          {"total", static_cast<qint64>(result.renderedFrames)},
+                          {"elapsedMilliseconds", result.elapsedMilliseconds},
+                          {"renderMilliseconds", result.renderMilliseconds},
+                          {"renderNanoseconds", result.renderNanoseconds},
+                          {"renderedFrames", static_cast<qint64>(result.renderedFrames)}});
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         writeExportEvent(

@@ -47,6 +47,7 @@ private slots:
     void probesMediaInfoJson();
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
+    void preservesAbsoluteExportTimestamps();
     void syncsOptionalRealRecording();
 };
 
@@ -465,6 +466,28 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QCOMPARE(ExportEngine::frameCount(120.0, 140.0, {30'000, 1001}), qsizetype(600));
     QCOMPARE(ExportEngine::frameCount(0.0, 1.0, {60'000, 1001}), qsizetype(60));
     QCOMPARE(ExportEngine::frameCount(1.0, 1.0, {30, 1}), qsizetype(0));
+}
+
+void TelemetryTests::preservesAbsoluteExportTimestamps()
+{
+    const MediaRational rate{30'000, 1001};
+    QCOMPARE(ExportEngine::framePresentationTime(120.0, 0, rate), 120.0);
+    QVERIFY(qAbs(ExportEngine::framePresentationTime(120.0, 300, rate) - 130.01) < 0.000001);
+    const SyncTransform sync{90.203, 1.0};
+    TelemetrySession session;
+    session.channels.insert(
+        "speed", TelemetryChannel{"speed", {}, {210.203, 215.203}, {73.4F, 101.2F}});
+    session.channels.insert(
+        "rpm", TelemetryChannel{"rpm", {}, {210.203, 215.203}, {3842.0F, 5270.0F}});
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    context.setSyncTransform(sync);
+    context.setTime(ExportEngine::framePresentationTime(120.0, 0, rate));
+    QVERIFY(qAbs(context.telemetryTime() - 210.203) < 0.000001);
+    QVERIFY(qAbs(context.telemetryValue("speed").toDouble() - 73.4) < 0.001);
+    context.setTime(125.0);
+    QVERIFY(qAbs(context.telemetryTime() - 215.203) < 0.000001);
+    QVERIFY(qAbs(context.telemetryValue("rpm").toDouble() - 5270.0) < 0.001);
 }
 
 void TelemetryTests::decodesGps9Gpmf()

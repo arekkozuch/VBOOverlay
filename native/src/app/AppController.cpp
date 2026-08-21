@@ -89,6 +89,29 @@ bool AppController::exporting() const { return m_exportProcess && m_exportProces
 int AppController::exportProgress() const { return m_exportProgress; }
 QString AppController::exportState() const { return m_exportState; }
 QString AppController::exportError() const { return m_exportError; }
+QVariantMap AppController::exportSourceInfo() const
+{
+    if (!m_exportSourceInfo.videoSize.isValid()) {
+        return {};
+    }
+    const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate
+        : m_exportSourceInfo.frameRate;
+    return {
+        {"width", m_exportSourceInfo.videoSize.width()},
+        {"height", m_exportSourceInfo.videoSize.height()},
+        {"duration", m_exportSourceInfo.duration},
+        {"frameRate", rate.value()},
+        {"frameRateText", QStringLiteral("%1/%2 (%3 fps)")
+                              .arg(rate.numerator)
+                              .arg(rate.denominator)
+                              .arg(rate.value(), 0, 'f', 3)},
+        {"videoCodec", m_exportSourceInfo.videoCodec},
+        {"audioCodecs", m_exportSourceInfo.audioCodecs.join(QStringLiteral(", "))},
+        {"likelyVariableFrameRate", m_exportSourceInfo.likelyVariableFrameRate},
+    };
+}
+QVariantMap AppController::exportMetrics() const { return m_exportMetrics; }
 QVariantMap AppController::syncCandidate() const { return m_syncCandidate; }
 QVariant AppController::speed() const { return semanticValue("speed"); }
 QVariant AppController::rpm() const { return semanticValue("rpm"); }
@@ -123,6 +146,7 @@ void AppController::loadVideo(const QUrl &url)
         return;
     }
     m_videoSource = QUrl::fromLocalFile(info.absoluteFilePath());
+    probeExportSource();
     m_syncCandidate.clear();
     m_settings.setValue("sources/video", info.absoluteFilePath());
     emit videoSourceChanged();
@@ -162,6 +186,8 @@ void AppController::loadVbo(const QUrl &url)
 void AppController::clearProject()
 {
     m_videoSource = QUrl();
+    m_exportSourceInfo = {};
+    m_exportMetrics.clear();
     m_telemetryPath.clear();
     m_session.reset();
     m_trackGeometry = {};
@@ -396,11 +422,16 @@ void AppController::ignoreSyncCandidate()
     setStatus("Synchronization candidate ignored; existing timing was retained.");
 }
 
-void AppController::startExport(
-    const QUrl &output, const QString &quality, const bool audioEnabled)
+bool AppController::startExport(
+    const QUrl &output,
+    const QString &quality,
+    const bool audioEnabled,
+    const bool customRange,
+    const double rangeStart,
+    const double rangeEnd)
 {
     if (exporting()) {
-        return;
+        return false;
     }
     const QString inputPath = m_videoSource.toLocalFile();
     const QString outputPath = output.toLocalFile();
@@ -408,7 +439,23 @@ void AppController::startExport(
         m_exportError = QStringLiteral("Open a video and VBO telemetry, then choose an output file.");
         m_exportState = QStringLiteral("failed");
         emit exportChanged();
-        return;
+        return false;
+    }
+    if (!m_exportSourceInfo.videoSize.isValid()) {
+        probeExportSource();
+    }
+    const double sourceDuration = m_exportSourceInfo.duration;
+    const double startTime = customRange ? rangeStart : 0.0;
+    const double endTime = customRange ? rangeEnd : sourceDuration;
+    if (!std::isfinite(sourceDuration) || sourceDuration <= 0.0 || !std::isfinite(startTime)
+        || !std::isfinite(endTime) || startTime < 0.0 || endTime <= startTime
+        || endTime > sourceDuration) {
+        m_exportError = QStringLiteral(
+            "Export range must satisfy 0 ≤ start < end ≤ source duration (%1 s).")
+                            .arg(sourceDuration, 0, 'f', 3);
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return false;
     }
     m_exportConfig = std::make_unique<QTemporaryFile>(
         QDir::temp().filePath(QStringLiteral("flappedear-export-XXXXXX.json")));
@@ -416,7 +463,7 @@ void AppController::startExport(
         m_exportError = QStringLiteral("Could not create temporary export configuration.");
         m_exportState = QStringLiteral("failed");
         emit exportChanged();
-        return;
+        return false;
     }
     m_exportCancelPath = m_exportConfig->fileName() + QStringLiteral(".cancel");
     QFile::remove(m_exportCancelPath);
@@ -428,6 +475,8 @@ void AppController::startExport(
         {"sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}}},
         {"quality", quality},
         {"audioEnabled", audioEnabled},
+        {"startTime", startTime},
+        {"endTime", endTime},
         {"cancelPath", m_exportCancelPath},
     };
     if (m_exportConfig->write(QJsonDocument(config).toJson(QJsonDocument::Compact)) < 0) {
@@ -435,7 +484,7 @@ void AppController::startExport(
         m_exportState = QStringLiteral("failed");
         m_exportConfig.reset();
         emit exportChanged();
-        return;
+        return false;
     }
     m_exportConfig->flush();
     // The worker is a separate process; closing before it starts avoids a
@@ -445,6 +494,7 @@ void AppController::startExport(
     m_exportStdout.clear();
     m_exportProgress = 0;
     m_exportError.clear();
+    m_exportMetrics.clear();
     m_exportState = QStringLiteral("starting");
     m_exportProcess = std::make_unique<QProcess>(this);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -465,8 +515,11 @@ void AppController::startExport(
         m_exportState = QStringLiteral("failed");
         m_exportProcess.reset();
         m_exportConfig.reset();
+        emit exportChanged();
+        return false;
     }
     emit exportChanged();
+    return true;
 }
 
 void AppController::cancelExport()
@@ -501,14 +554,28 @@ void AppController::handleExportOutput()
         if (!state.isEmpty()) {
             m_exportState = state;
         }
-        if (event.contains("current") && event.value("total").toInt() > 0) {
+        if (state == "rendering" && event.contains("current") && event.value("total").toInt() > 0) {
+            // Rendering is the dominant step, but validation still has to pass
+            // before the UI is allowed to show completion.
             m_exportProgress = qBound(
                 0,
-                qRound(100.0 * event.value("current").toDouble() / event.value("total").toDouble()),
-                100);
+                qRound(90.0 * event.value("current").toDouble() / event.value("total").toDouble()),
+                90);
+        } else if (state == "encoding") {
+            m_exportProgress = qMax(m_exportProgress, 92);
+        } else if (state == "validating") {
+            m_exportProgress = qMax(m_exportProgress, 96);
         }
         if (event.contains("error")) {
             m_exportError = event.value("error").toString();
+        }
+        if (event.contains("elapsedMilliseconds")) {
+            m_exportMetrics = {
+                {"elapsedMilliseconds", event.value("elapsedMilliseconds").toInteger()},
+                {"renderMilliseconds", event.value("renderMilliseconds").toInteger()},
+                {"renderNanoseconds", event.value("renderNanoseconds").toInteger()},
+                {"renderedFrames", event.value("renderedFrames").toInteger()},
+            };
         }
         emit exportChanged();
     }
@@ -672,6 +739,7 @@ void AppController::restoreSources()
     const QString videoPath = m_settings.value("sources/video").toString();
     if (QFileInfo::exists(videoPath)) {
         m_videoSource = QUrl::fromLocalFile(videoPath);
+        probeExportSource();
     }
     const QString vboPath = m_settings.value("sources/vbo").toString();
     if (!QFileInfo::exists(vboPath)) {
@@ -693,6 +761,20 @@ void AppController::restoreSources()
     } catch (const std::exception &error) {
         m_statusText = QStringLiteral("Could not restore VBO: %1").arg(error.what());
     }
+}
+
+void AppController::probeExportSource()
+{
+    m_exportSourceInfo = {};
+    if (m_videoSource.isEmpty()) {
+        return;
+    }
+    try {
+        m_exportSourceInfo = MediaProbe::probe(m_videoSource.toLocalFile());
+    } catch (const std::exception &) {
+        // Video playback/import must remain available without FFmpeg tooling.
+    }
+    emit exportChanged();
 }
 
 void AppController::reconcileAnalysisChannels()

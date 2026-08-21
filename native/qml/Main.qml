@@ -384,6 +384,11 @@ ApplicationWindow {
         width: 470
         anchors.centerIn: parent
         property url outputFile
+        onOpened: {
+            const duration = Number(appController.exportSourceInfo.duration || 0);
+            exportRangeStart.text = "0.000";
+            exportRangeEnd.text = duration.toFixed(3);
+        }
         background: Rectangle {
             radius: 14
             color: "#0d141d"
@@ -395,6 +400,31 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: qsTr("Source resolution and frame rate are preserved. Audio is encoded to AAC when present.")
                 color: "#8b98a8"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 11
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: Object.keys(appController.exportSourceInfo).length > 0
+                text: qsTr("Source: %1×%2 · %3\n%4 · %5\n%6")
+                    .arg(appController.exportSourceInfo.width)
+                    .arg(appController.exportSourceInfo.height)
+                    .arg(appController.exportSourceInfo.frameRateText)
+                    .arg(appController.exportSourceInfo.videoCodec)
+                    .arg(appController.exportSourceInfo.audioCodecs.length > 0
+                         ? qsTr("Audio: %1").arg(appController.exportSourceInfo.audioCodecs)
+                         : qsTr("No audio stream"))
+                    .arg(qsTr("Duration: %1 s").arg(Number(appController.exportSourceInfo.duration || 0).toFixed(3)))
+                color: "#b5c0cd"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 11
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: appController.exportSourceInfo.likelyVariableFrameRate === true
+                text: qsTr("Variable frame rate source detected. Export will use %1 constant-frame-rate output. Telemetry remains timestamp-driven, but output cadence will be converted to CFR.")
+                    .arg(appController.exportSourceInfo.frameRateText)
+                color: "#ffc66d"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 11
             }
@@ -428,6 +458,45 @@ ApplicationWindow {
                 checked: true
             }
             Label {
+                text: qsTr("Range")
+                color: "#8b98a8"
+                font.pixelSize: 11
+            }
+            FeComboBox {
+                id: exportRangeMode
+                Layout.fillWidth: true
+                model: [qsTr("Entire video"), qsTr("Custom")]
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 6
+                visible: exportRangeMode.currentIndex === 1
+                Label {
+                    text: qsTr("Start (seconds)")
+                    color: "#8b98a8"
+                    font.pixelSize: 11
+                }
+                FeTextField {
+                    id: exportRangeStart
+                    Layout.fillWidth: true
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    validator: DoubleValidator { bottom: 0 }
+                }
+                Label {
+                    text: qsTr("End (seconds)")
+                    color: "#8b98a8"
+                    font.pixelSize: 11
+                }
+                FeTextField {
+                    id: exportRangeEnd
+                    Layout.fillWidth: true
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    validator: DoubleValidator { bottom: 0 }
+                }
+            }
+            Label {
                 visible: appController.exportState === "failed" && appController.exportError.length > 0
                 Layout.fillWidth: true
                 text: appController.exportError
@@ -448,8 +517,14 @@ ApplicationWindow {
                     enabled: exportDialog.outputFile.toString().length > 0
                     onClicked: {
                         const quality = ["fast", "high", "maximum"][exportQuality.currentIndex];
-                        appController.startExport(exportDialog.outputFile, quality, exportAudio.checked);
-                        exportDialog.close();
+                        if (appController.startExport(
+                            exportDialog.outputFile,
+                            quality,
+                            exportAudio.checked,
+                            exportRangeMode.currentIndex === 1,
+                            Number(exportRangeStart.text),
+                            Number(exportRangeEnd.text)))
+                            exportDialog.close();
                     }
                 }
             }
@@ -475,7 +550,19 @@ ApplicationWindow {
             anchors.margins: 18
             spacing: 10
             Label {
-                text: appController.exportState === "cancelling" ? qsTr("Cancelling export…") : qsTr("Exporting HEVC…")
+                text: {
+                    if (appController.exportState === "cancelling")
+                        return qsTr("Cancelling export…");
+                    if (appController.exportState === "starting")
+                        return qsTr("Preparing export…");
+                    if (appController.exportState === "rendering")
+                        return qsTr("Rendering telemetry…");
+                    if (appController.exportState === "encoding")
+                        return qsTr("Finalizing HEVC…");
+                    if (appController.exportState === "validating")
+                        return qsTr("Validating output…");
+                    return qsTr("Exporting HEVC…");
+                }
                 color: "#f2f6fb"
                 font.pixelSize: 17
                 font.weight: Font.DemiBold

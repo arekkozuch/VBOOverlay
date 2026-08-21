@@ -30,6 +30,9 @@ struct ExportResult {
     QString error;
     MediaInfo mediaInfo;
     qsizetype renderedFrames = 0;
+    qint64 elapsedMilliseconds = 0;
+    qint64 renderMilliseconds = 0;
+    qint64 renderNanoseconds = 0;
     bool cancelled = false;
 };
 
@@ -39,6 +42,8 @@ public:
         const ExportSettings &settings, TelemetryFrameRenderer &renderer);
     [[nodiscard]] static qsizetype frameCount(
         double startTime, double endTime, const MediaRational &frameRate);
+    [[nodiscard]] static double framePresentationTime(
+        double startTime, qsizetype frameIndex, const MediaRational &frameRate);
 };
 
 } // namespace FlappedEar

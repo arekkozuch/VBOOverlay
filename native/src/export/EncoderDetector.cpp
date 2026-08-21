@@ -23,6 +23,20 @@ constexpr KnownEncoder kKnownHevcEncoders[] = {
     {"libx265", "x265 HEVC", false},
 };
 
+bool canEncodeHevc(const QString &executable, const QString &encoder)
+{
+    // `ffmpeg -encoders` reports compiled-in encoders. Hardware entries can
+    // still be unusable because a driver, device, or operating-system service
+    // is unavailable, so verify the selected binary with a tiny in-memory job.
+    QProcess process;
+    process.start(
+        executable,
+        {"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+         "color=c=black:s=64x64:r=30", "-frames:v", "1", "-c:v", encoder, "-f", "null", "-"});
+    return process.waitForStarted() && process.waitForFinished(15'000)
+        && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+}
+
 } // namespace
 
 QList<EncoderCapability> EncoderDetector::discover(const QString &requestedFfmpegPath)
@@ -39,7 +53,15 @@ QList<EncoderCapability> EncoderDetector::discover(const QString &requestedFfmpe
         || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         throw std::runtime_error("Could not query FFmpeg encoders.");
     }
-    return parseEncoders(QString::fromUtf8(process.readAllStandardOutput()));
+    const QList<EncoderCapability> advertised = parseEncoders(
+        QString::fromUtf8(process.readAllStandardOutput()));
+    QList<EncoderCapability> usable;
+    for (const EncoderCapability &capability : advertised) {
+        if (canEncodeHevc(executable, capability.id)) {
+            usable.append(capability);
+        }
+    }
+    return usable;
 }
 
 QList<EncoderCapability> EncoderDetector::parseEncoders(const QString &output)
@@ -60,8 +82,8 @@ QList<EncoderCapability> EncoderDetector::parseEncoders(const QString &output)
 
 QString EncoderDetector::preferredHevcEncoder(const QList<EncoderCapability> &encoders)
 {
-    // This order favours platform hardware encoders when the queried FFmpeg
-    // actually exposes one, then falls back only to an installed x265 build.
+    // This order favours working platform hardware encoders, then a working
+    // x265 build. discover() removes encoders merely advertised by FFmpeg.
     for (const KnownEncoder &known : kKnownHevcEncoders) {
         for (const EncoderCapability &capability : encoders) {
             if (capability.id == QLatin1String(known.id)) {

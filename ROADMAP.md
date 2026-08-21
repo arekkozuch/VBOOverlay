@@ -32,8 +32,11 @@ Current implementation status:
 - [x] GoPro GPS5/GPS9 GPMF extraction and automatic GPS-speed synchronization port.
 - [x] Removal of the obsolete Electron/React prototype and Node build chain.
 - [x] Custom telemetry branding and native macOS/Windows application icon assets.
-- [ ] HEVC export, progress, cancellation, and output validation.
-- [ ] Windows build and runtime validation.
+- [x] HEVC export, AAC audio transcoding, progress, cancellation, and output validation using the
+      shared QML telemetry scene. Custom ranges retain absolute source timestamps; VFR inputs are
+      warned and exported at the source average CFR cadence.
+- [x] Windows build validation.
+- [ ] Windows runtime validation.
 - [ ] Repeatable self-contained packaging below the agreed size budget; preliminary macOS dependency
       deployment measured 126 MB before trimming.
 
@@ -76,18 +79,17 @@ Foundation delivered:
 Export finished clips from the same native scene definitions used by the preview. Rendering must be
 timestamp-driven so variable-frame-rate sources and telemetry remain synchronized.
 
-- Add an export dialog for output path, resolution, frame rate, codec, bitrate/quality, audio, and export
-  range, with sensible presets for video editors and direct sharing.
-- Render every output frame at its presentation timestamp through the same widget layout, cue, animation,
-  and interpolation logic as the editor preview.
-- Start with H.264, HEVC, and ProRes where the platform FFmpeg build supports them; detect hardware
-  encoders and keep a reliable software fallback.
-- Preserve audio timing by remuxing compatible audio or re-encoding when required, including sources with
-  non-zero start timestamps.
-- Show frame-accurate progress, elapsed/remaining time, current stage, cancellation, and actionable encoder
-  errors; clean partial and temporary files after cancellation or failure.
-- Validate the finished duration, dimensions, frame cadence, audio stream, and final timestamp before
-  reporting success.
+- [x] Add an export dialog for output path, quality, audio, and entire/custom source-time range.
+- [x] Render every output frame at its presentation timestamp through the same widget layout, cue,
+  animation, and interpolation logic as the editor preview.
+- [x] Export HEVC where a runtime-probed FFmpeg encoder works; report a clear error otherwise. Current
+  preference is working platform hardware encoders, then a working external `libx265` encoder.
+- [x] Re-encode source audio to AAC and validate its presence when source audio was requested.
+- [x] Show staged progress, cancellation, and validation; clean partial files after cancellation.
+- [x] Validate final duration, dimensions, HEVC codec, and requested audio stream.
+- [ ] Validate the user-facing workflow against a private real GoPro/VBO pair and measure 4K/60
+      performance; the private paths were unavailable during the current local validation.
+- [ ] Preserve source audio timestamps for non-zero-start sources with a dedicated integration fixture.
 - Add an editor-oriented transparent-overlay follow-up (ProRes 4444 or PNG sequence) so telemetry can be
   composited separately from the source video.
 - Add timing and cancellation unit tests plus short deterministic integration exports before validating a

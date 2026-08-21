@@ -16,6 +16,9 @@ removed.
   Delete/Backspace removal.
 - Multiple timed appearance cues per widget with Fade, Pop, and Slide Up effects.
 - Nine built-in layouts plus persistent custom templates and `.fettemplate` import/export.
+- File → Export produces H.265/HEVC MP4 clips from the same telemetry scene as preview, with AAC
+  audio when present, source-resolution/source-CFR output, custom ranges, progress, cancellation,
+  and post-export media validation.
 - A custom Qt Quick design system rather than platform-default Qt controls.
 
 ## Requirements
@@ -24,6 +27,8 @@ removed.
 - A C++20 compiler.
 - Qt 6.8 or newer with Concurrent, Core, Gui, Quick, Quick Controls 2, Multimedia, and Test.
 - macOS or Windows for the intended desktop targets.
+- FFmpeg and FFprobe on `PATH` (or Homebrew's `/opt/homebrew/bin` or `/usr/local/bin` on macOS) for
+  GoPro indexing and export. A working HEVC encoder is required for export.
 
 On Apple Silicon with Homebrew Qt installed in `/opt/homebrew/opt/qt`:
 
@@ -42,6 +47,8 @@ open "build-native/native/FlappedEar Telemetry.app"
 - `native/src/gopro`: bounded MP4/GPMF packet discovery and GPS telemetry decoding.
 - `native/src/sync`: centralized time-domain synchronization.
 - `native/src/widgets`: persistent widget, group, animation-cue, and template model.
+- `native/src/export`: FFmpeg/FFprobe discovery, media probing, working-encoder detection,
+  timestamp-driven telemetry frames, HEVC compositing, and output validation.
 - `native/src/app`: application state, projects, source restoration, and QML-facing controller.
 - `native/qml`: native editor, inspector, controls, and preview renderer.
 - `native/resources`: shareable built-in layout definitions.
@@ -49,8 +56,9 @@ open "build-native/native/FlappedEar Telemetry.app"
   track geometry, and GPMF decoding.
 - `native/tests/fixtures`: small deterministic VBO input used by the native test target.
 
-Preview and future export must consume the same scene definitions. All synchronization is expressed
-in seconds rather than frames.
+Preview and export consume `TelemetryScene.qml` through independent `TelemetryRenderContext` objects.
+All synchronization is expressed in seconds rather than frames. A custom range remains on the source
+timeline: exporting 120–140 seconds renders its first telemetry frame at source time 120 seconds.
 
 ## Private integration tests
 
@@ -80,9 +88,15 @@ scene as a persistent custom template and share it as a `.fettemplate` file.
 ## Current limitations
 
 - A source currently contains one video file; continuous multi-chapter GoPro support is planned.
-- HEVC compositing/export, audio preservation, progress, and cancellation are pending.
+- Export is explicit-CFR. Likely variable-frame-rate sources are warned about in the export dialog;
+  native timestamp-preserving VFR output is not yet validated.
+- HEVC export requires a locally working FFmpeg encoder. The detector verifies a small encode before
+  selecting an advertised encoder; it does not bundle FFmpeg or an encoder.
+- HEVC/AAC export has deterministic synthetic validation. A current real GoPro/VBO export could not
+  be run in this workspace because the private sample paths were unavailable.
 - Interactive map tiles and offline-safe map export are pending; GPS track outlines work offline.
-- Windows runtime validation and repeatable self-contained packaging remain pending.
+- Windows source compilation has been confirmed locally, but Windows runtime validation and repeatable
+  self-contained packaging remain pending.
 - macOS and Windows builds are unsigned.
 
 See [ROADMAP.md](ROADMAP.md) for the agreed remaining work.

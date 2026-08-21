@@ -6,6 +6,8 @@
 
 #include <QFileInfo>
 #include <QProcess>
+#include <QElapsedTimer>
+#include <QScopeGuard>
 #include <algorithm>
 #include <cmath>
 
@@ -59,10 +61,26 @@ qsizetype ExportEngine::frameCount(
                   / static_cast<double>(frameRate.denominator) - 1e-9));
 }
 
+double ExportEngine::framePresentationTime(
+    const double startTime, const qsizetype frameIndex, const MediaRational &frameRate)
+{
+    if (!frameRate.isValid()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return startTime + static_cast<double>(frameIndex) * static_cast<double>(frameRate.denominator)
+        / static_cast<double>(frameRate.numerator);
+}
+
 ExportResult ExportEngine::exportVideo(
     const ExportSettings &settings, TelemetryFrameRenderer &renderer)
 {
     ExportResult result;
+    QElapsedTimer elapsedTimer;
+    elapsedTimer.start();
+    const auto captureElapsed = qScopeGuard([&result, &elapsedTimer] {
+        result.elapsedMilliseconds = elapsedTimer.elapsed();
+        result.renderMilliseconds = result.renderNanoseconds / 1'000'000;
+    });
     try {
         if (settings.stateCallback) {
             settings.stateCallback(QStringLiteral("starting"));
@@ -131,10 +149,11 @@ ExportResult ExportEngine::exportVideo(
                 QFile::remove(settings.outputPath);
                 return result;
             }
-            const double presentationTime = start
-                + static_cast<double>(frame) * static_cast<double>(frameRate.denominator)
-                    / static_cast<double>(frameRate.numerator);
+            const double presentationTime = framePresentationTime(start, frame, frameRate);
+            QElapsedTimer renderTimer;
+            renderTimer.start();
             const QImage image = renderer.renderFrame(presentationTime);
+            result.renderNanoseconds += renderTimer.nsecsElapsed();
             if (image.size() != outputSize) {
                 result.error = renderer.errorString().isEmpty()
                     ? QStringLiteral("Telemetry renderer returned an invalid frame.")

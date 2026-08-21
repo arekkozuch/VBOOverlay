@@ -3,6 +3,7 @@
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
+#include "export/MediaProbe.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 
@@ -35,6 +36,8 @@ class AppController final : public QObject {
     Q_PROPERTY(int exportProgress READ exportProgress NOTIFY exportChanged)
     Q_PROPERTY(QString exportState READ exportState NOTIFY exportChanged)
     Q_PROPERTY(QString exportError READ exportError NOTIFY exportChanged)
+    Q_PROPERTY(QVariantMap exportSourceInfo READ exportSourceInfo NOTIFY exportChanged)
+    Q_PROPERTY(QVariantMap exportMetrics READ exportMetrics NOTIFY exportChanged)
     Q_PROPERTY(QVariantMap syncCandidate READ syncCandidate NOTIFY syncCandidateChanged)
     Q_PROPERTY(QVariant speed READ speed NOTIFY liveValuesChanged)
     Q_PROPERTY(QVariant rpm READ rpm NOTIFY liveValuesChanged)
@@ -74,6 +77,8 @@ public:
     [[nodiscard]] int exportProgress() const;
     [[nodiscard]] QString exportState() const;
     [[nodiscard]] QString exportError() const;
+    [[nodiscard]] QVariantMap exportSourceInfo() const;
+    [[nodiscard]] QVariantMap exportMetrics() const;
     [[nodiscard]] QVariantMap syncCandidate() const;
     [[nodiscard]] QVariant speed() const;
     [[nodiscard]] QVariant rpm() const;
@@ -108,7 +113,13 @@ public:
     Q_INVOKABLE void autoSync();
     Q_INVOKABLE void applySyncCandidate();
     Q_INVOKABLE void ignoreSyncCandidate();
-    Q_INVOKABLE void startExport(const QUrl &output, const QString &quality, bool audioEnabled);
+    Q_INVOKABLE bool startExport(
+        const QUrl &output,
+        const QString &quality,
+        bool audioEnabled,
+        bool customRange,
+        double rangeStart,
+        double rangeEnd);
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
@@ -149,6 +160,7 @@ private:
     void saveWidgetSettings();
     void restoreSources();
     void reconcileAnalysisChannels();
+    void probeExportSource();
     void handleExportOutput();
     void finishExport(int exitCode, QProcess::ExitStatus exitStatus);
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
@@ -173,6 +185,8 @@ private:
     int m_exportProgress = 0;
     QString m_exportState = QStringLiteral("idle");
     QString m_exportError;
+    MediaInfo m_exportSourceInfo;
+    QVariantMap m_exportMetrics;
     QVariantMap m_syncCandidate;
     QStringList m_analysisChannels;
     bool m_analysisVisible = true;
