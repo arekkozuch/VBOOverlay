@@ -923,6 +923,8 @@ Item {
                             const cx = width * 0.28;
                             const cy = height * 0.88;
                             const radius = Math.min(width * 0.50, height * 0.78);
+                            if (!Number.isFinite(radius) || radius <= 0)
+                                return;
                             const start = Math.PI * 0.92;
                             const end = Math.PI * 1.82;
                             ctx.lineWidth = Math.max(5, radius * 0.12);
@@ -1074,8 +1076,11 @@ Item {
                             context.stroke();
                         }
                         Connections {
-                            target: appController
-                            function onTelemetryChanged() {
+                            target: root.renderContext
+                            function onSourceChanged() {
+                                trackCanvas.requestPaint();
+                            }
+                            function onTimeChanged() {
                                 trackCanvas.requestPaint();
                             }
                         }

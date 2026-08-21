@@ -1,5 +1,6 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "export/EncoderDetector.h"
+#include "export/ExportEngine.h"
 #include "export/MediaProbe.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
@@ -44,6 +45,7 @@ private slots:
     void rendersTelemetryAtExplicitTime();
     void probesMediaInfoJson();
     void detectsHevcEncoders();
+    void calculatesTimestampDrivenExportFrames();
     void syncsOptionalRealRecording();
 };
 
@@ -447,6 +449,13 @@ void TelemetryTests::detectsHevcEncoders()
     QCOMPARE(encoders[0].id, QString("hevc_videotoolbox"));
     QVERIFY(encoders[0].hardware);
     QCOMPARE(EncoderDetector::preferredHevcEncoder(encoders), QString("hevc_videotoolbox"));
+}
+
+void TelemetryTests::calculatesTimestampDrivenExportFrames()
+{
+    QCOMPARE(ExportEngine::frameCount(120.0, 140.0, {30'000, 1001}), qsizetype(600));
+    QCOMPARE(ExportEngine::frameCount(0.0, 1.0, {60'000, 1001}), qsizetype(60));
+    QCOMPARE(ExportEngine::frameCount(1.0, 1.0, {30, 1}), qsizetype(0));
 }
 
 void TelemetryTests::decodesGps9Gpmf()

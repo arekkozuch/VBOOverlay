@@ -1,4 +1,4 @@
-find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Quick QuickControls2 Multimedia Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Qml Quick QuickControls2 Multimedia Test)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -13,10 +13,14 @@ endfunction()
 qt_add_library(flappedear_core STATIC
     src/export/EncoderDetector.cpp
     src/export/EncoderDetector.h
+    src/export/ExportEngine.cpp
+    src/export/ExportEngine.h
     src/export/FfmpegTools.cpp
     src/export/FfmpegTools.h
     src/export/MediaProbe.cpp
     src/export/MediaProbe.h
+    src/export/TelemetryFrameRenderer.cpp
+    src/export/TelemetryFrameRenderer.h
     src/gopro/GoProTelemetrySource.cpp
     src/gopro/GoProTelemetrySource.h
     src/sync/TelemetrySyncEngine.cpp
@@ -34,7 +38,7 @@ qt_add_library(flappedear_core STATIC
 )
 target_compile_features(flappedear_core PUBLIC cxx_std_20)
 target_include_directories(flappedear_core PUBLIC src)
-target_link_libraries(flappedear_core PUBLIC Qt6::Core)
+target_link_libraries(flappedear_core PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 flappedear_enable_warnings(flappedear_core)
 
 qt_add_resources(flappedear_core "flappedear_templates"
