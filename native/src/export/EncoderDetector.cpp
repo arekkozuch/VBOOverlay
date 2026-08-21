@@ -1,7 +1,9 @@
 #include "export/EncoderDetector.h"
 
 #include "export/FfmpegTools.h"
+#include "export/ExportProcessSupervisor.h"
 
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QRegularExpression>
 #include <stdexcept>
@@ -23,23 +25,41 @@ constexpr KnownEncoder kKnownHevcEncoders[] = {
     {"libx265", "x265 HEVC", false},
 };
 
-bool canEncodeHevc(const QString &executable, const QString &encoder)
+bool waitForFinished(QProcess &process, ExportProcessSupervisor &supervisor,
+                     const std::function<bool()> &cancelled, const int timeoutMilliseconds)
+{
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (process.state() != QProcess::NotRunning && elapsed.elapsed() < timeoutMilliseconds) {
+        if (cancelled && cancelled()) {
+            static_cast<void>(supervisor.stopAndWait());
+            throw std::runtime_error("Encoder discovery cancelled.");
+        }
+        process.waitForFinished(100);
+    }
+    return process.state() == QProcess::NotRunning;
+}
+
+bool canEncodeHevc(const QString &executable, const QString &encoder,
+                   const std::function<bool()> &cancelled)
 {
     // `ffmpeg -encoders` reports compiled-in encoders. Hardware entries can
     // still be unusable because a driver, device, or operating-system service
     // is unavailable, so verify the selected binary with a tiny in-memory job.
     QProcess process;
-    process.start(
+    ExportProcessSupervisor supervisor(process, false);
+    supervisor.start(
         executable,
         {"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
          "color=c=black:s=64x64:r=30", "-frames:v", "1", "-c:v", encoder, "-f", "null", "-"});
-    return process.waitForStarted() && process.waitForFinished(15'000)
+    return supervisor.waitForStarted(5'000) && waitForFinished(process, supervisor, cancelled, 15'000)
         && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
 }
 
 } // namespace
 
-QList<EncoderCapability> EncoderDetector::discover(const QString &requestedFfmpegPath)
+QList<EncoderCapability> EncoderDetector::discover(
+    const QString &requestedFfmpegPath, const std::function<bool()> &cancelled)
 {
     const QString executable = requestedFfmpegPath.isEmpty()
         ? FfmpegTools::ffmpegPath()
@@ -48,8 +68,9 @@ QList<EncoderCapability> EncoderDetector::discover(const QString &requestedFfmpe
         throw std::runtime_error(FfmpegTools::missingToolsMessage().toStdString());
     }
     QProcess process;
-    process.start(executable, {"-hide_banner", "-encoders"});
-    if (!process.waitForStarted() || !process.waitForFinished(15'000)
+    ExportProcessSupervisor supervisor(process, false);
+    supervisor.start(executable, {"-hide_banner", "-encoders"});
+    if (!supervisor.waitForStarted(5'000) || !waitForFinished(process, supervisor, cancelled, 15'000)
         || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         throw std::runtime_error("Could not query FFmpeg encoders.");
     }
@@ -57,7 +78,7 @@ QList<EncoderCapability> EncoderDetector::discover(const QString &requestedFfmpe
         QString::fromUtf8(process.readAllStandardOutput()));
     QList<EncoderCapability> usable;
     for (const EncoderCapability &capability : advertised) {
-        if (canEncodeHevc(executable, capability.id)) {
+        if (canEncodeHevc(executable, capability.id, cancelled)) {
             usable.append(capability);
         }
     }

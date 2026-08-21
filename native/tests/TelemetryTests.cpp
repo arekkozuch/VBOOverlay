@@ -74,6 +74,7 @@ private slots:
     void preservesLiveManifestForStartupRecovery();
     void supervisesUnixExportProcessTree();
     void detectsHevcEncoders();
+    void cancelsEncoderDiscovery();
     void calculatesTimestampDrivenExportFrames();
     void preservesExactExportRateRationals();
     void preservesCfrCadenceForCommonRates();
@@ -1355,6 +1356,29 @@ void TelemetryTests::detectsHevcEncoders()
     QCOMPARE(encoders[0].id, QString("hevc_videotoolbox"));
     QVERIFY(encoders[0].hardware);
     QCOMPARE(EncoderDetector::preferredHevcEncoder(encoders), QString("hevc_videotoolbox"));
+}
+
+void TelemetryTests::cancelsEncoderDiscovery()
+{
+#ifdef Q_OS_UNIX
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString helper = directory.filePath("slow-ffmpeg.sh");
+    QFile script(helper);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(script.write("#!/bin/sh\nsleep 10\n"), qint64(19));
+    script.close();
+    QVERIFY(script.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    QString error;
+    try {
+        static_cast<void>(EncoderDetector::discover(helper, [] { return true; }));
+    } catch (const std::exception &exception) {
+        error = QString::fromUtf8(exception.what());
+    }
+    QCOMPARE(error, QStringLiteral("Encoder discovery cancelled."));
+#else
+    QSKIP("Cancellable helper script requires a POSIX shell.");
+#endif
 }
 
 void TelemetryTests::calculatesTimestampDrivenExportFrames()

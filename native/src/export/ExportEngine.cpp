@@ -295,7 +295,8 @@ ExportResult ExportEngine::exportVideo(
         const double exportDuration = outputDuration(expectedFrames, exportFrameRate);
         result.exportFrameRate = exportFrameRate;
         result.expectedFrames = expectedFrames;
-        const QList<EncoderCapability> encoders = EncoderDetector::discover();
+        const QList<EncoderCapability> encoders = EncoderDetector::discover(
+            {}, [&settings] { return isCancelled(settings); });
         const QString encoder = settings.encoder.isEmpty()
             ? EncoderDetector::preferredHevcEncoder(encoders)
             : settings.encoder;

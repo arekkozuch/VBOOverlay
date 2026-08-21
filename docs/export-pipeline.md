@@ -55,7 +55,7 @@ Telemetry rendering still uses absolute source time: exporting source seconds 12
 Progress and Very Verbose diagnostics report stage activity, FFmpeg progress,
 temporary-overlay size, frame-count source, reported rates/time base, metadata
 validation elapsed time, validation checks, and bounded diagnostic output.
-One cancellation file is consulted by input/temporary/final `ffprobe` calls and both FFmpeg stages. Cancellation follows cooperative request, a short graceful wait, process-tree termination, then force kill. On macOS/Unix the GUI worker starts in a dedicated process group; FFmpeg and ffprobe inherit it, so forced worker shutdown reaches the complete export tree. The current Unix behavior is runtime-tested. Windows assigns the top-level worker to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job; that path is compile-tested here, not runtime-validated on Windows.
+One cancellation file is consulted by input/temporary/final `ffprobe` calls, encoder discovery/capability checks, and both FFmpeg stages. Cancellation follows cooperative request, a short graceful wait, process-tree termination, then force kill. On macOS/Unix the GUI worker starts in a dedicated process group; FFmpeg and ffprobe inherit it, so forced worker shutdown reaches the complete export tree. The current Unix behavior is runtime-tested. Windows assigns the top-level worker to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job; that path is compile-tested here, not runtime-validated on Windows.
 Final validation checks for a nonempty result, HEVC codec, dimensions, exact
 nominal and average rate, progress frame count, independent video packet count
 when available, zero video start, scheduled video duration, and requested audio.
