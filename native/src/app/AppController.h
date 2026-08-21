@@ -8,6 +8,7 @@
 #include "export/ExportOutputTransaction.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
+#include "project/ProjectWriter.h"
 
 #include <QFutureWatcher>
 #include <QProcess>
@@ -120,7 +121,7 @@ public:
         const QString &channelName, double videoStart, double videoEnd, int maximumPoints) const;
     Q_INVOKABLE void toggleAnalysisChannel(const QString &channelName);
     Q_INVOKABLE void openProject(const QUrl &url);
-    Q_INVOKABLE void saveProject(const QUrl &url);
+    Q_INVOKABLE bool saveProject(const QUrl &url);
     Q_INVOKABLE void autoSync();
     Q_INVOKABLE void applySyncCandidate();
     Q_INVOKABLE void ignoreSyncCandidate();
@@ -190,6 +191,7 @@ private:
     TelemetryRenderContext m_previewRenderContext;
     QVariantList m_trackPoints;
     QJsonObject m_projectTemplate;
+    ProjectWriter m_projectWriter;
     double m_playbackTime = 0.0;
     SyncTransform m_sync;
     QFutureWatcher<AutoSyncResult> m_syncWatcher;

@@ -12,6 +12,7 @@
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/VboParser.h"
 #include "widgets/WidgetModel.h"
+#include "project/ProjectWriter.h"
 
 #include <QFile>
 #include <QProcess>
@@ -70,6 +71,8 @@ private slots:
     void preservesExistingExportTargetOnFailures_data();
     void preservesExistingExportTargetOnFailures();
     void commitsNewAndReplacementExports();
+    void savesProjectsAtomically();
+    void detectsPartialAndCommitWriteFailures();
     void syncsOptionalRealRecording();
 };
 
@@ -132,6 +135,29 @@ bool writeBytes(const QString &path, const QByteArray &bytes)
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(bytes) == bytes.size();
 }
+
+class InjectedProjectWriteDevice final : public ProjectWriteDevice {
+public:
+    InjectedProjectWriteDevice(
+        const bool opens, const qint64 bytesWritten, const bool commits, QString error)
+        : m_opens(opens)
+        , m_bytesWritten(bytesWritten)
+        , m_commits(commits)
+        , m_error(std::move(error))
+    {
+    }
+
+    bool open() override { return m_opens; }
+    qint64 write(const QByteArray &) override { return m_bytesWritten; }
+    bool commit() override { return m_commits; }
+    QString errorString() const override { return m_error; }
+
+private:
+    bool m_opens;
+    qint64 m_bytesWritten;
+    bool m_commits;
+    QString m_error;
+};
 
 } // namespace
 
@@ -245,6 +271,56 @@ void TelemetryTests::commitsNewAndReplacementExports()
         {QStringLiteral("*.part.*"), QStringLiteral("*.backup"), QStringLiteral("*.cancel")},
         QDir::Files | QDir::Hidden);
     QVERIFY2(artifacts.isEmpty(), qPrintable(artifacts.join(',')));
+}
+
+void TelemetryTests::savesProjectsAtomically()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("project.fetproject");
+    const QByteArray original = R"({"version":2,"scene":{"widgets":[]}})";
+    const QByteArray replacement = R"({"version":2,"scene":{"widgets":[{"type":"speed"}]}})";
+    QVERIFY(writeBytes(path, original));
+
+    const ProjectWriter writer;
+    const ProjectWriter::Result success = writer.write(path, replacement);
+    QVERIFY2(success.success, qPrintable(success.error));
+    QFile saved(path);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    QCOMPARE(saved.readAll(), replacement);
+    saved.close();
+
+    const QFile::Permissions originalPermissions = QFileInfo(directory.path()).permissions();
+    QVERIFY(QFile::setPermissions(
+        directory.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    const auto restorePermissions = qScopeGuard([&] {
+        QFile::setPermissions(directory.path(), originalPermissions);
+    });
+    const ProjectWriter::Result failure = writer.write(path, QByteArray("corrupting replacement"));
+    QVERIFY(!failure.success);
+    QFile unchanged(path);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), replacement);
+}
+
+void TelemetryTests::detectsPartialAndCommitWriteFailures()
+{
+    const QByteArray payload("complete serialized project");
+    const ProjectWriter partialWriter([&](const QString &) {
+        return std::make_unique<InjectedProjectWriteDevice>(
+            true, payload.size() - 1, true, QStringLiteral("injected partial write"));
+    });
+    const ProjectWriter::Result partial = partialWriter.write("project.fetproject", payload);
+    QVERIFY(!partial.success);
+    QVERIFY(partial.error.contains(QStringLiteral("incomplete")));
+
+    const ProjectWriter commitWriter([&](const QString &) {
+        return std::make_unique<InjectedProjectWriteDevice>(
+            true, payload.size(), false, QStringLiteral("injected commit failure"));
+    });
+    const ProjectWriter::Result commit = commitWriter.write("project.fetproject", payload);
+    QVERIFY(!commit.success);
+    QVERIFY(commit.error.contains(QStringLiteral("commit")));
 }
 
 void TelemetryTests::parsesRealisticFixture()

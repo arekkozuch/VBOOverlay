@@ -359,16 +359,11 @@ void AppController::openProject(const QUrl &url)
     setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(file).fileName()));
 }
 
-void AppController::saveProject(const QUrl &url)
+bool AppController::saveProject(const QUrl &url)
 {
     QString path = url.toLocalFile();
     if (!path.endsWith(".fetproject", Qt::CaseInsensitive)) {
         path.append(".fetproject");
-    }
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        setStatus(QStringLiteral("Project save error: %1").arg(file.errorString()));
-        return;
     }
     QJsonObject project = m_projectTemplate;
     project.insert("version", 2);
@@ -387,11 +382,16 @@ void AppController::saveProject(const QUrl &url)
     if (!project.contains("exportSettings")) {
         project.insert("exportSettings", QJsonObject{{"quality", "high"}});
     }
-    file.write(QJsonDocument(project).toJson(QJsonDocument::Indented));
-    file.close();
+    const QByteArray payload = QJsonDocument(project).toJson(QJsonDocument::Indented);
+    const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
+    if (!writeResult.success) {
+        setStatus(QStringLiteral("Project save error: %1").arg(writeResult.error));
+        return false;
+    }
     m_projectTemplate = project;
     m_settings.setValue("project/path", path);
     setStatus(QStringLiteral("Project saved: %1").arg(QFileInfo(path).fileName()));
+    return true;
 }
 
 void AppController::autoSync()
