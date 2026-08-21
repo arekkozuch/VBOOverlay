@@ -74,6 +74,7 @@ private slots:
     void estimatesExportProgress();
     void tracksExportStageElapsedTime();
     void boundsVerboseDiagnosticStorage();
+    void formatsStageAFailureDiagnostics();
     void throttlesDiagnosticHeartbeats();
     void tracksValidationSubstepStages();
     void parsesStructuredFfmpegProgress();
@@ -1154,6 +1155,61 @@ void TelemetryTests::boundsVerboseDiagnosticStorage()
     QVERIFY(log.text().startsWith(QStringLiteral("[older diagnostic entries omitted]\n")));
     QVERIFY(!log.text().contains(QStringLiteral("one")));
     QVERIFY(log.text().endsWith(QStringLiteral("five\nwith details")));
+}
+
+void TelemetryTests::formatsStageAFailureDiagnostics()
+{
+    const StageAFailureDiagnostics diagnostics{
+        QStringLiteral("FFmpeg stopped before the next overlay frame was rendered"),
+        819,
+        8992,
+        1,
+        QStringLiteral("NormalExit"),
+        QStringLiteral("WriteError"),
+        QStringLiteral("Broken pipe"),
+        817,
+        13'630'000,
+        59.94,
+        0.21,
+        31'457'280,
+        94'371'840,
+        QStringLiteral("/tmp/flappedear-overlay-test.mkv"),
+        59'391'756,
+        QStringLiteral("No space left on device"),
+        QStringLiteral("/"),
+        123'456,
+        987'654,
+        QStringLiteral("/Volumes/Exports"),
+        456'789,
+        987'654,
+        QStringLiteral("/tmp/flappedear-export.cancel"),
+        false};
+    const QString formatted = formatStageAFailureDiagnostics(diagnostics);
+    QVERIFY(formatted.contains(QStringLiteral("Stage A exited unexpectedly")));
+    QVERIFY(formatted.contains(QStringLiteral("Submitted frames: 819 / 8992")));
+    QVERIFY(formatted.contains(QStringLiteral("FFmpeg exit: code=1 status=NormalExit")));
+    QVERIFY(formatted.contains(QStringLiteral("QProcess error: WriteError (Broken pipe)")));
+    QVERIFY(formatted.contains(QStringLiteral("Temporary overlay before cleanup: /tmp/flappedear-overlay-test.mkv (59391756 bytes)")));
+    QVERIFY(formatted.contains(QStringLiteral("Cancellation marker: /tmp/flappedear-export.cancel exists=no")));
+    QVERIFY(formatted.contains(QStringLiteral("FFmpeg stderr tail:\nNo space left on device")));
+
+    const QVariantMap details = stageAFailureDiagnosticDetails(diagnostics);
+    QCOMPARE(details.value(QStringLiteral("submittedFrames")).toLongLong(), 819);
+    QCOMPARE(details.value(QStringLiteral("temporaryOverlayBytes")).toLongLong(), 59'391'756);
+    QCOMPARE(details.value(QStringLiteral("cancellationFileExists")).toBool(), false);
+    QCOMPARE(details.value(QStringLiteral("stderrTail")).toString(), QStringLiteral("No space left on device"));
+
+    StageAFailureDiagnostics crash = diagnostics;
+    crash.exitCode = 9;
+    crash.exitStatus = QStringLiteral("CrashExit (Unix signal unavailable from QProcess)");
+    crash.processError = QStringLiteral("Crashed");
+    crash.processErrorString = QStringLiteral("Process crashed");
+    crash.cancellationFileExists = true;
+    crash.stderrTail.clear();
+    const QString crashFormatted = formatStageAFailureDiagnostics(crash);
+    QVERIFY(crashFormatted.contains(QStringLiteral("status=CrashExit (Unix signal unavailable from QProcess)")));
+    QVERIFY(crashFormatted.contains(QStringLiteral("QProcess error: Crashed (Process crashed)")));
+    QVERIFY(crashFormatted.contains(QStringLiteral("exists=yes")));
 }
 
 void TelemetryTests::throttlesDiagnosticHeartbeats()

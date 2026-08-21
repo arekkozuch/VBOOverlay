@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QString>
 #include <QStringList>
+#include <QVariantMap>
 
 namespace FlappedEar {
 
@@ -46,5 +47,39 @@ private:
     bool m_omissionMarkerNeeded = false;
     QStringList m_entries;
 };
+
+// Captures the state that matters when the raw overlay producer loses FFmpeg
+// before all expected frames have been accepted.  This deliberately contains
+// only value types so formatting and event payloads can be regression tested
+// without a live child process.
+struct StageAFailureDiagnostics {
+    QString reason;
+    qsizetype submittedFrames = 0;
+    qsizetype expectedFrames = 0;
+    int exitCode = -1;
+    QString exitStatus;
+    QString processError;
+    QString processErrorString;
+    qsizetype lastEncodedFrame = 0;
+    qint64 lastEncodedTimeMicroseconds = -1;
+    double encoderFps = 0.0;
+    double encoderRealtimeFactor = 0.0;
+    qint64 queuedBytes = 0;
+    qint64 maximumQueuedBytes = 0;
+    QString temporaryOverlayPath;
+    qint64 temporaryOverlayBytes = 0;
+    QString stderrTail;
+    QString temporaryFilesystemRoot;
+    qint64 temporaryFilesystemAvailableBytes = -1;
+    qint64 temporaryFilesystemTotalBytes = -1;
+    QString destinationFilesystemRoot;
+    qint64 destinationFilesystemAvailableBytes = -1;
+    qint64 destinationFilesystemTotalBytes = -1;
+    QString cancellationFilePath;
+    bool cancellationFileExists = false;
+};
+
+[[nodiscard]] QVariantMap stageAFailureDiagnosticDetails(const StageAFailureDiagnostics &diagnostics);
+[[nodiscard]] QString formatStageAFailureDiagnostics(const StageAFailureDiagnostics &diagnostics);
 
 } // namespace FlappedEar

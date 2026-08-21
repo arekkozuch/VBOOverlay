@@ -1116,6 +1116,10 @@ QString formatDiagnosticEvent(const QJsonObject &event)
         const QString value = diagnosticValue(details.value(key));
         if (!value.isEmpty()) result += QStringLiteral("\n    %1: %2").arg(key, value);
     }
+    const QString error = event.value("error").toString();
+    if (!error.isEmpty()) result += QStringLiteral("\n    error: %1").arg(error);
+    const QString diagnostics = event.value("diagnostics").toString();
+    if (!diagnostics.isEmpty()) result += QStringLiteral("\n    diagnostics:\n%1").arg(diagnostics);
     return result;
 }
 
