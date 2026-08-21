@@ -17,7 +17,8 @@ double MediaRational::value() const
 
 bool MediaRational::isValid() const { return numerator > 0 && denominator > 0; }
 
-MediaInfo MediaProbe::probe(const QString &path, const QString &requestedFfprobePath)
+MediaInfo MediaProbe::probe(
+    const QString &path, const QString &requestedFfprobePath, const bool countVideoFrames)
 {
     const QString executable = requestedFfprobePath.isEmpty()
         ? FfmpegTools::ffprobePath()
@@ -26,8 +27,12 @@ MediaInfo MediaProbe::probe(const QString &path, const QString &requestedFfprobe
         throw std::runtime_error(FfmpegTools::missingToolsMessage(false).toStdString());
     }
     QProcess process;
-    process.start(executable, {"-v", "error", "-print_format", "json", "-show_format",
-                               "-show_streams", path});
+    QStringList arguments{"-v", "error", "-print_format", "json"};
+    if (countVideoFrames) {
+        arguments.append("-count_frames");
+    }
+    arguments.append({"-show_format", "-show_streams", path});
+    process.start(executable, arguments);
     if (!process.waitForStarted()) {
         throw std::runtime_error("Could not start ffprobe.");
     }
@@ -59,6 +64,11 @@ MediaInfo MediaProbe::parseJson(const QByteArray &json, const QString &path)
             info.timeBase = parseRational(stream.value("time_base").toString());
             info.videoCodec = stream.value("codec_name").toString();
             info.pixelFormat = stream.value("pix_fmt").toString();
+            bool frameCountOk = false;
+            const qint64 frameCount = stream.value("nb_read_frames").toString().toLongLong(&frameCountOk);
+            if (frameCountOk && frameCount >= 0) {
+                info.videoFrameCount = static_cast<qsizetype>(frameCount);
+            }
             if (stream.contains("start_time")) {
                 info.startTime = stream.value("start_time").toString().toDouble();
             }

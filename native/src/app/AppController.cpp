@@ -612,8 +612,10 @@ void AppController::handleExportOutput()
         if (!state.isEmpty()) {
             m_exportState = state;
         }
-        for (const QString &key : {QStringLiteral("generatedFrames"), QStringLiteral("renderedFrames"), QStringLiteral("totalFrames"),
-                                   QStringLiteral("sourceTime"), QStringLiteral("endTime"),
+        for (const QString &key : {QStringLiteral("generatedFrames"), QStringLiteral("renderedFrames"), QStringLiteral("expectedFrames"),
+                                   QStringLiteral("sourceRangeStart"), QStringLiteral("sourceRangeEnd"),
+                                   QStringLiteral("exportDuration"), QStringLiteral("exportRelativeTime"),
+                                   QStringLiteral("sourceVideoTime"),
                                    QStringLiteral("telemetryTime"), QStringLiteral("elapsedMilliseconds"),
                                    QStringLiteral("throughputFps"), QStringLiteral("realtimeFactor"),
                                    QStringLiteral("etaSeconds"), QStringLiteral("outputBytes"),

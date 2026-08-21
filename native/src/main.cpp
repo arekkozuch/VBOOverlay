@@ -166,34 +166,46 @@ int exportWorker(const QString &configPath)
         settings.quality = config.value("quality").toString("high");
         settings.audioEnabled = config.value("audioEnabled").toBool(true);
         settings.cancellationFilePath = config.value("cancelPath").toString();
-        const qsizetype totalFrames = FlappedEar::ExportEngine::frameCount(
+        const double sourceRangeStart = settings.startTime;
+        const double sourceRangeEnd = settings.endTime;
+        const double exportDuration = sourceRangeEnd - sourceRangeStart;
+        const qsizetype expectedFrames = FlappedEar::ExportEngine::frameCount(
             settings.startTime, settings.endTime, settings.frameRate);
         FlappedEar::ExportProgressEstimator rendererProgress;
         QElapsedTimer elapsed;
         elapsed.start();
         qint64 lastUpdate = -125;
-        writeExportEvent({{"state", "preparing"}, {"sourceTime", settings.startTime},
-                          {"endTime", settings.endTime}, {"totalFrames", static_cast<qint64>(totalFrames)},
+        writeExportEvent({{"state", "preparing"}, {"sourceRangeStart", sourceRangeStart},
+                          {"sourceRangeEnd", sourceRangeEnd}, {"exportDuration", exportDuration},
+                          {"sourceVideoTime", sourceRangeStart},
+                          {"exportRelativeTime", 0.0},
+                          {"expectedFrames", static_cast<qint64>(expectedFrames)},
                           {"width", input.videoSize.width()}, {"height", input.videoSize.height()},
                           {"frameRate", settings.frameRate.value()}, {"audioEnabled", settings.audioEnabled}});
         settings.progressCallback = [&](const FlappedEar::ExportPipelineProgress &pipeline) {
             const qint64 elapsedMilliseconds = elapsed.elapsed();
-            if (pipeline.submittedFrames != pipeline.totalFrames
+            if (pipeline.submittedFrames != pipeline.expectedFrames
                 && elapsedMilliseconds - lastUpdate < 125) return;
             lastUpdate = elapsedMilliseconds;
             const auto rendererSnapshot = rendererProgress.update(
-                pipeline.submittedFrames, pipeline.totalFrames, elapsedMilliseconds, settings.frameRate);
+                pipeline.submittedFrames, pipeline.expectedFrames, elapsedMilliseconds, settings.frameRate);
             const double encodedPercent = FlappedEar::FfmpegProgressParser::overallPercent(
                 pipeline.encodedSeconds, pipeline.outputDurationSeconds);
-            const double visiblePercent = pipeline.stage == QStringLiteral("finalizing")
-                ? 97.0 : encodedPercent;
+            const double overlayPercent = pipeline.expectedFrames > 0
+                ? 60.0 * double(pipeline.submittedFrames) / double(pipeline.expectedFrames) : 0.0;
+            const double visiblePercent = pipeline.stage == QStringLiteral("renderingOverlay") ? overlayPercent
+                : pipeline.stage == QStringLiteral("encodingVideo") ? 60.0 + 0.35 * encodedPercent
+                : pipeline.stage == QStringLiteral("finalizing") ? 97.0 : encodedPercent;
             QJsonObject event{{"state", pipeline.stage},
                               {"renderedFrames", static_cast<qint64>(pipeline.submittedFrames)},
                               {"generatedFrames", static_cast<qint64>(pipeline.generatedFrames)},
-                              {"totalFrames", static_cast<qint64>(pipeline.totalFrames)},
-                              {"sourceTime", pipeline.submittedSourceTime},
-                              {"endTime", settings.endTime},
-                              {"telemetryTime", FlappedEar::videoToTelemetryTime(pipeline.submittedSourceTime, sync)},
+                              {"expectedFrames", static_cast<qint64>(pipeline.expectedFrames)},
+                              {"sourceRangeStart", pipeline.sourceRangeStart},
+                              {"sourceRangeEnd", pipeline.sourceRangeEnd},
+                              {"exportDuration", pipeline.exportDuration},
+                              {"exportRelativeTime", pipeline.exportRelativeTime},
+                              {"sourceVideoTime", pipeline.sourceVideoTime},
+                              {"telemetryTime", FlappedEar::videoToTelemetryTime(pipeline.sourceVideoTime, sync)},
                               {"encodedFrames", static_cast<qint64>(pipeline.encodedFrames)},
                               {"encodedSeconds", pipeline.encodedSeconds},
                               {"encodedProgress", encodedPercent},
@@ -211,10 +223,7 @@ int exportWorker(const QString &configPath)
             writeExportEvent(event);
         };
         settings.stateCallback = [](const QString &state) {
-            const QString progressState = state == "encoding" ? QStringLiteral("finalizing")
-                : state == "validating" ? QStringLiteral("validating")
-                                      : QStringLiteral("preparing");
-            writeExportEvent({{"state", progressState}});
+            writeExportEvent({{"state", state}});
         };
         settings.encoderCallback = [](const QString &id, const QString &name) {
             writeExportEvent({{"state", "preparing"}, {"encoderId", id}, {"encoderName", name}});
@@ -230,7 +239,7 @@ int exportWorker(const QString &configPath)
         }
         writeExportEvent({{"state", "complete"}, {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
                           {"generatedFrames", static_cast<qint64>(result.generatedFrames)},
-                          {"totalFrames", static_cast<qint64>(result.renderedFrames)},
+                          {"expectedFrames", static_cast<qint64>(result.renderedFrames)},
                           {"elapsedMilliseconds", result.elapsedMilliseconds},
                           {"renderMilliseconds", result.renderMilliseconds},
                           {"renderNanoseconds", result.renderNanoseconds},

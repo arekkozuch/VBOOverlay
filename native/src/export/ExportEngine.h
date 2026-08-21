@@ -13,8 +13,12 @@ class TelemetryFrameRenderer;
 struct ExportPipelineProgress {
     qsizetype generatedFrames = 0;
     qsizetype submittedFrames = 0;
-    qsizetype totalFrames = 0;
-    double submittedSourceTime = 0.0;
+    qsizetype expectedFrames = 0;
+    double sourceRangeStart = 0.0;
+    double sourceRangeEnd = 0.0;
+    double exportDuration = 0.0;
+    double exportRelativeTime = 0.0;
+    double sourceVideoTime = 0.0;
     qsizetype encodedFrames = 0;
     double encodedSeconds = 0.0;
     double outputDurationSeconds = 0.0;
@@ -69,7 +73,11 @@ public:
     [[nodiscard]] static ExportResult exportVideo(
         const ExportSettings &settings, TelemetryFrameRenderer &renderer);
     [[nodiscard]] static qsizetype frameCount(
-        double startTime, double endTime, const MediaRational &frameRate);
+        double sourceRangeStart, double sourceRangeEnd, const MediaRational &frameRate);
+    [[nodiscard]] static double exportRelativeTime(
+        qsizetype frameIndex, const MediaRational &frameRate);
+    [[nodiscard]] static double sourceVideoTime(
+        double sourceRangeStart, qsizetype frameIndex, const MediaRational &frameRate);
     [[nodiscard]] static double framePresentationTime(
         double startTime, qsizetype frameIndex, const MediaRational &frameRate);
 };

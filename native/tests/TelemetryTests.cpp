@@ -51,6 +51,7 @@ private slots:
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
     void preservesAbsoluteExportTimestamps();
+    void composesNonZeroExportRangeWithZeroBasedOutput();
     void estimatesExportProgress();
     void parsesStructuredFfmpegProgress();
     void calculatesEncodedOutputProgress();
@@ -448,11 +449,12 @@ void TelemetryTests::rendersTelemetryAtExplicitTime()
 
 void TelemetryTests::probesMediaInfoJson()
 {
-    const QByteArray json = R"({"format":{"duration":"3.000000","start_time":"0.500000"},"streams":[{"codec_type":"video","codec_name":"h264","width":320,"height":180,"r_frame_rate":"30000/1001","avg_frame_rate":"30000/1001","time_base":"1/90000","pix_fmt":"yuv420p"},{"codec_type":"audio","codec_name":"aac"}]})";
+    const QByteArray json = R"({"format":{"duration":"3.000000","start_time":"0.500000"},"streams":[{"codec_type":"video","codec_name":"h264","width":320,"height":180,"r_frame_rate":"30000/1001","avg_frame_rate":"30000/1001","time_base":"1/90000","pix_fmt":"yuv420p","nb_read_frames":"90"},{"codec_type":"audio","codec_name":"aac"}]})";
     const MediaInfo info = MediaProbe::parseJson(json, "/fixture.mp4");
     QCOMPARE(info.path, QString("/fixture.mp4"));
     QCOMPARE(info.videoSize, QSize(320, 180));
     QCOMPARE(info.videoCodec, QString("h264"));
+    QCOMPARE(info.videoFrameCount, qsizetype(90));
     QCOMPARE(info.audioCodecs, QStringList({"aac"}));
     QVERIFY(qAbs(info.frameRate.value() - 29.97002997) < 0.00001);
     QVERIFY(!info.likelyVariableFrameRate);
@@ -473,6 +475,13 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QCOMPARE(ExportEngine::frameCount(120.0, 140.0, {30'000, 1001}), qsizetype(600));
     QCOMPARE(ExportEngine::frameCount(0.0, 1.0, {60'000, 1001}), qsizetype(60));
     QCOMPARE(ExportEngine::frameCount(1.0, 1.0, {30, 1}), qsizetype(0));
+    const MediaRational ntscRate{60'000, 1001};
+    QCOMPARE(ExportEngine::frameCount(30.0, 150.0, ntscRate), qsizetype(7'193));
+    QCOMPARE(ExportEngine::sourceVideoTime(30.0, 0, ntscRate), 30.0);
+    QVERIFY(qAbs(ExportEngine::sourceVideoTime(30.0, 1, ntscRate) - (30.0 + 1001.0 / 60'000.0)) < 0.000001);
+    QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) < 150.0);
+    QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) > 149.9);
+    QCOMPARE(ExportEngine::exportRelativeTime(0, ntscRate), 0.0);
 }
 
 void TelemetryTests::preservesAbsoluteExportTimestamps()
@@ -495,6 +504,87 @@ void TelemetryTests::preservesAbsoluteExportTimestamps()
     context.setTime(125.0);
     QVERIFY(qAbs(context.telemetryTime() - 215.203) < 0.000001);
     QVERIFY(qAbs(context.telemetryValue("rpm").toDouble() - 5270.0) < 0.001);
+}
+
+void TelemetryTests::composesNonZeroExportRangeWithZeroBasedOutput()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the non-zero-range integration test.");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    constexpr int width = 64;
+    constexpr int height = 16;
+    constexpr int sourceFrames = 300;
+    constexpr int rangeStartFrame = 90;
+    constexpr int exportFrames = 150;
+    const QString primaryRaw = directory.filePath("source.rgba");
+    const QString overlayRaw = directory.filePath("telemetry.rgba");
+    const QString primary = directory.filePath("source.mkv");
+    const QString overlay = directory.filePath("overlay.mkv");
+    const QString composed = directory.filePath("composed.mkv");
+    const QString decoded = directory.filePath("decoded.rgba");
+    const auto writeIdentityFrames = [](const QString &path, const int count, const int pixelOffset) {
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly)) return false;
+        for (int frame = 0; frame < count; ++frame) {
+            QByteArray pixels(width * height * 4, '\0');
+            for (int bit = 0; bit < 8; ++bit) {
+                const int offset = (pixelOffset + bit) * 4;
+                const char value = (frame & (1 << bit)) ? static_cast<char>(255) : 0;
+                pixels[offset] = value;
+                pixels[offset + 1] = value;
+                pixels[offset + 2] = value;
+                pixels[offset + 3] = static_cast<char>(255);
+            }
+            if (file.write(pixels) != pixels.size()) return false;
+        }
+        return true;
+    };
+    QVERIFY(writeIdentityFrames(primaryRaw, sourceFrames, 0));
+    QVERIFY(writeIdentityFrames(overlayRaw, exportFrames, 8));
+    const auto runFfmpeg = [&ffmpeg](const QStringList &arguments) {
+        QProcess process;
+        process.start(ffmpeg, arguments);
+        QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+        QVERIFY2(process.waitForFinished(30'000), qPrintable(process.errorString()));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    };
+    const QString size = QStringLiteral("%1x%2").arg(width).arg(height);
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgba",
+               "-video_size", size, "-framerate", "30", "-i", primaryRaw, "-f", "lavfi", "-i",
+               "sine=frequency=440:sample_rate=48000:duration=10", "-frames:v", QString::number(sourceFrames),
+               "-c:v", "ffv1", "-pix_fmt", "bgra", "-c:a", "pcm_s16le", primary});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgba",
+               "-video_size", size, "-framerate", "30", "-i", overlayRaw, "-an", "-c:v", "ffv1",
+               "-pix_fmt", "bgra", overlay});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", primary, "-i", overlay,
+               "-filter_complex", "[0:v]trim=start=3:end=8,setpts=PTS-STARTPTS[source];[1:v]setpts=PTS-STARTPTS[telemetry];[source][telemetry]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=rgb[video];[0:a]atrim=start=3:end=8,asetpts=PTS-STARTPTS[audio]",
+               "-map", "[video]", "-map", "[audio]", "-c:v", "ffv1", "-pix_fmt", "bgra", "-c:a",
+               "pcm_s16le", composed});
+    const MediaInfo outputInfo = MediaProbe::probe(composed, {}, true);
+    QCOMPARE(outputInfo.videoFrameCount, qsizetype(exportFrames));
+    QVERIFY(qAbs(outputInfo.duration - 5.0) < 0.05);
+    QVERIFY(!outputInfo.audioCodecs.isEmpty());
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", composed, "-f", "rawvideo",
+               "-pixel_format", "rgba", decoded});
+    QFile decodedFile(decoded);
+    QVERIFY(decodedFile.open(QIODevice::ReadOnly));
+    const QByteArray output = decodedFile.readAll();
+    const qsizetype bytesPerFrame = width * height * 4;
+    QCOMPARE(output.size(), exportFrames * bytesPerFrame);
+    const auto decodeIdentity = [](const char *pixels, const int pixelOffset) {
+        int identity = 0;
+        for (int bit = 0; bit < 8; ++bit) {
+            if (static_cast<uchar>(pixels[(pixelOffset + bit) * 4]) > 127) identity |= 1 << bit;
+        }
+        return identity;
+    };
+    for (int frame = 0; frame < exportFrames; ++frame) {
+        const char *pixels = output.constData() + frame * bytesPerFrame;
+        QCOMPARE(decodeIdentity(pixels, 0), rangeStartFrame + frame);
+        QCOMPARE(decodeIdentity(pixels, 8), frame);
+    }
 }
 
 void TelemetryTests::estimatesExportProgress()

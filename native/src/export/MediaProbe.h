@@ -23,13 +23,15 @@ struct MediaInfo {
     QString videoCodec;
     QString pixelFormat;
     QStringList audioCodecs;
+    qsizetype videoFrameCount = 0;
     double startTime = 0.0;
     bool likelyVariableFrameRate = false;
 };
 
 class MediaProbe final {
 public:
-    [[nodiscard]] static MediaInfo probe(const QString &path, const QString &ffprobePath = {});
+    [[nodiscard]] static MediaInfo probe(
+        const QString &path, const QString &ffprobePath = {}, bool countVideoFrames = false);
     [[nodiscard]] static MediaInfo parseJson(const QByteArray &json, const QString &path = {});
     [[nodiscard]] static MediaRational parseRational(const QString &value);
 };

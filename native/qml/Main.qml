@@ -593,7 +593,8 @@ ApplicationWindow {
             }
             Label {
                 text: {
-                    const names = { "preparing": qsTr("Preparing"), "rendering": qsTr("Rendering & encoding"),
+                    const names = { "preparing": qsTr("Preparing"), "renderingOverlay": qsTr("Rendering overlay"),
+                        "encodingVideo": qsTr("Encoding video"), "rendering": qsTr("Rendering & encoding"),
                         "finalizing": qsTr("Finalizing"), "validating": qsTr("Validating"),
                         "cancelling": qsTr("Cancelling"), "complete": qsTr("Complete"), "failed": qsTr("Failed") };
                     return names[appController.exportProgressInfo.stage] || qsTr("Preparing");
@@ -614,8 +615,8 @@ ApplicationWindow {
             }
             Label {
                 Layout.fillWidth: true
-                text: window.formatTime(Number(appController.exportProgressInfo.encodedSeconds || 0) * 1000)
-                    + " / " + window.formatTime(Number(appController.exportProgressInfo.endTime || 0) * 1000)
+                text: window.formatTime(Number(appController.exportProgressInfo.encodedSeconds || appController.exportProgressInfo.exportRelativeTime || 0) * 1000)
+                    + " / " + window.formatTime(Number(appController.exportProgressInfo.exportDuration || 0) * 1000)
                     + "    ·    " + qsTr("Encoded frame %1").arg(appController.exportProgressInfo.encodedFrames || 0)
                 color: "#d8e0e9"
                 font.pixelSize: 12
@@ -625,11 +626,11 @@ ApplicationWindow {
                 columns: 3
                 Label { text: qsTr("Elapsed\n%1").arg(window.formatTime(Number(appController.exportProgressInfo.elapsedMilliseconds || 0))); color: "#aeb9c7" }
                 Label { text: qsTr("Overlay feed\n%1 fps").arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1)); color: "#aeb9c7" }
-                Label { text: qsTr("Encoder\n%1 fps · %2x").arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1)).arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2)); color: "#aeb9c7" }
+                Label { text: (appController.exportProgressInfo.stage === "renderingOverlay" ? qsTr("Overlay encode") : qsTr("Final encoder")) + "\n%1 fps · %2x".arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1)).arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2)); color: "#aeb9c7" }
             }
             Label {
                 Layout.fillWidth: true
-                text: "HEVC · " + (appController.exportProgressInfo.encoderName || qsTr("Detecting encoder…"))
+                text: (appController.exportProgressInfo.stage === "renderingOverlay" ? qsTr("Temporary overlay · FFV1") : "HEVC · " + (appController.exportProgressInfo.encoderName || qsTr("Detecting encoder…")))
                     + " · " + (appController.exportProgressInfo.width || "") + "×" + (appController.exportProgressInfo.height || "")
                     + " · " + Number(appController.exportProgressInfo.frameRate || 0).toFixed(3) + " fps\n" + (appController.exportProgressInfo.audioLabel || "")
                 color: "#8b98a8"; font.pixelSize: 11
@@ -651,8 +652,12 @@ ApplicationWindow {
                     wrapMode: TextEdit.WrapAnywhere
                     color: "#9eabba"
                     font.pixelSize: 11
-                    text: qsTr("Overlay generated/submitted: %1 / %2 of %3\nFFmpeg encoded: %4 frames\nQueued to FFmpeg: %5 MiB (maximum %6 MiB)\nTemporary overlay: %7 MiB\nOverlay feed: %8 fps\nEncoder: %9 fps · %10x realtime\nEncoder ID: %11\nOutput: %12")
-                        .arg(appController.exportProgressInfo.generatedFrames || 0).arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
+                    text: qsTr("Overlay generated/submitted: %1 / %2 of %3\nSource range: %4 → %5\nCurrent source time: %6\nTelemetry time: %7\nFFmpeg encoded: %8 frames\nQueued to FFmpeg: %9 MiB (maximum %10 MiB)\nTemporary overlay: %11 MiB\nOverlay feed: %12 fps\nEncoder: %13 fps · %14x realtime\nEncoder ID: %15\nOutput: %16")
+                        .arg(appController.exportProgressInfo.generatedFrames || 0).arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.expectedFrames || 0)
+                        .arg(window.formatTime(Number(appController.exportProgressInfo.sourceRangeStart || 0) * 1000))
+                        .arg(window.formatTime(Number(appController.exportProgressInfo.sourceRangeEnd || 0) * 1000))
+                        .arg(window.formatTime(Number(appController.exportProgressInfo.sourceVideoTime || 0) * 1000))
+                        .arg(window.formatTime(Number(appController.exportProgressInfo.telemetryTime || 0) * 1000))
                         .arg(appController.exportProgressInfo.encodedFrames || 0)
                         .arg((Number(appController.exportProgressInfo.queuedBytes || 0) / 1048576).toFixed(1))
                         .arg((Number(appController.exportProgressInfo.maximumQueuedBytes || 0) / 1048576).toFixed(1))
