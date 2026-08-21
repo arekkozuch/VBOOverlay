@@ -2,6 +2,14 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Quick QuickControls
 
 qt_standard_project_setup(REQUIRES 6.8)
 
+function(flappedear_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
 qt_add_library(flappedear_core STATIC
     src/gopro/GoProTelemetrySource.cpp
     src/gopro/GoProTelemetrySource.h
@@ -19,7 +27,7 @@ qt_add_library(flappedear_core STATIC
 target_compile_features(flappedear_core PUBLIC cxx_std_20)
 target_include_directories(flappedear_core PUBLIC src)
 target_link_libraries(flappedear_core PUBLIC Qt6::Core)
-target_compile_options(flappedear_core PRIVATE -Wall -Wextra -Wpedantic)
+flappedear_enable_warnings(flappedear_core)
 
 qt_add_resources(flappedear_core "flappedear_templates"
     PREFIX "/flappedear"
@@ -54,7 +62,7 @@ target_link_libraries(flappedear_native PRIVATE
     Qt6::QuickControls2
     Qt6::Multimedia
 )
-target_compile_options(flappedear_native PRIVATE -Wall -Wextra -Wpedantic)
+flappedear_enable_warnings(flappedear_native)
 
 qt_add_resources(flappedear_native "flappedear_branding"
     PREFIX "/flappedear"
