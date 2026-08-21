@@ -51,6 +51,8 @@ struct ExportSettings {
     QString quality = QStringLiteral("high");
     bool audioEnabled = true;
     QString cancellationFilePath;
+    QString temporaryOverlayPath;
+    QString manifestPath;
     std::function<void(const QString &state)> stateCallback;
     std::function<void(const ExportPipelineProgress &progress)> progressCallback;
     std::function<void(const QString &id, const QString &displayName)> encoderCallback;

@@ -22,3 +22,9 @@ For an existing target, replacement requires the controller's explicit `overwrit
 
 Input video, VBO, and known transaction paths are compared using cleaned absolute paths and canonical
 paths where Qt can resolve them, including existing symlinks and canonicalized parent directories.
+
+## Active artifact manifests and recovery
+
+Before a worker is started, the controller writes an atomic versioned JSON manifest in the system temporary directory. It records the export UUID, creation time, worker PID, state, temporary FFV1 path, staging path, and final target for diagnostics. The manifest is the authorization record: only its validated overlay and staging paths may be removed automatically; the final target is never a cleanup candidate.
+
+On normal success, cancellation, or failure the controller removes those owned artifacts and the manifest. If cleanup cannot finish, the manifest remains. At application startup the janitor reads only FlappedEar manifest files, rejects malformed records, skips a record whose PID is still active, and removes only paths proven by the valid manifest. Names such as `*.mkv` or `*.part.mp4` alone never authorize deletion.

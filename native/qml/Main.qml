@@ -796,7 +796,7 @@ ApplicationWindow {
                             "cleaningUp": qsTr("Cleaning up"), "complete": qsTr("Complete"),
                             "validationWarning": qsTr("Completed with warning"), "failed": qsTr("Failed"),
                             "cancelled": qsTr("Cancelled") };
-                        let value = qsTr("Stage: %1\nCurrent operation: %2\nStage elapsed: %3\nTotal elapsed: %4\n\nOverlay generated/submitted: %5 / %6 of %7\nSource range: %8 → %9\nCurrent source time: %10\nTelemetry time: %11\nFinal encoded frames: %12\nQueued to FFmpeg: %13 MiB (maximum %14 MiB)\nTemporary overlay: %15 MiB\nFinal output: %16 MiB\nOverlay feed: %17 fps\nEncoder: %18 fps · %19x realtime\nFinal encoder: %20\nOutput: %21")
+                        let value = qsTr("Stage: %1\nCurrent operation: %2\nStage elapsed: %3\nTotal elapsed: %4\n\nOverlay generated/submitted: %5 / %6 of %7\nSource range: %8 → %9\nCurrent source time: %10\nTelemetry time: %11\nFinal encoded frames: %12\nQueued to FFmpeg: %13 MiB (maximum %14 MiB)\nTemporary overlay: %15 MiB\nFinal output: %16 MiB\nEstimated temporary use: %17 GiB\nTemporary volume free: %18 GiB\nEstimated final output: %19 GiB\nDestination volume free: %20 GiB\nOverlay feed: %21 fps\nEncoder: %22 fps · %23x realtime\nFinal encoder: %24\nOutput: %25")
                             .arg(names[p.stage] || p.stage || qsTr("Preparing"))
                             .arg(p.currentOperation || qsTr("Preparing telemetry scene"))
                             .arg(window.formatTime(Number(p.stageElapsedMilliseconds || 0)))
@@ -811,6 +811,10 @@ ApplicationWindow {
                             .arg((Number(p.maximumQueuedBytes || 0) / 1048576).toFixed(1))
                             .arg((Number(p.temporaryOverlayBytes || 0) / 1048576).toFixed(1))
                             .arg((Number(p.outputBytes || 0) / 1048576).toFixed(1))
+                            .arg((Number(p.estimatedTemporaryOverlayBytes || 0) / 1073741824).toFixed(2))
+                            .arg((Number(p.temporaryFilesystemAvailableBytes || 0) / 1073741824).toFixed(2))
+                            .arg((Number(p.estimatedFinalOutputBytes || 0) / 1073741824).toFixed(2))
+                            .arg((Number(p.destinationFilesystemAvailableBytes || 0) / 1073741824).toFixed(2))
                             .arg(Number(p.rendererFps || 0).toFixed(1))
                             .arg(Number(p.encoderFps || 0).toFixed(1))
                             .arg(Number(p.encoderRealtimeFactor || 0).toFixed(2))

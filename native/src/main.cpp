@@ -4,6 +4,7 @@
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
+#include "export/ExportArtifactManifest.h"
 #include "telemetry/VboParser.h"
 #include "telemetry/TrackGeometry.h"
 #include "widgets/WidgetModel.h"
@@ -226,8 +227,10 @@ int exportWorker(const QString &configPath)
         currentOperation = QStringLiteral("probeInput");
         currentMessage = QStringLiteral("Reading input metadata with ffprobe");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
+        const QString cancellationPath = config.value("cancelPath").toString();
+        const auto cancelled = [cancellationPath] { return !cancellationPath.isEmpty() && QFileInfo::exists(cancellationPath); };
         const FlappedEar::MediaInfo input = FlappedEar::MediaProbe::probe(
-            config.value("inputPath").toString(), {}, false, -1, emitProbeEvent);
+            config.value("inputPath").toString(), {}, false, -1, emitProbeEvent, cancelled);
         emitEvent({{"type", "log"}, {"level", "info"}, {"component", "ffprobe"},
                    {"message", "Input probed"},
                    {"details", QJsonObject{{"codec", input.videoCodec},
@@ -256,6 +259,8 @@ int exportWorker(const QString &configPath)
         settings.quality = config.value("quality").toString("high");
         settings.audioEnabled = config.value("audioEnabled").toBool(true);
         settings.cancellationFilePath = config.value("cancelPath").toString();
+        settings.temporaryOverlayPath = config.value("temporaryOverlayPath").toString();
+        settings.manifestPath = config.value("manifestPath").toString();
         const double sourceRangeStart = settings.startTime;
         const double sourceRangeEnd = settings.endTime;
         const double exportDuration = sourceRangeEnd - sourceRangeStart;
@@ -338,6 +343,11 @@ int exportWorker(const QString &configPath)
                               {"component", observation.component}};
             if (!observation.details.isEmpty()) {
                 event.insert("details", QJsonObject::fromVariantMap(observation.details));
+                if (observation.component == QStringLiteral("storage")) {
+                    for (auto it = observation.details.cbegin(); it != observation.details.cend(); ++it) {
+                        event.insert(it.key(), QJsonValue::fromVariant(it.value()));
+                    }
+                }
             }
             emitEvent(event);
         };
@@ -418,6 +428,12 @@ int main(int argc, char *argv[])
     }
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
+    if (!exportWorkerMode) {
+        QStringList janitorDiagnostics;
+        const QStringList recovered = FlappedEar::ExportArtifactManifest::recoverStale(&janitorDiagnostics);
+        for (const QString &path : recovered) qInfo().noquote() << QStringLiteral("Recovered owned stale export artifacts: %1").arg(path);
+        for (const QString &message : janitorDiagnostics) qWarning().noquote() << message;
+    }
     QCoreApplication::setOrganizationName("FlappedEar");
     QCoreApplication::setOrganizationDomain("flappedear.com");
     QCoreApplication::setApplicationName("FlappedEar Telemetry");

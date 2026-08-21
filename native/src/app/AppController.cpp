@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 
 #include "gopro/GoProTelemetrySource.h"
+#include "export/ExportArtifactManifest.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/VboParser.h"
 
@@ -13,6 +14,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QDateTime>
 #include <QScopedValueRollback>
 #include <QTimer>
 #include <QtConcurrent>
@@ -136,14 +138,12 @@ AppController::~AppController()
         if (cancellationFile.open(QIODevice::WriteOnly)) {
             cancellationFile.close();
         }
-        m_exportProcess->terminate();
-        if (!m_exportProcess->waitForFinished(5'000)) {
-            m_exportProcess->kill();
-            m_exportProcess->waitForFinished(5'000);
-        }
+        if (m_exportSupervisor) static_cast<void>(m_exportSupervisor->stopAndWait());
     }
     m_exportOutputTransaction.reset();
-    QFile::remove(m_exportCancelPath);
+    // On abnormal destruction the manifest intentionally remains for startup
+    // recovery. A normal finished callback performs the authorized cleanup.
+    if (!exporting()) QFile::remove(m_exportCancelPath);
 }
 
 QUrl AppController::videoSource() const { return m_videoSource; }
@@ -942,11 +942,28 @@ bool AppController::startExport(
         emit exportChanged();
         return false;
     }
+    const QString exportId = m_exportOutputTransaction->transactionId();
+    const QString temporaryOverlayPath = QDir::temp().filePath(
+        QStringLiteral("flappedear-overlay-%1.mkv").arg(exportId));
+    const ExportArtifactManifestData manifest{exportId, QDateTime::currentMSecsSinceEpoch(),
+        temporaryOverlayPath, m_exportOutputTransaction->stagingPath(),
+        m_exportOutputTransaction->userTargetPath(), 0, QStringLiteral("preparing")};
+    QString manifestError;
+    if (!ExportArtifactManifest::create(manifest, &manifestError)) {
+        m_exportError = QStringLiteral("Could not create export ownership manifest: %1").arg(manifestError);
+        m_exportState = QStringLiteral("failed");
+        m_exportOutputTransaction.reset();
+        emit exportChanged();
+        return false;
+    }
+    m_exportManifestPath = ExportArtifactManifest::manifestPathFor(exportId);
     m_exportConfig = std::make_unique<QTemporaryFile>(
         QDir::temp().filePath(QStringLiteral("flappedear-export-XXXXXX.json")));
     if (!m_exportConfig->open()) {
         m_exportError = QStringLiteral("Could not create temporary export configuration.");
         m_exportState = QStringLiteral("failed");
+        static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
+        m_exportManifestPath.clear();
         m_exportOutputTransaction.reset();
         emit exportChanged();
         return false;
@@ -964,10 +981,14 @@ bool AppController::startExport(
         {"startTime", startTime},
         {"endTime", endTime},
         {"cancelPath", m_exportCancelPath},
+        {"temporaryOverlayPath", temporaryOverlayPath},
+        {"manifestPath", m_exportManifestPath},
     };
     if (m_exportConfig->write(QJsonDocument(config).toJson(QJsonDocument::Compact)) < 0) {
         m_exportError = QStringLiteral("Could not write temporary export configuration.");
         m_exportState = QStringLiteral("failed");
+        static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
+        m_exportManifestPath.clear();
         m_exportOutputTransaction.reset();
         m_exportConfig.reset();
         emit exportChanged();
@@ -992,6 +1013,7 @@ bool AppController::startExport(
     m_exportProgressVisible = true;
     m_exportState = QStringLiteral("starting");
     m_exportProcess = std::make_unique<QProcess>(this);
+    m_exportSupervisor = std::make_unique<ExportProcessSupervisor>(*m_exportProcess);
     m_exportProcess->setProcessChannelMode(QProcess::SeparateChannels);
     connect(m_exportProcess.get(), &QProcess::readyReadStandardOutput, this, &AppController::handleExportOutput);
     connect(
@@ -999,15 +1021,34 @@ bool AppController::startExport(
         qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
         this,
         &AppController::finishExport);
-    m_exportProcess->start(
+    m_exportSupervisor->start(
         QCoreApplication::applicationFilePath(), {"--export-worker", m_exportConfig->fileName()});
-    if (!m_exportProcess->waitForStarted(5'000)) {
+    if (!m_exportSupervisor->waitForStarted(5'000)) {
         m_exportError = QStringLiteral("Could not start export worker: %1")
                             .arg(m_exportProcess->errorString());
         m_exportState = QStringLiteral("failed");
+        static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
+        m_exportManifestPath.clear();
+        m_exportSupervisor.reset();
         m_exportProcess.reset();
         m_exportConfig.reset();
         m_exportOutputTransaction.reset();
+        emit exportChanged();
+        return false;
+    }
+    ExportArtifactManifestData activeManifest;
+    if (!ExportArtifactManifest::read(m_exportManifestPath, &activeManifest, &manifestError)) {
+        m_exportError = QStringLiteral("Could not read active export ownership manifest: %1").arg(manifestError);
+        static_cast<void>(m_exportSupervisor->stopAndWait());
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return false;
+    }
+    activeManifest.workerPid = m_exportProcess->processId();
+    if (!ExportArtifactManifest::update(m_exportManifestPath, activeManifest, &manifestError)) {
+        m_exportError = QStringLiteral("Could not update active export ownership manifest: %1").arg(manifestError);
+        static_cast<void>(m_exportSupervisor->stopAndWait());
+        m_exportState = QStringLiteral("failed");
         emit exportChanged();
         return false;
     }
@@ -1041,20 +1082,13 @@ void AppController::cancelExportAndQuit()
     }
     m_quitAfterExport = true;
     cancelExport();
-    // A worker that cannot react to the cancellation file must not keep the
-    // application alive indefinitely. Its process teardown also terminates
-    // its FFmpeg child.
+    // Escalate through the dedicated process-tree owner: the worker and every
+    // inherited FFmpeg/ffprobe descendant are stopped as one lifetime unit.
     QTimer::singleShot(7'000, this, [this] {
         if (!exporting()) {
             return;
         }
-        m_exportProcess->terminate();
-        QTimer::singleShot(3'000, this, [this] {
-            if (exporting()) {
-                m_exportProcess->kill();
-                if (m_exportOutputTransaction) m_exportOutputTransaction->cleanup();
-            }
-        });
+        if (m_exportSupervisor) static_cast<void>(m_exportSupervisor->stopAndWait(3'000, 3'000));
     });
 }
 
@@ -1157,6 +1191,13 @@ void AppController::handleExportOutput()
                                    QStringLiteral("encoderFps"), QStringLiteral("encoderRealtimeFactor"),
                                    QStringLiteral("rendererFps"), QStringLiteral("queuedBytes"),
                                    QStringLiteral("maximumQueuedBytes"), QStringLiteral("temporaryOverlayBytes"),
+                                   QStringLiteral("estimatedTemporaryOverlayBytes"),
+                                   QStringLiteral("estimatedFinalOutputBytes"),
+                                   QStringLiteral("safetyReserveBytes"),
+                                   QStringLiteral("temporaryFilesystemRoot"),
+                                   QStringLiteral("temporaryFilesystemAvailableBytes"),
+                                   QStringLiteral("destinationFilesystemRoot"),
+                                   QStringLiteral("destinationFilesystemAvailableBytes"),
                                    QStringLiteral("outputBytes"), QStringLiteral("currentOperation"),
                                    QStringLiteral("operation"), QStringLiteral("stageElapsedMilliseconds"),
                                    QStringLiteral("totalElapsedMilliseconds"), QStringLiteral("stageDurations"),
@@ -1220,6 +1261,11 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
                && m_exportState == QStringLiteral("complete")) {
         QString commitError;
         if (m_exportOutputTransaction && m_exportOutputTransaction->commit(&commitError)) {
+            ExportArtifactManifestData manifest;
+            if (ExportArtifactManifest::read(m_exportManifestPath, &manifest)) {
+                manifest.state = QStringLiteral("completed");
+                static_cast<void>(ExportArtifactManifest::update(m_exportManifestPath, manifest));
+            }
             m_exportProgress = 100;
             m_exportState = QStringLiteral("complete");
             m_exportError.clear();
@@ -1240,6 +1286,13 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
     m_exportProgressInfo.insert("stage", m_exportState);
     m_exportProgressInfo.insert("progressPercent", m_exportProgress);
     QFile::remove(m_exportCancelPath);
+    QString cleanupError;
+    if (!m_exportManifestPath.isEmpty()
+        && !ExportArtifactManifest::cleanupOwned(m_exportManifestPath, &cleanupError)) {
+        m_exportDiagnosticLog.append(QStringLiteral("Owned export cleanup deferred: %1").arg(cleanupError));
+    }
+    m_exportManifestPath.clear();
+    m_exportSupervisor.reset();
     m_exportProcess.reset();
     m_exportConfig.reset();
     m_exportOutputTransaction.reset();

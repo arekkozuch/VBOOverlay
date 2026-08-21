@@ -15,12 +15,18 @@ qt_add_library(flappedear_core STATIC
     src/export/EncoderDetector.h
     src/export/ExportDiagnostics.cpp
     src/export/ExportDiagnostics.h
+    src/export/ExportArtifactManifest.cpp
+    src/export/ExportArtifactManifest.h
     src/export/ExportEngine.cpp
     src/export/ExportEngine.h
     src/export/ExportOutputTransaction.cpp
     src/export/ExportOutputTransaction.h
     src/export/ExportProgress.cpp
     src/export/ExportProgress.h
+    src/export/ExportProcessSupervisor.cpp
+    src/export/ExportProcessSupervisor.h
+    src/export/ExportStoragePolicy.cpp
+    src/export/ExportStoragePolicy.h
     src/export/FfmpegTools.cpp
     src/export/FfmpegTools.h
     src/export/MediaProbe.cpp

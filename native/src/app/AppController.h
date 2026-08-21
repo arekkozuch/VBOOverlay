@@ -6,6 +6,7 @@
 #include "export/MediaProbe.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportOutputTransaction.h"
+#include "export/ExportProcessSupervisor.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -294,10 +295,12 @@ private:
     QString m_projectLoadStage;
     QString m_projectLoadError;
     std::unique_ptr<QProcess> m_exportProcess;
+    std::unique_ptr<ExportProcessSupervisor> m_exportSupervisor;
     std::unique_ptr<QTemporaryFile> m_exportConfig;
     std::unique_ptr<ExportOutputTransaction> m_exportOutputTransaction;
     QByteArray m_exportStdout;
     QString m_exportCancelPath;
+    QString m_exportManifestPath;
     int m_exportProgress = 0;
     QString m_exportState = QStringLiteral("idle");
     QString m_exportError;

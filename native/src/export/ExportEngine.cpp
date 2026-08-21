@@ -1,7 +1,10 @@
 #include "export/ExportEngine.h"
 
 #include "export/EncoderDetector.h"
+#include "export/ExportArtifactManifest.h"
 #include "export/ExportDiagnostics.h"
+#include "export/ExportProcessSupervisor.h"
+#include "export/ExportStoragePolicy.h"
 #include "export/FfmpegTools.h"
 #include "export/ExportProgress.h"
 #include "export/TelemetryFrameRenderer.h"
@@ -14,6 +17,7 @@
 #include <QElapsedTimer>
 #include <QScopeGuard>
 #include <QStorageInfo>
+#include <QUuid>
 #include <algorithm>
 #include <cmath>
 
@@ -55,6 +59,15 @@ QString qualityBitrate(const QString &quality)
 bool isCancelled(const ExportSettings &settings)
 {
     return !settings.cancellationFilePath.isEmpty() && QFileInfo::exists(settings.cancellationFilePath);
+}
+
+bool updateManifestState(const ExportSettings &settings, const QString &state)
+{
+    if (settings.manifestPath.isEmpty()) return true;
+    ExportArtifactManifestData manifest;
+    if (!ExportArtifactManifest::read(settings.manifestPath, &manifest)) return false;
+    manifest.state = state;
+    return ExportArtifactManifest::update(settings.manifestPath, manifest);
 }
 
 void observe(
@@ -251,7 +264,8 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("probeInput"), QStringLiteral("Reading input metadata with ffprobe"));
         const MediaInfo source = MediaProbe::probe(
             settings.inputPath, {}, false, -1,
-            probeObservations(settings, QStringLiteral("preparing"), QStringLiteral("probeInput")));
+            probeObservations(settings, QStringLiteral("preparing"), QStringLiteral("probeInput")),
+            [&settings] { return isCancelled(settings); });
         observe(settings, QStringLiteral("log"), QStringLiteral("preparing"),
                 QStringLiteral("probeInput"), QStringLiteral("Input probed"), QStringLiteral("ffprobe"),
                 {{"codec", source.videoCodec}, {"width", source.videoSize.width()},
@@ -298,26 +312,44 @@ ExportResult ExportEngine::exportVideo(
         if (settings.encoderCallback && selected != encoders.cend()) {
             settings.encoderCallback(selected->id, selected->displayName);
         }
-        QTemporaryFile temporaryOverlay(
-            QDir::temp().filePath(QStringLiteral("flappedear-overlay-XXXXXX.mkv")));
-        if (!temporaryOverlay.open()) {
-            result.error = QStringLiteral("Could not create a temporary telemetry overlay file.");
+        const QString temporaryOverlayPath = settings.temporaryOverlayPath.isEmpty()
+            ? QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv")
+                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
+            : settings.temporaryOverlayPath;
+        const ExportStorageEstimate storageEstimate = ExportStoragePolicy::estimate(
+            expectedFrames, outputSize, exportDuration, settings.quality);
+        const ExportStoragePreflight storagePreflight = ExportStoragePolicy::evaluate(
+            temporaryOverlayPath, settings.outputPath, storageEstimate);
+        observe(settings, QStringLiteral("log"), QStringLiteral("preparing"),
+                QStringLiteral("preflightStorage"), QStringLiteral("Export storage preflight"),
+                QStringLiteral("storage"), {{"estimatedTemporaryOverlayBytes", storageEstimate.temporaryOverlayBytes},
+                {"estimatedFinalOutputBytes", storageEstimate.finalOutputBytes},
+                {"safetyReserveBytes", storageEstimate.safetyReserveBytes},
+                {"temporaryFilesystemRoot", storagePreflight.temporaryFilesystem.rootPath},
+                {"temporaryFilesystemAvailableBytes", storagePreflight.temporaryFilesystem.availableBytes},
+                {"destinationFilesystemRoot", storagePreflight.destinationFilesystem.rootPath},
+                {"destinationFilesystemAvailableBytes", storagePreflight.destinationFilesystem.availableBytes}});
+        if (!storagePreflight.sufficient) { result.error = storagePreflight.error; return result; }
+        if (!updateManifestState(settings, QStringLiteral("stageA"))) {
+            result.error = QStringLiteral("Could not update export ownership manifest before Stage A.");
             return result;
         }
-        temporaryOverlay.close();
-        temporaryOverlay.setAutoRemove(false);
-        const FilesystemSnapshot temporaryFilesystemAtStart = filesystemSnapshot(temporaryOverlay.fileName());
+        const FilesystemSnapshot temporaryFilesystemAtStart = filesystemSnapshot(temporaryOverlayPath);
         const FilesystemSnapshot destinationFilesystemAtStart = filesystemSnapshot(settings.outputPath);
         const auto cleanupTemporaryOverlay = qScopeGuard([&] {
-            const QFileInfo temporaryInfo(temporaryOverlay.fileName());
+            const QFileInfo temporaryInfo(temporaryOverlayPath);
             observe(settings, QStringLiteral("status"), QStringLiteral("cleaningUp"),
                     QStringLiteral("removeTemporaryOverlay"),
                     QStringLiteral("Cleaning temporary overlay"));
             observe(settings, QStringLiteral("log"), QStringLiteral("cleaningUp"),
                     QStringLiteral("removeTemporaryOverlay"),
                     QStringLiteral("Removing temporary overlay"), QStringLiteral("cleanup"),
-                    {{"path", temporaryOverlay.fileName()}, {"bytes", temporaryInfo.size()}});
-            const bool removed = !temporaryInfo.exists() || QFile::remove(temporaryOverlay.fileName());
+                    {{"path", temporaryOverlayPath}, {"bytes", temporaryInfo.size()}});
+            // The controller's manifest janitor is the only authority allowed
+            // to remove worker-owned artifacts. Legacy direct callers retain
+            // the old local temporary-file cleanup behavior.
+            const bool removed = !temporaryInfo.exists()
+                || (settings.manifestPath.isEmpty() && QFile::remove(temporaryOverlayPath));
             observe(settings, QStringLiteral("log"), QStringLiteral("cleaningUp"),
                     QStringLiteral("removeTemporaryOverlay"),
                     removed ? QStringLiteral("Temporary overlay deleted")
@@ -325,13 +357,17 @@ ExportResult ExportEngine::exportVideo(
                     QStringLiteral("cleanup"), {{"result", removed ? "deleted" : "failed"}});
         });
         QProcess ffmpeg;
+        // Keep FFmpeg in the worker's group, so a forced GUI-worker shutdown
+        // reaches it as well as any inherited descendants.
+        ExportProcessSupervisor ffmpegSupervisor(ffmpeg, false);
         QProcess *activeFfmpeg = &ffmpeg;
+        ExportProcessSupervisor *activeSupervisor = &ffmpegSupervisor;
         const QString size = QStringLiteral("%1x%2").arg(outputSize.width()).arg(outputSize.height());
         const QStringList overlayArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
             "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", size,
             "-framerate", rateString(exportFrameRate), "-i", "pipe:0", "-an",
-            "-c:v", "ffv1", "-pix_fmt", "bgra", "-f", "matroska", temporaryOverlay.fileName(),
+            "-c:v", "ffv1", "-pix_fmt", "bgra", "-f", "matroska", temporaryOverlayPath,
         };
         observe(settings, QStringLiteral("status"), QStringLiteral("renderingOverlay"),
                 QStringLiteral("encodeTemporaryOverlay"),
@@ -340,7 +376,7 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("encodeTemporaryOverlay"), QStringLiteral("Stage A started"),
                 QStringLiteral("ffmpeg"),
                 {{"executable", FfmpegTools::ffmpegPath()}, {"arguments", overlayArguments},
-                 {"temporaryOverlayPath", temporaryOverlay.fileName()}, {"temporaryOverlayAutoRemove", false},
+                 {"temporaryOverlayPath", temporaryOverlayPath}, {"temporaryOverlayAutoRemove", false},
                  {"temporaryFilesystemRoot", temporaryFilesystemAtStart.root},
                  {"temporaryFilesystemAvailableBytes", temporaryFilesystemAtStart.availableBytes},
                  {"temporaryFilesystemTotalBytes", temporaryFilesystemAtStart.totalBytes},
@@ -349,15 +385,14 @@ ExportResult ExportEngine::exportVideo(
                  {"destinationFilesystemTotalBytes", destinationFilesystemAtStart.totalBytes}});
         ffmpeg.setProcessChannelMode(QProcess::SeparateChannels);
         qInfo().noquote() << QStringLiteral("Stage A FFmpeg arguments: %1").arg(formatArgumentList(overlayArguments));
-        ffmpeg.start(FfmpegTools::ffmpegPath(), overlayArguments);
-        if (!ffmpeg.waitForStarted()) {
+        ffmpegSupervisor.start(FfmpegTools::ffmpegPath(), overlayArguments);
+        if (!ffmpegSupervisor.waitForStarted()) {
             result.error = QStringLiteral("Could not start FFmpeg: %1").arg(ffmpeg.errorString());
             return result;
         }
         if (isCancelled(settings)) {
             result.cancelled = true;
-            ffmpeg.kill();
-            ffmpeg.waitForFinished();
+            static_cast<void>(ffmpegSupervisor.stopAndWait());
             return result;
         }
         const qint64 bytesPerFrame = static_cast<qint64>(outputSize.width()) * outputSize.height() * 4;
@@ -371,13 +406,15 @@ ExportResult ExportEngine::exportVideo(
         QString stderr;
         QElapsedTimer activityTimer;
         activityTimer.start();
+        QElapsedTimer storageMonitorTimer;
+        storageMonitorTimer.start();
         bool finalizing = false;
         bool compositing = false;
         int lastOverlayMilestone = -5;
         int lastCompositionMilestone = -5;
         QString stageAStdinCloseReason;
         const auto refreshTemporaryOverlaySize = [&] {
-            result.temporaryOverlayBytes = QFileInfo(temporaryOverlay.fileName()).size();
+            result.temporaryOverlayBytes = QFileInfo(temporaryOverlayPath).size();
         };
         const auto reportProgress = [&] {
             if (!compositing) {
@@ -457,7 +494,7 @@ ExportResult ExportEngine::exportVideo(
             // diagnostic snapshot so FFmpeg's actual failure is not lost.
             pumpFfmpeg();
             refreshTemporaryOverlaySize();
-            const FilesystemSnapshot temporaryFilesystemNow = filesystemSnapshot(temporaryOverlay.fileName());
+            const FilesystemSnapshot temporaryFilesystemNow = filesystemSnapshot(temporaryOverlayPath);
             const FilesystemSnapshot destinationFilesystemNow = filesystemSnapshot(settings.outputPath);
             const qint64 queuedBytes = static_cast<qint64>(ffmpeg.bytesToWrite());
             result.maximumQueuedBytes = qMax(result.maximumQueuedBytes, queuedBytes);
@@ -475,7 +512,7 @@ ExportResult ExportEngine::exportVideo(
                 lastFfmpegProgress.realtimeFactor,
                 queuedBytes,
                 result.maximumQueuedBytes,
-                temporaryOverlay.fileName(),
+                temporaryOverlayPath,
                 result.temporaryOverlayBytes,
                 stderr.right(16 * 1024),
                 temporaryFilesystemNow.root,
@@ -499,11 +536,22 @@ ExportResult ExportEngine::exportVideo(
                                             .arg(result.renderedFrames).arg(expectedFrames);
                 activeFfmpeg->closeWriteChannel();
             }
-            activeFfmpeg->terminate();
-            if (!activeFfmpeg->waitForFinished(5'000)) {
-                activeFfmpeg->kill();
-                activeFfmpeg->waitForFinished(5'000);
-            }
+            static_cast<void>(activeSupervisor->stopAndWait());
+        };
+        const auto checkTemporarySpace = [&] {
+            if (storageMonitorTimer.elapsed() < 1'000) return true;
+            storageMonitorTimer.restart();
+            const ExportFilesystemInfo filesystem = ExportStoragePolicy::filesystemForPath(temporaryOverlayPath);
+            observe(settings, QStringLiteral("log"), compositing ? QStringLiteral("encodingVideo")
+                : QStringLiteral("renderingOverlay"), QStringLiteral("monitorStorage"),
+                QStringLiteral("Temporary volume free-space sample"), QStringLiteral("storage"),
+                {{"temporaryFilesystemRoot", filesystem.rootPath},
+                 {"temporaryFilesystemAvailableBytes", filesystem.availableBytes}});
+            if (!ExportStoragePolicy::criticallyLow(filesystem, storageEstimate.safetyReserveBytes)) return true;
+            result.error = QStringLiteral("Not enough free space for export. Temporary filesystem %1 fell below the %2 safety reserve.")
+                .arg(filesystem.rootPath, ExportStoragePolicy::bytesText(storageEstimate.safetyReserveBytes));
+            static_cast<void>(activeSupervisor->stopAndWait());
+            return false;
         };
         const auto waitForQueueRoom = [&] {
             if (static_cast<qint64>(activeFfmpeg->bytesToWrite()) <= queueHighWaterMark) return true;
@@ -515,18 +563,15 @@ ExportResult ExportEngine::exportVideo(
                 activeFfmpeg->waitForBytesWritten(250);
                 pumpFfmpeg();
                 reportProgress();
+                if (!checkTemporarySpace()) return false;
                 if (activityTimer.elapsed() > 300'000) {
                     result.error = QStringLiteral("FFmpeg encoder appears stalled (no progress for five minutes).");
-                    activeFfmpeg->terminate();
-                    if (!activeFfmpeg->waitForFinished(5'000)) {
-                        activeFfmpeg->kill();
-                        activeFfmpeg->waitForFinished(5'000);
-                    }
+                    static_cast<void>(activeSupervisor->stopAndWait());
                     pumpFfmpeg();
                     result.diagnostics = formatDiagnostics(
                         *activeFfmpeg, lastFfmpegProgress, stderr,
                         compositing ? QStringLiteral("Stage B composition") : QStringLiteral("Stage A overlay"),
-                        compositing ? QStringList{} : overlayArguments, temporaryOverlay.fileName(),
+                        compositing ? QStringList{} : overlayArguments, temporaryOverlayPath,
                         result.temporaryOverlayBytes, stageAStdinCloseReason);
                     return false;
                 }
@@ -540,7 +585,7 @@ ExportResult ExportEngine::exportVideo(
                     } else {
                         result.diagnostics = formatDiagnostics(
                             *activeFfmpeg, lastFfmpegProgress, stderr, QStringLiteral("Stage B composition"),
-                            {}, temporaryOverlay.fileName(), result.temporaryOverlayBytes,
+                            {}, temporaryOverlayPath, result.temporaryOverlayBytes,
                             stageAStdinCloseReason);
                     }
                     return false;
@@ -554,6 +599,7 @@ ExportResult ExportEngine::exportVideo(
                 return result;
             }
             pumpFfmpeg();
+            if (!checkTemporarySpace()) return result;
             if (ffmpeg.state() == QProcess::NotRunning) {
                 result.error = QStringLiteral("Temporary overlay encoder exited early: %1 of %2 frames submitted.")
                                    .arg(result.renderedFrames).arg(expectedFrames);
@@ -571,8 +617,7 @@ ExportResult ExportEngine::exportVideo(
                 result.error = renderer.errorString().isEmpty()
                     ? QStringLiteral("Telemetry renderer returned an invalid frame.")
                     : renderer.errorString();
-                ffmpeg.kill();
-                ffmpeg.waitForFinished();
+                static_cast<void>(ffmpegSupervisor.stopAndWait());
                 return result;
             }
             ++result.generatedFrames;
@@ -590,8 +635,7 @@ ExportResult ExportEngine::exportVideo(
                 const QString writeError = processErrorName(ffmpeg.error());
                 const QString writeErrorString = ffmpeg.errorString();
                 if (ffmpeg.state() != QProcess::NotRunning) {
-                    ffmpeg.kill();
-                    ffmpeg.waitForFinished();
+                    static_cast<void>(ffmpegSupervisor.stopAndWait());
                 }
                 recordUnexpectedStageAExit(
                     QStringLiteral("QProcess::write accepted fewer bytes than one overlay frame"),
@@ -622,17 +666,14 @@ ExportResult ExportEngine::exportVideo(
             ffmpeg.waitForFinished(250);
             pumpFfmpeg();
             reportProgress();
+            if (!checkTemporarySpace()) return result;
             if (activityTimer.elapsed() > 300'000) {
                 result.error = QStringLiteral("FFmpeg encoder appears stalled (no progress for five minutes).");
-                ffmpeg.terminate();
-                if (!ffmpeg.waitForFinished(5'000)) {
-                    ffmpeg.kill();
-                    ffmpeg.waitForFinished(5'000);
-                }
+                static_cast<void>(ffmpegSupervisor.stopAndWait());
                 pumpFfmpeg();
                 result.diagnostics = formatDiagnostics(
                     ffmpeg, lastFfmpegProgress, stderr, QStringLiteral("Stage A overlay"), overlayArguments,
-                    temporaryOverlay.fileName(), result.temporaryOverlayBytes, stageAStdinCloseReason);
+                    temporaryOverlayPath, result.temporaryOverlayBytes, stageAStdinCloseReason);
                 return result;
             }
         }
@@ -647,8 +688,8 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("Stage A FFmpeg exited · code %1").arg(ffmpeg.exitCode()),
                 QStringLiteral("ffmpeg"), {{"exitCode", ffmpeg.exitCode()},
                                             {"stderr", stderr.right(16 * 1024)}});
-        if (!QFileInfo(temporaryOverlay.fileName()).isFile()
-            || QFileInfo(temporaryOverlay.fileName()).size() <= 0) {
+        if (!QFileInfo(temporaryOverlayPath).isFile()
+            || QFileInfo(temporaryOverlayPath).size() <= 0) {
             result.error = QStringLiteral("FFmpeg did not create the temporary telemetry overlay.");
             return result;
         }
@@ -672,9 +713,10 @@ ExportResult ExportEngine::exportVideo(
                     QStringLiteral("Temporary overlay packet-count fallback started"),
                     QStringLiteral("validation"));
             const MediaInfo packetCountInfo = MediaProbe::probe(
-                temporaryOverlay.fileName(), {}, false, 30'000,
+                temporaryOverlayPath, {}, false, 30'000,
                 probeObservations(settings, QStringLiteral("validatingOverlay"),
-                                  QStringLiteral("countTemporaryOverlayPackets")), {}, true);
+                                  QStringLiteral("countTemporaryOverlayPackets")),
+                [&settings] { return isCancelled(settings); }, true);
             stagedEncodedFrames = packetCountInfo.videoPacketCount;
             stagedFrameCountSource = QStringLiteral("FFmpeg packet-count fallback");
         }
@@ -688,6 +730,10 @@ ExportResult ExportEngine::exportVideo(
         }
         if (settings.stateCallback) {
             settings.stateCallback(QStringLiteral("validating"));
+        }
+        if (!updateManifestState(settings, QStringLiteral("validating"))) {
+            result.error = QStringLiteral("Could not update export ownership manifest before validation.");
+            return result;
         }
         observe(settings, QStringLiteral("status"), QStringLiteral("validatingOverlay"),
                 QStringLiteral("probeTemporaryOverlayMetadata"),
@@ -703,9 +749,10 @@ ExportResult ExportEngine::exportVideo(
         QElapsedTimer temporaryValidationTimer;
         temporaryValidationTimer.start();
         const MediaInfo temporaryOverlayInfo = MediaProbe::probeSummary(
-            temporaryOverlay.fileName(), {}, 30'000,
+            temporaryOverlayPath, {}, 30'000,
             probeObservations(settings, QStringLiteral("validatingOverlay"),
-                              QStringLiteral("probeTemporaryOverlayMetadata")));
+                              QStringLiteral("probeTemporaryOverlayMetadata")),
+            [&settings] { return isCancelled(settings); });
         const TemporaryOverlayValidationResult temporaryValidation =
             TemporaryOverlayValidation::validate(
                 temporaryOverlayInfo, outputSize, exportFrameRate, expectedFrames, exportDuration);
@@ -778,7 +825,9 @@ ExportResult ExportEngine::exportVideo(
         // while the primary decoder advances. Compose only after a complete,
         // rational-rate FFV1/BGRA overlay stream exists on disk.
         QProcess compositor;
+        ExportProcessSupervisor compositorSupervisor(compositor, false);
         activeFfmpeg = &compositor;
+        activeSupervisor = &compositorSupervisor;
         progressParser = FfmpegProgressParser{};
         lastFfmpegProgress = {};
         stderr.clear();
@@ -797,7 +846,7 @@ ExportResult ExportEngine::exportVideo(
                                             .arg(expectedFrames);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
-            "-i", settings.inputPath, "-i", temporaryOverlay.fileName(),
+            "-i", settings.inputPath, "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
             "-b:v", qualityBitrate(settings.quality),
@@ -821,8 +870,12 @@ ExportResult ExportEngine::exportVideo(
                 {{"executable", FfmpegTools::ffmpegPath()}, {"arguments", compositionArguments}});
         compositor.setProcessChannelMode(QProcess::SeparateChannels);
         qInfo().noquote() << QStringLiteral("Stage B FFmpeg arguments: %1").arg(formatArgumentList(compositionArguments));
-        compositor.start(FfmpegTools::ffmpegPath(), compositionArguments);
-        if (!compositor.waitForStarted()) {
+        if (!updateManifestState(settings, QStringLiteral("stageB"))) {
+            result.error = QStringLiteral("Could not update export ownership manifest before Stage B.");
+            return result;
+        }
+        compositorSupervisor.start(FfmpegTools::ffmpegPath(), compositionArguments);
+        if (!compositorSupervisor.waitForStarted()) {
             result.error = QStringLiteral("Could not start FFmpeg composition: %1").arg(compositor.errorString());
             return result;
         }
@@ -834,28 +887,24 @@ ExportResult ExportEngine::exportVideo(
             compositor.waitForFinished(250);
             pumpFfmpeg();
             reportProgress();
+            if (!checkTemporarySpace()) return result;
             if (lastFfmpegProgress.encodedFrames > result.renderedFrames) {
                 result.error = QStringLiteral("FFmpeg output advanced beyond available telemetry overlay frames.");
-                compositor.terminate();
-                if (!compositor.waitForFinished(5'000)) compositor.kill();
+                static_cast<void>(compositorSupervisor.stopAndWait());
                 pumpFfmpeg();
                 result.diagnostics = formatDiagnostics(
                     compositor, lastFfmpegProgress, stderr, QStringLiteral("Stage B composition"),
-                    compositionArguments, temporaryOverlay.fileName(), result.temporaryOverlayBytes,
+                    compositionArguments, temporaryOverlayPath, result.temporaryOverlayBytes,
                     stageAStdinCloseReason);
                 return result;
             }
             if (activityTimer.elapsed() > 300'000) {
                 result.error = QStringLiteral("FFmpeg encoder appears stalled (no progress for five minutes).");
-                compositor.terminate();
-                if (!compositor.waitForFinished(5'000)) {
-                    compositor.kill();
-                    compositor.waitForFinished(5'000);
-                }
+                static_cast<void>(compositorSupervisor.stopAndWait());
                 pumpFfmpeg();
                 result.diagnostics = formatDiagnostics(
                     compositor, lastFfmpegProgress, stderr, QStringLiteral("Stage B composition"),
-                    compositionArguments, temporaryOverlay.fileName(), result.temporaryOverlayBytes,
+                    compositionArguments, temporaryOverlayPath, result.temporaryOverlayBytes,
                     stageAStdinCloseReason);
                 return result;
             }
@@ -867,7 +916,7 @@ ExportResult ExportEngine::exportVideo(
             result.error = QStringLiteral("FFmpeg composition failed.");
             result.diagnostics = formatDiagnostics(
                 compositor, lastFfmpegProgress, stderr, QStringLiteral("Stage B composition"),
-                compositionArguments, temporaryOverlay.fileName(), result.temporaryOverlayBytes,
+                compositionArguments, temporaryOverlayPath, result.temporaryOverlayBytes,
                 stageAStdinCloseReason);
             return result;
         }
@@ -924,7 +973,8 @@ ExportResult ExportEngine::exportVideo(
             result.mediaInfo = MediaProbe::probe(
                 settings.outputPath, {}, false, 30'000,
                 probeObservations(settings, QStringLiteral("validatingOutput"),
-                                  QStringLiteral("probeFinalOutput")), {}, true);
+                                  QStringLiteral("probeFinalOutput")),
+                [&settings] { return isCancelled(settings); }, true);
         } catch (const std::exception &error) {
             result.error = QStringLiteral("Automatic media validation failed; the staged output was not committed.");
             result.diagnostics = QString::fromUtf8(error.what());

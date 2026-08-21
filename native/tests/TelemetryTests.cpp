@@ -5,6 +5,9 @@
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
+#include "export/ExportArtifactManifest.h"
+#include "export/ExportProcessSupervisor.h"
+#include "export/ExportStoragePolicy.h"
 #include "export/FfmpegTools.h"
 #include "export/MediaProbe.h"
 #include "export/TemporaryOverlayValidation.h"
@@ -18,11 +21,13 @@
 #include "project/ProjectDocumentState.h"
 
 #include <QFile>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QProcess>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QTemporaryDir>
+#include <QUuid>
 #include <QtEndian>
 #include <QtTest>
 #include <cmath>
@@ -64,6 +69,10 @@ private slots:
     void classifiesMediaProbeProcessFailures();
     void reportsMediaProbeLifecycleHeartbeat();
     void cancelsMediaProbeWithoutLeavingItRunning();
+    void evaluatesIndependentExportStorageVolumes();
+    void cleansOnlyManifestOwnedArtifacts();
+    void preservesLiveManifestForStartupRecovery();
+    void supervisesUnixExportProcessTree();
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
     void preservesExactExportRateRationals();
@@ -1051,6 +1060,100 @@ void TelemetryTests::cancelsMediaProbeWithoutLeavingItRunning()
     QVERIFY2(error.startsWith("ffprobe cancelled while probing: /fixture.mp4"), qPrintable(error));
 #else
     QSKIP("Lifecycle helper script requires a POSIX shell.");
+#endif
+}
+
+void TelemetryTests::evaluatesIndependentExportStorageVolumes()
+{
+    const ExportStorageEstimate estimate{100, 50, 25};
+    const auto provider = [](const QString &path) {
+        return path.startsWith(QStringLiteral("/temp"))
+            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, 130, 1'000}
+            : ExportFilesystemInfo{QStringLiteral("/destination"), path, 80, 1'000};
+    };
+    const ExportStoragePreflight enough = ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, provider);
+    QVERIFY(enough.sufficient);
+    const auto insufficientTemp = [](const QString &path) {
+        return path.startsWith(QStringLiteral("/temp"))
+            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, 124, 1'000}
+            : ExportFilesystemInfo{QStringLiteral("/destination"), path, 80, 1'000};
+    };
+    QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, insufficientTemp).sufficient);
+    const auto insufficientOutput = [](const QString &path) {
+        return path.startsWith(QStringLiteral("/temp"))
+            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, 130, 1'000}
+            : ExportFilesystemInfo{QStringLiteral("/destination"), path, 74, 1'000};
+    };
+    QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, insufficientOutput).sufficient);
+    const auto sharedFilesystem = [](const QString &path) {
+        return ExportFilesystemInfo{QStringLiteral("/shared"), path, 174, 1'000};
+    };
+    QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, sharedFilesystem).sufficient);
+}
+
+void TelemetryTests::cleansOnlyManifestOwnedArtifacts()
+{
+    QTemporaryDir destination;
+    QVERIFY(destination.isValid());
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString overlay = QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv").arg(id));
+    const QString staging = destination.filePath(QStringLiteral(".result.flappedear-%1.part.mp4").arg(id));
+    const QString target = destination.filePath("result.mp4");
+    const QString unrelated = destination.filePath("unrelated.mkv");
+    QVERIFY(writeBytes(overlay, "overlay"));
+    QVERIFY(writeBytes(staging, "staging"));
+    QVERIFY(writeBytes(unrelated, "keep"));
+    const ExportArtifactManifestData manifest{id, QDateTime::currentMSecsSinceEpoch(), overlay, staging, target, 0, "stageA"};
+    QString error;
+    QVERIFY2(ExportArtifactManifest::create(manifest, &error), qPrintable(error));
+    QVERIFY2(ExportArtifactManifest::cleanupOwned(ExportArtifactManifest::manifestPathFor(id), &error), qPrintable(error));
+    QVERIFY(!QFileInfo::exists(overlay));
+    QVERIFY(!QFileInfo::exists(staging));
+    QVERIFY(QFileInfo::exists(unrelated));
+
+    const QString malformed = QDir::temp().filePath(QStringLiteral("flappedear-export-%1.manifest.json")
+        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY(writeBytes(malformed, "not json"));
+    QVERIFY(!ExportArtifactManifest::cleanupOwned(malformed, &error));
+    QVERIFY(QFile::remove(malformed));
+}
+
+void TelemetryTests::preservesLiveManifestForStartupRecovery()
+{
+    QTemporaryDir destination;
+    QVERIFY(destination.isValid());
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString overlay = QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv").arg(id));
+    const QString staging = destination.filePath(QStringLiteral(".result.flappedear-%1.part.mp4").arg(id));
+    QVERIFY(writeBytes(overlay, "overlay"));
+    QVERIFY(writeBytes(staging, "staging"));
+    const ExportArtifactManifestData manifest{id, QDateTime::currentMSecsSinceEpoch(), overlay, staging,
+        destination.filePath("result.mp4"), QCoreApplication::applicationPid(), "stageB"};
+    QString error;
+    QVERIFY2(ExportArtifactManifest::create(manifest, &error), qPrintable(error));
+    const QString manifestPath = ExportArtifactManifest::manifestPathFor(id);
+    const QStringList recovered = ExportArtifactManifest::recoverStale();
+    QVERIFY(!recovered.contains(manifestPath));
+    QVERIFY(QFileInfo::exists(overlay));
+    QVERIFY2(ExportArtifactManifest::cleanupOwned(manifestPath, &error), qPrintable(error));
+}
+
+void TelemetryTests::supervisesUnixExportProcessTree()
+{
+#ifdef Q_OS_UNIX
+    QProcess process;
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    ExportProcessSupervisor supervisor(process);
+    supervisor.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("sleep 30 & echo $!; wait")});
+    QVERIFY2(supervisor.waitForStarted(), qPrintable(process.errorString()));
+    QVERIFY(process.waitForReadyRead(2'000));
+    bool ok = false;
+    const qint64 grandchildPid = QString::fromUtf8(process.readAllStandardOutput()).trimmed().toLongLong(&ok);
+    QVERIFY(ok && grandchildPid > 0);
+    QVERIFY(supervisor.stopAndWait(500, 2'000));
+    QTRY_VERIFY(!ExportArtifactManifest::processIsActive(grandchildPid));
+#else
+    QSKIP("Unix process-group behavior is runtime-tested on this platform only.");
 #endif
 }
 
