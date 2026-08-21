@@ -4,19 +4,13 @@ import QtQuick.Layouts
 
 Item {
     id: root
-    property int selectedIndex: -1
-    property var selectedIndices: []
-    // The editor supplies its playback-driven context. Export supplies an
-    // independent explicit-time context to the same scene implementation.
-    property var renderContext: appController.renderContext
-    property var widgetModel: appController.widgetModel
-    signal selectionRequested(int index, bool additive)
-    signal fullScreenRequested
+    // This is the complete visual layer. It has no editor selection or
+    // playback dependencies and can be mounted by preview and export alike.
+    required property var renderContext
+    required property var widgetModel
 
     Repeater {
-        // Rendering moved to TelemetryScene below. Retaining the old delegate
-        // body temporarily keeps this refactor mechanically low-risk.
-        model: null
+        model: root.widgetModel
 
         Item {
             id: widgetItem
@@ -1099,7 +1093,7 @@ Item {
             }
 
             Connections {
-                target: appController.widgetModel
+                target: root.widgetModel
                 function onRevisionChanged() {
                     arcCanvas.requestPaint();
                     dialCanvas.requestPaint();
@@ -1110,141 +1104,6 @@ Item {
                 }
             }
 
-            Rectangle {
-                anchors.fill: parent
-                visible: root.selectedIndices.indexOf(widgetItem.index) >= 0
-                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14) + 2
-                color: "transparent"
-                border.width: 2
-                border.color: "#55e6a5"
-                opacity: 0.95
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.SizeAllCursor
-                drag.target: widgetItem
-                drag.minimumX: 0
-                drag.minimumY: 0
-                drag.maximumX: root.width - widgetItem.width
-                drag.maximumY: root.height - widgetItem.height
-                onPressed: mouse => root.selectionRequested(widgetItem.index, !!(mouse.modifiers & Qt.ShiftModifier))
-                onDoubleClicked: root.fullScreenRequested()
-                onReleased: appController.widgetModel.moveWidget(widgetItem.index, widgetItem.x / root.width, widgetItem.y / root.height)
-            }
-            Rectangle {
-                width: 14
-                height: 14
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: -6
-                visible: root.selectedIndex === widgetItem.index
-                color: "#55e6a5"
-                radius: 7
-                border.color: "#07140f"
-                z: 3
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.SizeFDiagCursor
-                    property real startX
-                    property real startY
-                    property real startWidth
-                    property real startHeight
-                    onPressed: mouse => {
-                        startX = mouse.x;
-                        startY = mouse.y;
-                        startWidth = widgetItem.width;
-                        startHeight = widgetItem.height;
-                    }
-                    onPositionChanged: mouse => {
-                        if (!pressed)
-                            return;
-                        widgetItem.width = Math.max(36, startWidth + mouse.x - startX);
-                        widgetItem.height = Math.max(28, startHeight + mouse.y - startY);
-                    }
-                    onReleased: appController.widgetModel.resizeWidget(widgetItem.index, widgetItem.width / (root.width * widgetItem.widgetScale), widgetItem.height / (root.height * widgetItem.widgetScale))
-                }
-            }
-        }
-    }
-
-    TelemetryScene {
-        anchors.fill: parent
-        renderContext: root.renderContext
-        widgetModel: root.widgetModel
-    }
-
-    Repeater {
-        model: root.widgetModel
-
-        Item {
-            id: interactionItem
-            required property int index
-            required property real widgetX
-            required property real widgetY
-            required property real widgetWidth
-            required property real widgetHeight
-            required property real widgetScale
-            required property var widgetSettings
-
-            x: widgetX * root.width
-            y: widgetY * root.height
-            width: widgetWidth * widgetScale * root.width
-            height: widgetHeight * widgetScale * root.height
-
-            Rectangle {
-                anchors.fill: parent
-                visible: root.selectedIndices.indexOf(interactionItem.index) >= 0
-                radius: Number(interactionItem.widgetSettings.cornerRadius ?? 14) + 2
-                color: "transparent"
-                border.width: 2
-                border.color: "#55e6a5"
-                opacity: 0.95
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.SizeAllCursor
-                drag.target: interactionItem
-                drag.minimumX: 0
-                drag.minimumY: 0
-                drag.maximumX: root.width - interactionItem.width
-                drag.maximumY: root.height - interactionItem.height
-                onPressed: mouse => root.selectionRequested(interactionItem.index, !!(mouse.modifiers & Qt.ShiftModifier))
-                onDoubleClicked: root.fullScreenRequested()
-                onReleased: root.widgetModel.moveWidget(interactionItem.index, interactionItem.x / root.width, interactionItem.y / root.height)
-            }
-            Rectangle {
-                width: 14
-                height: 14
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: -6
-                visible: root.selectedIndex === interactionItem.index
-                color: "#55e6a5"
-                radius: 7
-                border.color: "#07140f"
-                z: 3
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.SizeFDiagCursor
-                    property real startX
-                    property real startY
-                    property real startWidth
-                    property real startHeight
-                    onPressed: mouse => {
-                        startX = mouse.x;
-                        startY = mouse.y;
-                        startWidth = interactionItem.width;
-                        startHeight = interactionItem.height;
-                    }
-                    onPositionChanged: mouse => {
-                        if (!pressed)
-                            return;
-                        interactionItem.width = Math.max(36, startWidth + mouse.x - startX);
-                        interactionItem.height = Math.max(28, startHeight + mouse.y - startY);
-                    }
-                    onReleased: root.widgetModel.resizeWidget(interactionItem.index, interactionItem.width / (root.width * interactionItem.widgetScale), interactionItem.height / (root.height * interactionItem.widgetScale))
-                }
-            }
         }
     }
 }

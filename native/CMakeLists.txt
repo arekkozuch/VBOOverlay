@@ -95,6 +95,7 @@ qt_add_qml_module(flappedear_native
         qml/Main.qml
         qml/SectionTitle.qml
         qml/TrackMapPanel.qml
+        qml/TelemetryScene.qml
         qml/WidgetOverlay.qml
 )
 
