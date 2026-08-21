@@ -14,13 +14,31 @@ For the selected source range, `ExportEngine` calculates an explicit rational fr
 
 FFmpeg writes the completed overlay as FFV1/BGRA in a temporary Matroska file. The bounded pipe limits queued raw frames while preserving renderer/encoder overlap.
 
-The staged overlay is validated with `ffprobe` for:
+The normal staged-overlay validation uses a metadata-only `ffprobe` call plus
+independent producer/encoder invariants. It checks:
 
 - FFV1 codec;
 - expected dimensions;
-- expected average cadence;
-- expected frame count; and
-- duration within the frame-cadence tolerance.
+- `generatedFrames == submittedFrames == FFmpeg progress frame count == expectedFrames`;
+- zero-origin stream start when reported; and
+- duration and reported `r_frame_rate` / `avg_frame_rate` within the tolerance
+  implied by the Matroska stream time base and exact scheduled duration.
+
+The rawvideo command receives the authoritative exact `MediaRational` (for
+example `60000/1001`). Matroska commonly stores this FFV1 stream with a 1 ms
+time base, so FFmpeg may report a nearby rational such as `19001/317` for both
+reported rates after timestamp quantization. That metadata is not required to
+be rationally identical to the schedule; it must be explainable by the
+stream-time-base duration bound. A meaningful cadence error such as `30/1`
+remains outside that bound and fails validation.
+
+Normal export deliberately does not pass `-count_frames` for the complete
+temporary FFV1 file. Full decoded frame counts remain deterministic/deep test
+evidence, while the production path uses the already-known producer count,
+FFmpeg's final progress count, and a quick metadata probe. Only if FFmpeg's
+final progress record is incomplete does it fall back to `-count_packets`; the
+generated FFV1 Matroska integration test verifies the one-packet-per-frame
+property used by that exceptional path.
 
 The staging step exists because FFmpeg framesync can select the latest secondary frame at or before a primary timestamp. With a live secondary pipe, the primary decoder can advance while telemetry repeats a stale frame. Stage B starts only after a completed, validated overlay exists on disk.
 
@@ -32,7 +50,13 @@ The output also uses the per-video-stream `-fps_mode:v cfr` control. The `fps` f
 
 Telemetry rendering still uses absolute source time: exporting source seconds 120–140 renders its first overlay at source time 120. The output audio/video timeline starts at zero.
 
-Progress and Very Verbose diagnostics report stage activity, FFmpeg progress, temporary-overlay size, validation checks, and bounded diagnostic output. Cancellation asks the active process to stop, then escalates to kill if needed. Final validation checks for a nonempty result, HEVC codec, dimensions, exact nominal and average rate, progress frame count, independent video packet count when available, zero video start, scheduled video duration, and requested audio.
+Progress and Very Verbose diagnostics report stage activity, FFmpeg progress,
+temporary-overlay size, frame-count source, reported rates/time base, metadata
+validation elapsed time, validation checks, and bounded diagnostic output.
+Cancellation asks the active process to stop, then escalates to kill if needed.
+Final validation checks for a nonempty result, HEVC codec, dimensions, exact
+nominal and average rate, progress frame count, independent video packet count
+when available, zero video start, scheduled video duration, and requested audio.
 
 Audio is trimmed from the requested source interval and reset to output time zero. Its start is compared with video using at most one AAC access-unit duration (1024 samples at the reported sample rate, or the audio time base when larger); its duration is compared with the requested interval using that same defensible tolerance. This permits normal AAC priming/edit-list granularity without accepting arbitrary A/V drift.
 

@@ -5,6 +5,7 @@
 #include "export/FfmpegTools.h"
 #include "export/ExportProgress.h"
 #include "export/TelemetryFrameRenderer.h"
+#include "export/TemporaryOverlayValidation.h"
 
 #include <QFileInfo>
 #include <QDir>
@@ -660,26 +661,55 @@ ExportResult ExportEngine::exportVideo(
                                      .arg(lastFfmpegProgress.encodedFrames);
             return result;
         }
+        qsizetype stagedEncodedFrames = lastFfmpegProgress.encodedFrames;
+        QString stagedFrameCountSource = QStringLiteral("FFmpeg final progress");
+        if (!lastFfmpegProgress.complete) {
+            observe(settings, QStringLiteral("status"), QStringLiteral("validatingOverlay"),
+                    QStringLiteral("countTemporaryOverlayPackets"),
+                    QStringLiteral("FFmpeg final progress was incomplete; counting temporary overlay packets"));
+            observe(settings, QStringLiteral("log"), QStringLiteral("validatingOverlay"),
+                    QStringLiteral("countTemporaryOverlayPackets"),
+                    QStringLiteral("Temporary overlay packet-count fallback started"),
+                    QStringLiteral("validation"));
+            const MediaInfo packetCountInfo = MediaProbe::probe(
+                temporaryOverlay.fileName(), {}, false, 30'000,
+                probeObservations(settings, QStringLiteral("validatingOverlay"),
+                                  QStringLiteral("countTemporaryOverlayPackets")), {}, true);
+            stagedEncodedFrames = packetCountInfo.videoPacketCount;
+            stagedFrameCountSource = QStringLiteral("FFmpeg packet-count fallback");
+        }
+        if (stagedEncodedFrames != expectedFrames) {
+            result.error = QStringLiteral("FFmpeg did not report every expected temporary overlay frame.");
+            result.diagnostics = QStringLiteral(
+                "Generated %1, submitted %2, FFmpeg encoded %3, expected %4 temporary overlay frames.")
+                                     .arg(result.generatedFrames).arg(result.renderedFrames)
+                                     .arg(stagedEncodedFrames).arg(expectedFrames);
+            return result;
+        }
         if (settings.stateCallback) {
             settings.stateCallback(QStringLiteral("validating"));
         }
         observe(settings, QStringLiteral("status"), QStringLiteral("validatingOverlay"),
-                QStringLiteral("countTemporaryOverlayFrames"),
-                QStringLiteral("Counting temporary overlay frames with ffprobe"));
+                QStringLiteral("probeTemporaryOverlayMetadata"),
+                QStringLiteral("Reading temporary overlay metadata with ffprobe"));
         observe(settings, QStringLiteral("log"), QStringLiteral("validatingOverlay"),
-                QStringLiteral("countTemporaryOverlayFrames"),
-                QStringLiteral("Temporary overlay validation started"));
-        const MediaInfo temporaryOverlayInfo = MediaProbe::probe(
-            temporaryOverlay.fileName(), {}, true, -1,
+                QStringLiteral("probeTemporaryOverlayMetadata"),
+                QStringLiteral("Temporary overlay metadata validation started"), QStringLiteral("validation"),
+                {{"frameCountSource", QStringLiteral("producer + %1").arg(stagedFrameCountSource)},
+                 {"generatedFrames", static_cast<qint64>(result.generatedFrames)},
+                 {"submittedFrames", static_cast<qint64>(result.renderedFrames)},
+                 {"encodedFrames", static_cast<qint64>(stagedEncodedFrames)},
+                 {"expectedFrames", static_cast<qint64>(expectedFrames)}});
+        QElapsedTimer temporaryValidationTimer;
+        temporaryValidationTimer.start();
+        const MediaInfo temporaryOverlayInfo = MediaProbe::probeSummary(
+            temporaryOverlay.fileName(), {}, 30'000,
             probeObservations(settings, QStringLiteral("validatingOverlay"),
-                              QStringLiteral("countTemporaryOverlayFrames")));
+                              QStringLiteral("probeTemporaryOverlayMetadata")));
+        const TemporaryOverlayValidationResult temporaryValidation =
+            TemporaryOverlayValidation::validate(
+                temporaryOverlayInfo, outputSize, exportFrameRate, expectedFrames, exportDuration);
         const double frameInterval = 1.0 / exportFrameRate.value();
-        const bool temporaryCodecOk = temporaryOverlayInfo.videoCodec == QStringLiteral("ffv1");
-        const bool temporarySizeOk = temporaryOverlayInfo.videoSize == outputSize;
-        const bool temporaryRateOk = temporaryOverlayInfo.averageFrameRate.isEquivalentTo(exportFrameRate);
-        const bool temporaryFramesOk = temporaryOverlayInfo.videoFrameCount == expectedFrames;
-        const bool temporaryDurationOk = qAbs(temporaryOverlayInfo.duration - exportDuration)
-            <= frameInterval * 1.5;
         const auto validationLog = [&](const QString &name, const QVariant &expected,
                                        const QVariant &actual, const bool passed) {
             observe(settings, QStringLiteral("log"), QStringLiteral("validatingOverlay"),
@@ -692,33 +722,51 @@ ExportResult ExportEngine::exportVideo(
                      {"passed", passed}});
         };
         validationLog(QStringLiteral("Temporary codec"), QStringLiteral("ffv1"),
-                      temporaryOverlayInfo.videoCodec, temporaryCodecOk);
+                      temporaryOverlayInfo.videoCodec, temporaryValidation.codecOk);
         validationLog(QStringLiteral("Temporary resolution"),
                       QStringLiteral("%1x%2").arg(outputSize.width()).arg(outputSize.height()),
                       QStringLiteral("%1x%2").arg(temporaryOverlayInfo.videoSize.width())
-                                               .arg(temporaryOverlayInfo.videoSize.height()), temporarySizeOk);
-        validationLog(QStringLiteral("Temporary frame rate"), rateString(exportFrameRate),
-                      rateString(temporaryOverlayInfo.averageFrameRate), temporaryRateOk);
-        validationLog(QStringLiteral("Temporary frames"), expectedFrames,
-                      temporaryOverlayInfo.videoFrameCount, temporaryFramesOk);
+                                               .arg(temporaryOverlayInfo.videoSize.height()), temporaryValidation.dimensionsOk);
+        validationLog(QStringLiteral("Temporary nominal rate"), rateString(exportFrameRate),
+                      rateString(temporaryOverlayInfo.frameRate), temporaryValidation.nominalRateOk);
+        validationLog(QStringLiteral("Temporary observed average rate"), rateString(exportFrameRate),
+                      rateString(temporaryOverlayInfo.averageFrameRate), temporaryValidation.averageRateOk);
+        validationLog(QStringLiteral("Temporary encoded frames"), expectedFrames,
+                      stagedEncodedFrames, true);
         validationLog(QStringLiteral("Temporary duration"), exportDuration,
-                      temporaryOverlayInfo.duration, temporaryDurationOk);
-        if (!temporaryCodecOk || !temporarySizeOk || !temporaryRateOk
-            || !temporaryFramesOk || !temporaryDurationOk) {
+                      temporaryOverlayInfo.duration, temporaryValidation.durationOk);
+        validationLog(QStringLiteral("Temporary video start"), QStringLiteral("0"),
+                      temporaryOverlayInfo.videoStartTime, temporaryValidation.startTimeOk);
+        observe(settings, QStringLiteral("log"), QStringLiteral("validatingOverlay"),
+                QStringLiteral("probeTemporaryOverlayMetadata"),
+                QStringLiteral("Temporary overlay metadata validation elapsed %1 ms")
+                    .arg(temporaryValidationTimer.elapsed()), QStringLiteral("validation"),
+                {{"validationElapsedMilliseconds", temporaryValidationTimer.elapsed()},
+                 {"frameCountSource", QStringLiteral("producer + %1").arg(stagedFrameCountSource)},
+                 {"scheduledRate", rateString(exportFrameRate)},
+                 {"reportedNominalRate", rateString(temporaryOverlayInfo.frameRate)},
+                 {"reportedAverageRate", rateString(temporaryOverlayInfo.averageFrameRate)},
+                 {"timeBase", rateString(temporaryOverlayInfo.timeBase)},
+                 {"timestampToleranceMicroseconds", temporaryValidation.timestampToleranceMicroseconds},
+                 {"rateTolerance", temporaryValidation.rateTolerance}});
+        if (!temporaryValidation.passed()) {
             result.error = QStringLiteral("Temporary telemetry overlay failed validation.");
             result.diagnostics = QStringLiteral(
-                "Expected FFV1 %1x%2 at %3 fps, %4 frames, %5 s; staged %6 %7x%8 at %9 fps, %10 frames, %11 s, %12 bytes.\n"
-                "FFmpeg arguments: %13")
+                "Expected FFV1 %1x%2 at scheduled %3 fps, %4 frames, %5 s; staged %6 %7x%8 with nominal %9 fps, average %10 fps, "
+                "time base %11, duration %12 s, %13 bytes. Timestamp tolerance=%14 us.\n"
+                "FFmpeg arguments: %15")
                                      .arg(outputSize.width()).arg(outputSize.height())
                                      .arg(exportFrameRate.value(), 0, 'f', 6).arg(expectedFrames)
                                      .arg(exportDuration, 0, 'f', 6)
                                      .arg(temporaryOverlayInfo.videoCodec)
                                      .arg(temporaryOverlayInfo.videoSize.width())
                                      .arg(temporaryOverlayInfo.videoSize.height())
+                                     .arg(temporaryOverlayInfo.frameRate.value(), 0, 'f', 6)
                                      .arg(temporaryOverlayInfo.averageFrameRate.value(), 0, 'f', 6)
-                                     .arg(temporaryOverlayInfo.videoFrameCount)
+                                     .arg(rateString(temporaryOverlayInfo.timeBase))
                                      .arg(temporaryOverlayInfo.duration, 0, 'f', 6)
                                      .arg(result.temporaryOverlayBytes)
+                                     .arg(temporaryValidation.timestampToleranceMicroseconds)
                                      .arg(formatArgumentList(overlayArguments));
             return result;
         }

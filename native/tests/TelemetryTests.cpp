@@ -7,6 +7,7 @@
 #include "export/ExportOutputTransaction.h"
 #include "export/FfmpegTools.h"
 #include "export/MediaProbe.h"
+#include "export/TemporaryOverlayValidation.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
@@ -67,6 +68,7 @@ private slots:
     void calculatesTimestampDrivenExportFrames();
     void preservesExactExportRateRationals();
     void preservesCfrCadenceForCommonRates();
+    void validatesQuantizedTemporaryOverlayCadence();
     void preservesAbsoluteExportTimestamps();
     void composesNonZeroExportRangeWithZeroBasedOutput();
     void normalizesNonZeroStreamPtsForVideoAndAudio();
@@ -1312,6 +1314,62 @@ void TelemetryTests::preservesCfrCadenceForCommonRates()
         QVERIFY(qAbs(info.videoDuration - ExportEngine::outputDuration(expectedFrames, rate))
                 <= 1.0 / rate.value());
     }
+}
+
+void TelemetryTests::validatesQuantizedTemporaryOverlayCadence()
+{
+    const MediaRational scheduledRate{60'000, 1'001};
+    constexpr qsizetype expectedFrames = 7'193;
+    const double scheduledDuration = ExportEngine::outputDuration(expectedFrames, scheduledRate);
+    MediaInfo quantized;
+    quantized.videoCodec = QStringLiteral("ffv1");
+    quantized.videoSize = {3840, 2160};
+    quantized.frameRate = {19'001, 317};
+    quantized.averageFrameRate = {19'001, 317};
+    quantized.timeBase = {1, 1'000};
+    quantized.duration = 120.004;
+    quantized.videoStartTime = 0.0;
+    const TemporaryOverlayValidationResult quantizedResult = TemporaryOverlayValidation::validate(
+        quantized, {3840, 2160}, scheduledRate, expectedFrames, scheduledDuration);
+    QVERIFY(!quantized.frameRate.isEquivalentTo(scheduledRate));
+    QVERIFY(!quantized.averageFrameRate.isEquivalentTo(scheduledRate));
+    QVERIFY(!quantizedResult.nominalRateExact);
+    QVERIFY(quantizedResult.nominalRateOk);
+    QVERIFY(quantizedResult.averageRateOk);
+    QVERIFY(quantizedResult.durationOk);
+    QVERIFY(quantizedResult.passed());
+
+    MediaInfo wrongCadence = quantized;
+    wrongCadence.frameRate = {30, 1};
+    wrongCadence.averageFrameRate = {30, 1};
+    const TemporaryOverlayValidationResult wrongCadenceResult = TemporaryOverlayValidation::validate(
+        wrongCadence, {3840, 2160}, scheduledRate, expectedFrames, scheduledDuration);
+    QVERIFY(!wrongCadenceResult.nominalRateOk);
+    QVERIFY(!wrongCadenceResult.averageRateOk);
+    QVERIFY(!wrongCadenceResult.passed());
+
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the staged-overlay validation integration test.");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString overlay = directory.filePath(QStringLiteral("quantized-overlay.mkv"));
+    QProcess process;
+    process.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                           "color=c=black:s=16x16:r=60000/1001", "-frames:v",
+                           QString::number(expectedFrames), "-an", "-c:v", "ffv1", "-pix_fmt", "bgra",
+                           "-f", "matroska", overlay});
+    QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+    QVERIFY2(process.waitForFinished(30'000), qPrintable(process.errorString()));
+    QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+
+    const MediaInfo metadata = MediaProbe::probeSummary(overlay);
+    const TemporaryOverlayValidationResult metadataResult = TemporaryOverlayValidation::validate(
+        metadata, {16, 16}, scheduledRate, expectedFrames, scheduledDuration);
+    QVERIFY(metadataResult.passed());
+    const MediaInfo packetCount = MediaProbe::probe(overlay, {}, false, -1, {}, {}, true);
+    QCOMPARE(packetCount.videoPacketCount, expectedFrames);
+    const MediaInfo deepCount = MediaProbe::probe(overlay, {}, true);
+    QCOMPARE(deepCount.videoFrameCount, expectedFrames);
 }
 
 void TelemetryTests::preservesAbsoluteExportTimestamps()

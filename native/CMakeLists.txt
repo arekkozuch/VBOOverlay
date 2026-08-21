@@ -27,6 +27,8 @@ qt_add_library(flappedear_core STATIC
     src/export/MediaProbe.h
     src/export/TelemetryFrameRenderer.cpp
     src/export/TelemetryFrameRenderer.h
+    src/export/TemporaryOverlayValidation.cpp
+    src/export/TemporaryOverlayValidation.h
     src/gopro/GoProTelemetrySource.cpp
     src/gopro/GoProTelemetrySource.h
     src/project/ProjectWriter.cpp
