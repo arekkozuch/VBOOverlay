@@ -1,36 +1,34 @@
 # FlappedEar Telemetry
 
-FlappedEar Telemetry is a native motorsport telemetry overlay editor for macOS and Windows. It uses
-Qt 6, C++20, QML, Qt Multimedia, CMake, and Qt Test; the earlier Electron/React prototype has been
-removed.
+FlappedEar Telemetry is a native desktop editor for synchronizing motorsport telemetry with video and rendering telemetry overlays.
+
+## Status
+
+The application is a Qt 6, C++20, and QML native application in alpha and active development. Development has been validated on macOS, and Windows compilation has been validated. Windows runtime and package validation are still pending.
 
 ## Current capabilities
 
-- MP4/MOV playback with aspect-correct overlays, audio, scrubbing, and fullscreen preview.
-- Dynamic VBOX `.vbo` parsing with time-based interpolation and access to every numeric channel.
-- Native GoPro GPS5/GPS9 GPMF extraction and background GPS-speed synchronization.
-- Persistent `.fetproject` scenes, source restoration, window state, sync offset, and time scale.
-- Configurable Speed, RPM, Heart Rate, Pedals, G-Force, GPS Track, Custom Value, arc gauge, dial
-  gauge, data-strip, and retro broadcast widgets.
-- Widget positioning, resizing, rotation, duplication, visibility, grouping, multi-selection, and
-  Delete/Backspace removal.
-- Multiple timed appearance cues per widget with Fade, Pop, and Slide Up effects.
-- Nine built-in layouts plus persistent custom templates and `.fettemplate` import/export.
-- File → Export produces H.265/HEVC MP4 clips from the same telemetry scene as preview, with AAC
-  audio when present, source-resolution/source-CFR output, custom ranges, progress, cancellation,
-  and post-export media validation.
-- A custom Qt Quick design system rather than platform-default Qt controls.
+- MP4/MOV playback with timeline controls and preview overlays.
+- RaceChrono and VBOX VBO telemetry import.
+- GoPro GPMF GPS extraction and GPS-speed auto synchronization.
+- A visual widget editor, projects, built-in layouts, and shareable templates.
+- Synchronized telemetry analysis, including charts and a track view.
+- HEVC/AAC MP4 export, optional custom source ranges, progress, cancellation, and verbose diagnostics.
+- Asynchronous video/VBO loading, transactional project loading, and stale asynchronous-result rejection.
+- Crash-safe export-output handling and atomic project saving.
 
 ## Requirements
 
 - CMake 3.24 or newer.
 - A C++20 compiler.
 - Qt 6.8 or newer with Concurrent, Core, Gui, Quick, Quick Controls 2, Multimedia, and Test.
-- macOS or Windows for the intended desktop targets.
-- FFmpeg and FFprobe on `PATH` (or Homebrew's `/opt/homebrew/bin` or `/usr/local/bin` on macOS) for
-  GoPro indexing and export. A working HEVC encoder is required for export.
+- FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; neither is bundled.
 
-On Apple Silicon with Homebrew Qt installed in `/opt/homebrew/opt/qt`:
+The supported development targets are macOS and Windows. The repository currently has tested macOS/Homebrew commands below; it has no separate, validated Windows packaging procedure yet.
+
+## Build
+
+On Apple Silicon with Homebrew Qt in `/opt/homebrew/opt/qt`:
 
 ```bash
 cmake -S . -B build-native \
@@ -43,60 +41,39 @@ open "build-native/native/FlappedEar Telemetry.app"
 
 ## Architecture
 
-- `native/src/telemetry`: typed telemetry sessions, interpolation, track geometry, and VBO parsing.
-- `native/src/gopro`: bounded MP4/GPMF packet discovery and GPS telemetry decoding.
-- `native/src/sync`: centralized time-domain synchronization.
-- `native/src/widgets`: persistent widget, group, animation-cue, and template model.
-- `native/src/export`: FFmpeg/FFprobe discovery, media probing, working-encoder detection,
-  timestamp-driven telemetry frames, HEVC compositing, and output validation.
-- `native/src/app`: application state, projects, source restoration, and QML-facing controller.
-- `native/qml`: native editor, inspector, controls, and preview renderer.
-- `native/resources`: shareable built-in layout definitions.
-- `native/tests`: Qt Test coverage for parsing, synchronization, widgets, templates, groups, cues,
-  track geometry, and GPMF decoding.
-- `native/tests/fixtures`: small deterministic VBO input used by the native test target.
+The application keeps telemetry parsing, synchronization, video/media handling, widgets, and QML presentation separate. Preview and export mount the same `TelemetryScene.qml` with independent render contexts.
 
-Preview and export consume `TelemetryScene.qml` through independent `TelemetryRenderContext` objects.
-All synchronization is expressed in seconds rather than frames. A custom range remains on the source
-timeline: exporting 120–140 seconds renders its first telemetry frame at source time 120 seconds.
+Module details are in [docs/architecture.md](docs/architecture.md). The project source lives in [`native/src/project`](native/src/project).
+
+## Telemetry semantics
+
+Telemetry has strict no-data semantics: public lookup never returns `NaN` or infinity, and it does not bridge missing samples or values outside a channel's range. See [docs/telemetry-semantics.md](docs/telemetry-semantics.md).
+
+## Export
+
+Export stages a frame-cadenced telemetry overlay before timestamp-driven final composition, and it validates the staged overlay and final MP4 before committing the target file. See [docs/export-pipeline.md](docs/export-pipeline.md) and [docs/export-output-safety.md](docs/export-output-safety.md).
 
 ## Private integration tests
 
-Real recordings are ignored by Git. They can be supplied explicitly without entering source
-control:
+Private recordings are ignored by Git and can be supplied through environment variables:
 
 ```bash
-FLAPPEDEAR_REAL_GOPRO=/absolute/path/video.mp4 \
-FLAPPEDEAR_REAL_VBO=/absolute/path/session.vbo \
+FLAPPEDEAR_REAL_GOPRO=/path/to/video.mp4 \
+FLAPPEDEAR_REAL_VBO=/path/to/session.vbo \
   ./build-native/native/tests/flappedear_native_tests
 ```
 
-The supplied private RaceChrono file was validated with 32,718 samples, 49 numeric channels, and
-3,271.7 seconds of telemetry. The private 11,526,059,397-byte GoPro recording yielded 1,536 GPMF
-packets and synchronized to the VBO at approximately `+90.2 s` with correlation above `0.97`.
-Neither recording is part of the repository.
-
-## Projects and templates
-
-Native `.fetproject` files use the v2 JSON schema and contain source paths, synchronization,
-widgets, groups, animation cues, map settings, and export settings. Editor state is also autosaved
-locally.
-
-Built-in layouts live in `native/resources/widget-templates.json`. Users can capture the current
-scene as a persistent custom template and share it as a `.fettemplate` file.
+A private RaceChrono fixture has been validated with 32,718 samples, 49 channels, 3,271.7 seconds, and zero parser warnings. Development validation has also completed a real non-zero-range 4K, approximately 59.94 fps HEVC/AAC export on macOS through the private GoPro/VBO workflow. This is a development result, not a cross-platform performance guarantee.
 
 ## Current limitations
 
-- A source currently contains one video file; continuous multi-chapter GoPro support is planned.
-- Export is explicit-CFR. Likely variable-frame-rate sources are warned about in the export dialog;
-  native timestamp-preserving VFR output is not yet validated.
-- HEVC export requires a locally working FFmpeg encoder. The detector verifies a small encode before
-  selecting an advertised encoder; it does not bundle FFmpeg or an encoder.
-- HEVC/AAC export has deterministic synthetic validation. A current real GoPro/VBO export could not
-  be run in this workspace because the private sample paths were unavailable.
-- Interactive map tiles and offline-safe map export are pending; GPS track outlines work offline.
-- Windows source compilation has been confirmed locally, but Windows runtime validation and repeatable
-  self-contained packaging remain pending.
-- macOS and Windows builds are unsigned.
+- Final CFR enforcement and VFR-output validation are incomplete; VFR-looking inputs are warned about.
+- Windows runtime validation is pending.
+- Packaging and signing are pending.
+- A source currently contains one video file; multi-chapter timelines are not implemented.
+- Export requires external FFmpeg at runtime.
+- Rotation, sample-aspect-ratio, color, HDR, and 10-bit media handling have not been fully validated.
+- Real-media coverage remains limited.
+- Interactive map tiles are pending; the local GPS track view works without map tiles.
 
-See [ROADMAP.md](ROADMAP.md) for the agreed remaining work.
+For remaining work, see [ROADMAP.md](ROADMAP.md). Developer contribution rules are in [AGENTS.md](AGENTS.md), and local test guidance is in [docs/testing.md](docs/testing.md).

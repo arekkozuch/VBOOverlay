@@ -26,6 +26,23 @@
 - Preserve ordinary video import when GoPro metadata is absent or malformed.
 - Treat VFR as a timing concern and warn until a validated VFR export exists.
 
+## Safety and correctness invariants
+
+- Never write FFmpeg directly to a user-selected export target. Only transaction-owned temporary paths
+  may be deleted automatically, and an existing target requires explicit overwrite consent.
+- Project saves remain atomic. New, open, and quit actions must respect dirty state, and project open
+  must remain transactional.
+- Source and project async results must be guarded by generation and source identity. Stale results
+  must never mutate committed state.
+- Parser output timestamps must remain strictly monotonic. Public telemetry boundaries must not expose
+  `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
+- Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
+  safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
+- Cloud CI is intentionally disabled. Local build/tests are the current required gate, and real-media
+  validation must be reported separately from synthetic tests.
+- QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke
+  validation.
+
 ## Required validation
 
 Before handing off a change, run as applicable:

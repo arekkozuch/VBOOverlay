@@ -1,133 +1,47 @@
 # FlappedEar Telemetry roadmap
 
-This file tracks agreed product work. It is intentionally separate from implementation notes.
+This roadmap tracks remaining work. It is not a record of completed implementation history.
 
-## Production platform: native desktop
+## Completed foundation
 
-The application uses **Qt 6 with C++ and QML** so macOS and Windows share one native codebase. The
-earlier Electron prototype has been removed from the repository.
+- [x] Native Qt 6/C++/QML application and local Qt Test target.
+- [x] VBO parsing, time-based telemetry lookup, synchronization, GoPro GPMF GPS extraction, and GPS-speed auto-sync.
+- [x] Widget editor, templates, projects, analysis workspace, and shared preview/export telemetry scene.
+- [x] HEVC/AAC export with custom source ranges, staged overlay validation, diagnostics, progress, and cancellation.
+- [x] Export output transactions, including explicit overwrite consent and protected user targets.
+- [x] Atomic project saving and dirty-state safeguards for destructive project actions.
+- [x] Asynchronous video/VBO loading, transactional project loading, and stale-result rejection.
+- [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
+- [x] Windows compilation validation.
 
-Migration requirements:
+## Correctness / release hardening
 
-- Preserve VBO parsing, time-based interpolation, synchronization mathematics, and test fixtures as
-  behavioral specifications.
-- Use Qt Multimedia for preview and FFmpeg/FFprobe for media inspection and HEVC export where Qt's
-  platform APIs are insufficient.
-- Render preview and export from the same native scene definitions.
-- Produce a macOS `.app` and a portable Windows x64 folder before adding installers.
-- Measure clean-install size, startup time, idle memory, scrubbing latency, and 4K/60 playback on
-  both target platforms.
-- Use a clean, versioned native `.fetproject` schema; pre-release prototype compatibility is not a
-  requirement.
+- [ ] Define and enforce an explicit final CFR/VFR policy. The final composition is currently timestamp-driven; it does not explicitly force CFR.
+- [ ] Expand final-media validation, including VFR behavior and non-zero audio start times.
+- [ ] Validate rotation, sample aspect ratio, color, HDR, and 10-bit media policy.
+- [ ] Establish process-tree termination guarantees for FFmpeg/ffprobe.
+- [ ] Add disk-space preflight and temporary-file management policy.
+- [ ] Validate the QML preview/export result against broader real media.
+- [ ] Validate Windows runtime behavior with installed dependencies.
+- [ ] Define the packaging, signing, and release gate.
 
-Current implementation status:
+Development validation includes a successful private non-zero-range 4K, approximately 59.94 fps HEVC/AAC export on macOS. It does not replace wider real-media or Windows runtime validation.
 
-- [x] Qt 6/CMake application and test targets.
-- [x] Time-based telemetry session, interpolation, sync transform, and VBO parser port.
-- [x] Supplied real VBO integration test.
-- [x] Native video/VBO shell, source restoration, window settings, timeline, and fullscreen.
-- [x] Configurable native widget scene, v2 project schema, and shareable JSON layout templates.
-- [x] Persistent custom templates with import/export and multiple built-in use-case layouts.
-- [x] Per-widget timed visibility cues with fade and entrance effects.
-- [x] GoPro GPS5/GPS9 GPMF extraction and automatic GPS-speed synchronization port.
-- [x] Removal of the obsolete Electron/React prototype and Node build chain.
-- [x] Custom telemetry branding and native macOS/Windows application icon assets.
-- [x] HEVC export, AAC audio transcoding, progress, cancellation, and output validation using the
-      shared QML telemetry scene. Custom ranges retain absolute source timestamps; VFR inputs are
-      warned and exported at the source average CFR cadence.
-- [x] Windows build validation.
-- [ ] Windows runtime validation.
-- [ ] Repeatable self-contained packaging below the agreed size budget; preliminary macOS dependency
-      deployment measured 126 MB before trimming.
+## Product work
 
-## To do
+### Multi-chapter GoPro timelines
 
-### 1. Synchronized telemetry analysis workspace
+- [ ] Model ordered GoPro MP4/MOV chunks as one continuous time-based source.
+- [ ] Preserve one telemetry timeline across chapter boundaries, including gaps and overlaps.
+- [ ] Validate cross-chapter media compatibility and export a continuous result.
 
-Build one analysis workspace that is docked below the editor by default and can be detached into a
-separate window. Both presentations must use the same models and playback clock, so switching
-between them never creates a second synchronization path.
+### Analysis and map workflow
 
-Foundation delivered:
+- [ ] Add chart zoom, range selection, annotations, and configurable axes.
+- [ ] Add interactive map tiles and define offline-safe map export behavior.
 
-- [x] Docked multi-channel chart panel using the shared synchronized playhead.
-- [x] Full-resolution live values with bounded plot sampling for long sessions.
-- [x] Chart scrubbing, compact track position, channel selection, and project/session persistence.
-- [x] Detachable analysis window with independently resizable video, track, and chart panes.
-- [ ] Chart zoom/range selection, annotations, and configurable axes.
+### Distribution
 
-- Add a collapsible bottom analysis panel with a detachable-window action and persistent panel/window
-  geometry.
-- Keep the main preview, compact analysis video, track map, charts, timeline, and numeric cursor values
-  driven by one shared playback time and video-to-telemetry transform.
-- Display a compact video preview, compact track map with the current position, and one or more stacked
-  telemetry charts in the detached layout.
-- Allow any recorded channel to be added to or removed from a chart, with editable label, unit, color,
-  axis range, line style, and grouping by compatible axes.
-- Support a shared playhead, hover values, chart-to-video scrubbing, zooming, panning, and selection of a
-  time range without breaking normal timeline scrubbing.
-- Add markers and annotations that can later be reused as widget visibility cues and export ranges.
-- Downsample only the plotted geometry for long sessions while retaining full-resolution values at the
-  playhead and during export.
-- Persist selected channels, chart arrangement, zoom range, map visibility, and whether the workspace is
-  docked or detached in the project.
-- Add deterministic synchronization, chart-range, decimation, and project round-trip tests, plus a
-  performance check using the supplied real VBO session.
-
-### 2. Video export
-
-Export finished clips from the same native scene definitions used by the preview. Rendering must be
-timestamp-driven so variable-frame-rate sources and telemetry remain synchronized.
-
-- [x] Add an export dialog for output path, quality, audio, and entire/custom source-time range.
-- [x] Render every output frame at its presentation timestamp through the same widget layout, cue,
-  animation, and interpolation logic as the editor preview.
-- [x] Export HEVC where a runtime-probed FFmpeg encoder works; report a clear error otherwise. Current
-  preference is working platform hardware encoders, then a working external `libx265` encoder.
-- [x] Re-encode source audio to AAC and validate its presence when source audio was requested.
-- [x] Show staged progress, cancellation, and validation; clean partial files after cancellation.
-- [x] Validate final duration, dimensions, HEVC codec, and requested audio stream.
-- [ ] Validate the user-facing workflow against a private real GoPro/VBO pair and measure 4K/60
-      performance; the private paths were unavailable during the current local validation.
-- [ ] Preserve source audio timestamps for non-zero-start sources with a dedicated integration fixture.
-- Add an editor-oriented transparent-overlay follow-up (ProRes 4444 or PNG sequence) so telemetry can be
-  composited separately from the source video.
-- Add timing and cancellation unit tests plus short deterministic integration exports before validating a
-  full supplied GoPro clip.
-
-### Multiple GoPro video chapters
-
-Support recordings split by the camera into multiple MP4/MOV chunks as one continuous source.
-
-- Allow selecting multiple videos and adding/removing/reordering chunks.
-- Detect likely GoPro chapters from filenames and embedded creation/chapter metadata, while allowing
-  manual ordering.
-- Validate resolution, codec, frame rate, time base, audio, and telemetry compatibility and show
-  actionable warnings for mismatches.
-- Build a virtual media timeline from cumulative clip durations so playback and scrubbing cross clip
-  boundaries without resetting telemetry.
-- Stitch each clip's GPMF telemetry into the same continuous time domain, accounting for gaps,
-  overlaps, and missing telemetry.
-- Synchronize the combined video timeline to one VBO session; do not create independent widget
-  timing logic per clip.
-- Store the ordered clip list in `.fetproject` while continuing to open existing single-video
-  projects.
-- Export all chapters as one HEVC video with continuous overlays and preserved audio.
-- Add deterministic unit tests for boundary lookup and timing, plus integration tests with real GoPro
-  chapter files when samples are available.
-
-### Native feature parity
-
-- Video/VBO import and automatic source restoration.
-- Accurate resizing, playback, frame-independent scrubbing, and fullscreen preview.
-- Automatic and manual telemetry synchronization.
-- Configurable widgets and live telemetry panel with persistent layouts.
-- Native menus, shortcuts, dialogs, recent projects, and window-state persistence.
-- Timing-correct HEVC export with audio, progress, and cancellation.
-- Track/map rendering and offline-safe export behavior.
-
-## Deferred distribution work
-
-- macOS Developer ID signing and notarization.
-- Windows code signing.
-- Installers and automatic updates.
+- [ ] macOS signing and notarization.
+- [ ] Windows code signing.
+- [ ] Repeatable self-contained packages, installers, and update strategy.
