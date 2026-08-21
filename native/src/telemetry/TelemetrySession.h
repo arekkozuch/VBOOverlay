@@ -33,6 +33,9 @@ public:
     QStringList warnings;
     qsizetype sampleCount = 0;
 
+    // Public telemetry semantics are intentionally strict: queries outside a
+    // channel's range and internal non-finite samples are no data. Linear
+    // interpolation requires two adjacent finite samples; gaps are never bridged.
     [[nodiscard]] std::optional<double> valueAt(
         const QString &channelName,
         double time,

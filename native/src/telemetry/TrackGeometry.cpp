@@ -91,9 +91,15 @@ std::optional<QPointF> currentTrackPoint(
     }
     const QPointF local = toLocal(
         *latitude, *longitude, geometry.originLatitude, geometry.originLongitude);
-    return QPointF(
+    if (!std::isfinite(local.x()) || !std::isfinite(local.y())
+        || !std::isfinite(geometry.normalizationScale) || geometry.normalizationScale <= 0.0) {
+        return std::nullopt;
+    }
+    const QPointF normalized(
         (local.x() - geometry.localCenter.x()) / geometry.normalizationScale + 0.5,
         (local.y() - geometry.localCenter.y()) / geometry.normalizationScale + 0.5);
+    return std::isfinite(normalized.x()) && std::isfinite(normalized.y())
+        ? std::optional<QPointF>(normalized) : std::nullopt;
 }
 
 } // namespace FlappedEar

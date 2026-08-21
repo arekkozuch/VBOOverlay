@@ -13,36 +13,51 @@ std::optional<double> TelemetrySession::valueAt(
     const QString resolved = aliases.value(channelName, channelName);
     const auto channelIterator = channels.constFind(resolved);
     if (channelIterator == channels.cend() || channelIterator->timestamps.isEmpty()
-        || !std::isfinite(time)) {
+        || channelIterator->values.isEmpty() || !std::isfinite(time)) {
         return std::nullopt;
     }
 
     const TelemetryChannel &channel = channelIterator.value();
     const auto &timestamps = channel.timestamps;
     const auto &values = channel.values;
-    if (time <= timestamps.front()) {
-        return values.front();
-    }
-    if (time >= timestamps.back()) {
-        return values.back();
+    if (timestamps.size() != values.size() || time < timestamps.front() || time > timestamps.back()) {
+        return std::nullopt;
     }
 
     const auto nextIterator = std::lower_bound(timestamps.cbegin(), timestamps.cend(), time);
     const qsizetype next = std::distance(timestamps.cbegin(), nextIterator);
+    if (next < 0 || next >= values.size()) {
+        return std::nullopt;
+    }
+    const auto finiteValueAt = [&values](const qsizetype index) -> std::optional<double> {
+        if (index < 0 || index >= values.size() || !std::isfinite(values[index])) {
+            return std::nullopt;
+        }
+        return values[index];
+    };
     if (*nextIterator == time) {
-        return values[next];
+        return finiteValueAt(next);
+    }
+    if (next == 0) {
+        return std::nullopt;
     }
     const qsizetype previous = next - 1;
     if (mode == InterpolationMode::Previous) {
-        return values[previous];
+        return finiteValueAt(previous);
     }
     if (mode == InterpolationMode::Nearest) {
-        return time - timestamps[previous] <= timestamps[next] - time ? values[previous]
-                                                                       : values[next];
+        return time - timestamps[previous] <= timestamps[next] - time ? finiteValueAt(previous)
+                                                                       : finiteValueAt(next);
     }
     const double span = timestamps[next] - timestamps[previous];
-    const double ratio = span == 0.0 ? 0.0 : (time - timestamps[previous]) / span;
-    return values[previous] + (values[next] - values[previous]) * ratio;
+    const auto previousValue = finiteValueAt(previous);
+    const auto nextValue = finiteValueAt(next);
+    if (!previousValue || !nextValue || !std::isfinite(span) || span <= 0.0) {
+        return std::nullopt;
+    }
+    const double ratio = (time - timestamps[previous]) / span;
+    const double interpolated = *previousValue + (*nextValue - *previousValue) * ratio;
+    return std::isfinite(interpolated) ? std::optional<double>(interpolated) : std::nullopt;
 }
 
 QStringList TelemetrySession::channelNames() const

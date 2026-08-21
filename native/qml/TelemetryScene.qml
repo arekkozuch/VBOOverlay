@@ -91,13 +91,18 @@ Item {
                 let result = Number(value) * Number(widgetSettings.multiplier ?? 1) + Number(widgetSettings.valueOffset ?? 0);
                 if (widgetSettings.clampValue)
                     result = Math.max(Number(widgetSettings.minValue ?? 0), Math.min(Number(widgetSettings.maxValue ?? 100), result));
-                return result;
+                return Number.isFinite(result) ? result : undefined;
             }
             function numberText(value, unitFactor) {
                 const adjustedValue = adjusted(value);
                 if (adjustedValue === undefined || !Number.isFinite(adjustedValue))
                     return "—";
                 return (widgetSettings.prefix || "") + (adjustedValue * (unitFactor || 1)).toFixed(Number(widgetSettings.decimals ?? 0)) + (widgetSettings.suffix || "");
+            }
+            function slotText(value, decimals) {
+                const adjustedValue = adjusted(value);
+                return adjustedValue === undefined || !Number.isFinite(adjustedValue)
+                    ? "—" : adjustedValue.toFixed(Number(decimals));
             }
 
             Rectangle {
@@ -602,7 +607,7 @@ Item {
                                 }
                                 Label {
                                     anchors.horizontalCenter: parent.horizontalCenter
-                                    text: parent.parent.slotRaw === undefined ? "—" : Number(parent.parent.slotRaw).toFixed(Number(widgetItem.widgetSettings["decimals" + parent.parent.slot] ?? 0))
+                                    text: widgetItem.slotText(parent.parent.slotRaw, widgetItem.widgetSettings["decimals" + parent.parent.slot] ?? 0)
                                     color: widgetItem.primary
                                     font.family: widgetItem.family
                                     font.weight: widgetItem.weight
@@ -623,8 +628,12 @@ Item {
                 Item {
                     anchors.fill: parent
                     visible: widgetItem.widgetType === "retroGrandPrix"
-                    property real rpmValue: Number(widgetItem.raw("rpmSource", "rpm") || 0)
-                    property real speedValue: Number(widgetItem.raw("speedSource", "speed") || 0)
+                    property var rpmRaw: widgetItem.raw("rpmSource", "rpm")
+                    property var speedRaw: widgetItem.raw("speedSource", "speed")
+                    property bool hasRpm: rpmRaw !== undefined && rpmRaw !== null && Number.isFinite(Number(rpmRaw))
+                    property bool hasSpeed: speedRaw !== undefined && speedRaw !== null && Number.isFinite(Number(speedRaw))
+                    property real rpmValue: hasRpm ? Number(rpmRaw) : 0
+                    property real speedValue: hasSpeed ? Number(speedRaw) : 0
                     property real gearValue: Number(widgetItem.raw("gearSource", "gear"))
                     property real throttleValue: Number(widgetItem.raw("throttleSource", "throttle") || 0)
                     property real brakeValue: Number(widgetItem.raw("brakeSource", "brake") || 0)
@@ -752,7 +761,7 @@ Item {
                             ctx.fillStyle = white;
                             ctx.font = "700 17px " + family;
                             ctx.textAlign = "left";
-                            ctx.fillText(Math.round(speedValue) + " Km/h", 18, 354);
+                            ctx.fillText((hasSpeed ? Math.round(speedValue).toString() : "—") + " Km/h", 18, 354);
                             ctx.textAlign = "center";
                             ctx.fillText("200", 196, 356);
                             ctx.fillText("260", 252, 320);
@@ -777,7 +786,9 @@ Item {
                             ctx.fillText(settings.driverName || "DRIVER", plateX + plateW / 2, plateY + 15);
                             ctx.fillStyle = white;
                             ctx.textAlign = "right";
-                            const timing = timingValue === undefined || timingValue === null ? (settings.timingText || "") : Number(timingValue).toFixed(Number(settings.timingDecimals ?? 1));
+                            const timing = timingValue !== undefined && timingValue !== null && Number.isFinite(Number(timingValue))
+                                ? Number(timingValue).toFixed(Number(settings.timingDecimals ?? 1))
+                                : (settings.timingText || "—");
                             ctx.fillText(timing, plateX + plateW - 14, plateY + 46);
                             ctx.restore();
                         }
@@ -877,7 +888,9 @@ Item {
                     anchors.fill: parent
                     visible: widgetItem.widgetType === "retroPedal"
                     property var rawValue: widgetItem.raw("source", "")
-                    property real value: Number(widgetItem.adjusted(rawValue) || 0)
+                    property var adjustedValue: widgetItem.adjusted(rawValue)
+                    property bool hasValue: adjustedValue !== undefined && adjustedValue !== null && Number.isFinite(Number(adjustedValue))
+                    property real value: hasValue ? Number(adjustedValue) : 0
                     property real minimum: Number(widgetItem.widgetSettings.minValue ?? 0)
                     property real maximum: Math.max(minimum + 0.001, Number(widgetItem.widgetSettings.maxValue ?? 100))
                     property real progress: Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)))
@@ -895,7 +908,7 @@ Item {
                     }
                     Label {
                         anchors.centerIn: parent
-                        text: (widgetItem.widgetSettings.label || "Pedal") + ((widgetItem.widgetSettings.showValue ?? false) ? "  " + parent.value.toFixed(Number(widgetItem.widgetSettings.decimals ?? 0)) + "%" : "")
+                        text: (widgetItem.widgetSettings.label || "Pedal") + ((widgetItem.widgetSettings.showValue ?? false) ? "  " + (parent.hasValue ? parent.value.toFixed(Number(widgetItem.widgetSettings.decimals ?? 0)) + "%" : "—") : "")
                         color: widgetItem.primary
                         font.family: widgetItem.family
                         font.weight: Font.Bold
@@ -906,7 +919,9 @@ Item {
                 Item {
                     anchors.fill: parent
                     visible: widgetItem.widgetType === "retroSpeedArc"
-                    property real value: Number(widgetItem.adjusted(widgetItem.raw("source", "speed")) || 0)
+                    property var rawValue: widgetItem.adjusted(widgetItem.raw("source", "speed"))
+                    property bool hasValue: rawValue !== undefined && rawValue !== null && Number.isFinite(Number(rawValue))
+                    property real value: hasValue ? Number(rawValue) : 0
                     Canvas {
                         id: retroSpeedCanvas
                         anchors.fill: parent
@@ -949,7 +964,7 @@ Item {
                     Label {
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
-                        text: Math.round(parent.value) + " " + (widgetItem.widgetSettings.unit || "Km/h")
+                        text: (parent.hasValue ? Math.round(parent.value).toString() : "—") + " " + (widgetItem.widgetSettings.unit || "Km/h")
                         color: widgetItem.primary
                         font.family: widgetItem.family
                         font.weight: Font.Bold
@@ -995,7 +1010,7 @@ Item {
                         anchors.top: parent.top
                         height: parent.height * 0.48
                         verticalAlignment: Text.AlignVCenter
-                        text: parent.topValue === undefined || parent.topValue === null ? (widgetItem.widgetSettings.topText || "") : Number(parent.topValue).toFixed(Number(widgetItem.widgetSettings.topDecimals ?? 0))
+                        text: parent.topValue !== undefined && parent.topValue !== null && Number.isFinite(Number(parent.topValue)) ? Number(parent.topValue).toFixed(Number(widgetItem.widgetSettings.topDecimals ?? 0)) : (widgetItem.widgetSettings.topText || "—")
                         color: widgetItem.widgetSettings.topColor || "#111111"
                         font.family: widgetItem.family
                         font.weight: Font.Bold
@@ -1007,7 +1022,7 @@ Item {
                         anchors.bottom: parent.bottom
                         height: parent.height * 0.52
                         verticalAlignment: Text.AlignVCenter
-                        text: parent.bottomValue === undefined || parent.bottomValue === null ? (widgetItem.widgetSettings.bottomText || "") : Number(parent.bottomValue).toFixed(Number(widgetItem.widgetSettings.bottomDecimals ?? 1))
+                        text: parent.bottomValue !== undefined && parent.bottomValue !== null && Number.isFinite(Number(parent.bottomValue)) ? Number(parent.bottomValue).toFixed(Number(widgetItem.widgetSettings.bottomDecimals ?? 1)) : (widgetItem.widgetSettings.bottomText || "—")
                         color: widgetItem.widgetSettings.bottomColor || "#f4f4f4"
                         font.family: widgetItem.family
                         font.weight: Font.Bold
