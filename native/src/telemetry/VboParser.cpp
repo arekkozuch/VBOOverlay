@@ -172,7 +172,9 @@ TelemetrySession VboParser::parse(QStringView text)
         const auto match = QRegularExpression("^\\[([^\\]]+)\\]$").match(line);
         if (match.hasMatch()) {
             section = match.captured(1).trimmed().toLower();
-            sections.tryInsert(section, {});
+            if (!sections.contains(section)) {
+                sections.insert(section, QStringList{});
+            }
         } else {
             sections[section].append(line);
         }

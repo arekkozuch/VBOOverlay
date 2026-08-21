@@ -24,6 +24,7 @@ class TelemetryTests final : public QObject {
 private slots:
     void parsesRealisticFixture();
     void toleratesMalformedRows();
+    void preservesRepeatedDataSections();
     void rejectsMissingSections();
     void interpolatesByTime();
     void samplesTelemetryRanges();
@@ -126,6 +127,14 @@ void TelemetryTests::toleratesMalformedRows()
     QCOMPARE(session.sampleCount, 3);
     QVERIFY(std::isnan(session.channels.value("speed").values[1]));
     QCOMPARE(session.warnings.size(), 2);
+}
+
+void TelemetryTests::preservesRepeatedDataSections()
+{
+    const TelemetrySession session = VboParser::parse(
+        u"[column names]\ntime speed\n[data]\n0 10\n[data]\n1 20");
+    QCOMPARE(session.sampleCount, 2);
+    QCOMPARE(session.channels.value("speed").values, QVector<float>({10.0F, 20.0F}));
 }
 
 void TelemetryTests::rejectsMissingSections()
