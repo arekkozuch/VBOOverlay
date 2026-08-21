@@ -1158,7 +1158,14 @@ void AppController::handleExportOutput()
                                    QStringLiteral("totalElapsedMilliseconds"), QStringLiteral("stageDurations"),
                                    QStringLiteral("outputVideoCodec"), QStringLiteral("outputWidth"),
                                    QStringLiteral("outputHeight"), QStringLiteral("outputDuration"),
-                                   QStringLiteral("outputAudioCodecs"), QStringLiteral("diagnostics"),
+                                   QStringLiteral("outputVideoDuration"), QStringLiteral("outputVideoStart"),
+                                   QStringLiteral("outputVideoPacketCount"),
+                                   QStringLiteral("outputAverageFrameRate"),
+                                   QStringLiteral("outputAudioCodecs"), QStringLiteral("outputAudioStart"),
+                                   QStringLiteral("outputAudioDuration"),
+                                   QStringLiteral("exportFrameRateNumerator"),
+                                   QStringLiteral("exportFrameRateDenominator"),
+                                   QStringLiteral("exportFrameRate"), QStringLiteral("diagnostics"),
                                    QStringLiteral("warning")}) {
             if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
         }

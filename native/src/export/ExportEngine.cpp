@@ -172,6 +172,24 @@ double ExportEngine::exportRelativeTime(const qsizetype frameIndex, const MediaR
         / static_cast<double>(frameRate.numerator);
 }
 
+double ExportEngine::outputDuration(const qsizetype frameCount, const MediaRational &frameRate)
+{
+    if (!frameRate.isValid()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return static_cast<double>(frameCount) * static_cast<double>(frameRate.denominator)
+        / static_cast<double>(frameRate.numerator);
+}
+
+MediaRational ExportEngine::effectiveFrameRate(
+    const MediaInfo &source, const MediaRational &requested)
+{
+    if (requested.isValid()) {
+        return requested;
+    }
+    return source.averageFrameRate.isValid() ? source.averageFrameRate : source.frameRate;
+}
+
 double ExportEngine::sourceVideoTime(
     const double sourceRangeStart, const qsizetype frameIndex, const MediaRational &frameRate)
 {
@@ -204,13 +222,13 @@ ExportResult ExportEngine::exportVideo(
                 {{"codec", source.videoCodec}, {"width", source.videoSize.width()},
                  {"height", source.videoSize.height()}, {"duration", source.duration}});
         const QSize outputSize = settings.outputSize.isValid() ? settings.outputSize : source.videoSize;
-        const MediaRational frameRate = settings.frameRate.isValid()
-            ? settings.frameRate
-            : (source.averageFrameRate.isValid() ? source.averageFrameRate : source.frameRate);
+        // One exact rational governs overlay generation, framesync conversion,
+        // progress, and final-media validation.
+        const MediaRational exportFrameRate = effectiveFrameRate(source, settings.frameRate);
         const double sourceRangeStart = qMax(0.0, settings.startTime);
         const double sourceRangeEnd = settings.endTime > sourceRangeStart
             ? settings.endTime : source.duration;
-        if (sourceRangeEnd > source.duration + 1.0 / frameRate.value()) {
+        if (sourceRangeEnd > source.duration + 1.0 / exportFrameRate.value()) {
             result.error = QStringLiteral(
                 "Requested source range (%1 to %2 s) exceeds the probed source duration (%3 s).")
                                .arg(sourceRangeStart, 0, 'f', 3)
@@ -218,12 +236,16 @@ ExportResult ExportEngine::exportVideo(
                                .arg(source.duration, 0, 'f', 3);
             return result;
         }
-        const double exportDuration = sourceRangeEnd - sourceRangeStart;
-        const qsizetype expectedFrames = frameCount(sourceRangeStart, sourceRangeEnd, frameRate);
+        const double requestedDuration = sourceRangeEnd - sourceRangeStart;
+        const qsizetype expectedFrames = frameCount(
+            sourceRangeStart, sourceRangeEnd, exportFrameRate);
         if (expectedFrames == 0 || !outputSize.isValid()) {
             result.error = QStringLiteral("Export range or frame rate is invalid.");
             return result;
         }
+        const double exportDuration = outputDuration(expectedFrames, exportFrameRate);
+        result.exportFrameRate = exportFrameRate;
+        result.expectedFrames = expectedFrames;
         const QList<EncoderCapability> encoders = EncoderDetector::discover();
         const QString encoder = settings.encoder.isEmpty()
             ? EncoderDetector::preferredHevcEncoder(encoders)
@@ -271,7 +293,7 @@ ExportResult ExportEngine::exportVideo(
         const QStringList overlayArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
             "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", size,
-            "-framerate", rateString(frameRate), "-i", "pipe:0", "-an",
+            "-framerate", rateString(exportFrameRate), "-i", "pipe:0", "-an",
             "-c:v", "ffv1", "-pix_fmt", "bgra", "-f", "matroska", temporaryOverlay.fileName(),
         };
         observe(settings, QStringLiteral("status"), QStringLiteral("renderingOverlay"),
@@ -328,9 +350,10 @@ ExportResult ExportEngine::exportVideo(
             progress.sourceRangeEnd = sourceRangeEnd;
             progress.exportDuration = exportDuration;
             progress.exportRelativeTime = result.renderedFrames > 0
-                ? ExportEngine::exportRelativeTime(result.renderedFrames - 1, frameRate) : 0.0;
+                ? ExportEngine::exportRelativeTime(result.renderedFrames - 1, exportFrameRate) : 0.0;
             progress.sourceVideoTime = sourceVideoTime(
-                sourceRangeStart, result.renderedFrames > 0 ? result.renderedFrames - 1 : 0, frameRate);
+                sourceRangeStart, result.renderedFrames > 0 ? result.renderedFrames - 1 : 0,
+                exportFrameRate);
             progress.encodedFrames = lastFfmpegProgress.encodedFrames;
             progress.encodedSeconds = compositing
                 ? qMax(0.0, lastFfmpegProgress.outputMicroseconds / 1'000'000.0) : 0.0;
@@ -451,7 +474,8 @@ ExportResult ExportEngine::exportVideo(
                 return result;
             }
             if (!waitForQueueRoom()) return result;
-            const double currentSourceVideoTime = sourceVideoTime(sourceRangeStart, frameIndex, frameRate);
+            const double currentSourceVideoTime = sourceVideoTime(
+                sourceRangeStart, frameIndex, exportFrameRate);
             QElapsedTimer renderTimer;
             renderTimer.start();
             const QImage image = renderer.renderFrame(currentSourceVideoTime);
@@ -560,11 +584,10 @@ ExportResult ExportEngine::exportVideo(
             temporaryOverlay.fileName(), {}, true, -1,
             probeObservations(settings, QStringLiteral("validatingOverlay"),
                               QStringLiteral("countTemporaryOverlayFrames")));
-        const double frameInterval = 1.0 / frameRate.value();
+        const double frameInterval = 1.0 / exportFrameRate.value();
         const bool temporaryCodecOk = temporaryOverlayInfo.videoCodec == QStringLiteral("ffv1");
         const bool temporarySizeOk = temporaryOverlayInfo.videoSize == outputSize;
-        const bool temporaryRateOk = temporaryOverlayInfo.averageFrameRate.isValid()
-            && qAbs(temporaryOverlayInfo.averageFrameRate.value() - frameRate.value()) <= 0.001;
+        const bool temporaryRateOk = temporaryOverlayInfo.averageFrameRate.isEquivalentTo(exportFrameRate);
         const bool temporaryFramesOk = temporaryOverlayInfo.videoFrameCount == expectedFrames;
         const bool temporaryDurationOk = qAbs(temporaryOverlayInfo.duration - exportDuration)
             <= frameInterval * 1.5;
@@ -585,8 +608,8 @@ ExportResult ExportEngine::exportVideo(
                       QStringLiteral("%1x%2").arg(outputSize.width()).arg(outputSize.height()),
                       QStringLiteral("%1x%2").arg(temporaryOverlayInfo.videoSize.width())
                                                .arg(temporaryOverlayInfo.videoSize.height()), temporarySizeOk);
-        validationLog(QStringLiteral("Temporary frame rate"), frameRate.value(),
-                      temporaryOverlayInfo.averageFrameRate.value(), temporaryRateOk);
+        validationLog(QStringLiteral("Temporary frame rate"), rateString(exportFrameRate),
+                      rateString(temporaryOverlayInfo.averageFrameRate), temporaryRateOk);
         validationLog(QStringLiteral("Temporary frames"), expectedFrames,
                       temporaryOverlayInfo.videoFrameCount, temporaryFramesOk);
         validationLog(QStringLiteral("Temporary duration"), exportDuration,
@@ -598,7 +621,7 @@ ExportResult ExportEngine::exportVideo(
                 "Expected FFV1 %1x%2 at %3 fps, %4 frames, %5 s; staged %6 %7x%8 at %9 fps, %10 frames, %11 s, %12 bytes.\n"
                 "FFmpeg arguments: %13")
                                      .arg(outputSize.width()).arg(outputSize.height())
-                                     .arg(frameRate.value(), 0, 'f', 6).arg(expectedFrames)
+                                     .arg(exportFrameRate.value(), 0, 'f', 6).arg(expectedFrames)
                                      .arg(exportDuration, 0, 'f', 6)
                                      .arg(temporaryOverlayInfo.videoCodec)
                                      .arg(temporaryOverlayInfo.videoSize.width())
@@ -626,16 +649,21 @@ ExportResult ExportEngine::exportVideo(
         compositing = true;
         finalizing = false;
         const QString timeRangeFilter = QStringLiteral(
-            "[0:v]trim=start=%1:end=%2,setpts=PTS-STARTPTS[sourceVideo];"
+            "[0:v]trim=start=%1:end=%2,setpts=PTS-STARTPTS,"
+            "fps=fps=%3:start_time=0:round=near:eof_action=round,"
+            "trim=end_frame=%4,setpts=PTS-STARTPTS[sourceVideo];"
             "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
             "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=auto[video]")
                                             .arg(sourceRangeStart, 0, 'f', 9)
-                                            .arg(sourceRangeEnd, 0, 'f', 9);
+                                            .arg(sourceRangeEnd, 0, 'f', 9)
+                                            .arg(rateString(exportFrameRate))
+                                            .arg(expectedFrames);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
             "-i", settings.inputPath, "-i", temporaryOverlay.fileName(),
             "-filter_complex", timeRangeFilter,
-            "-map", "[video]", "-c:v", encoder, "-b:v", qualityBitrate(settings.quality),
+            "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
+            "-b:v", qualityBitrate(settings.quality),
             "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
         };
         if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
@@ -756,10 +784,10 @@ ExportResult ExportEngine::exportVideo(
         observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
                 QStringLiteral("probeFinalOutput"), QStringLiteral("Final validation started"));
         try {
-            result.mediaInfo = MediaProbe::probeSummary(
-                settings.outputPath, {}, 30'000,
+            result.mediaInfo = MediaProbe::probe(
+                settings.outputPath, {}, false, 30'000,
                 probeObservations(settings, QStringLiteral("validatingOutput"),
-                                  QStringLiteral("probeFinalOutput")));
+                                  QStringLiteral("probeFinalOutput")), {}, true);
         } catch (const std::exception &error) {
             result.error = QStringLiteral("Automatic media validation failed; the staged output was not committed.");
             result.diagnostics = QString::fromUtf8(error.what());
@@ -767,10 +795,30 @@ ExportResult ExportEngine::exportVideo(
         }
         const bool codecOk = result.mediaInfo.videoCodec == QStringLiteral("hevc");
         const bool dimensionsOk = result.mediaInfo.videoSize == outputSize;
-        const bool durationOk = qAbs(result.mediaInfo.duration - exportDuration)
-            <= 2.0 / qMax(1.0, frameRate.value());
+        const bool averageRateOk = result.mediaInfo.averageFrameRate.isEquivalentTo(exportFrameRate);
+        const bool nominalRateOk = result.mediaInfo.frameRate.isEquivalentTo(exportFrameRate);
+        const bool packetCountAvailable = result.mediaInfo.videoPacketCount > 0;
+        const bool packetCountOk = !packetCountAvailable
+            || result.mediaInfo.videoPacketCount == expectedFrames;
+        const double videoStartTolerance = result.mediaInfo.timeBase.isValid()
+            ? result.mediaInfo.timeBase.value() : frameInterval;
+        const bool videoStartOk = qAbs(result.mediaInfo.videoStartTime) <= videoStartTolerance;
+        const double videoDuration = result.mediaInfo.videoDuration > 0.0
+            ? result.mediaInfo.videoDuration : result.mediaInfo.duration;
+        const bool durationOk = qAbs(videoDuration - exportDuration) <= frameInterval;
         const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty();
-        const bool audioOk = !audioExpected || !result.mediaInfo.audioCodecs.isEmpty();
+        const double audioFrameDuration = result.mediaInfo.audioSampleRate > 0
+            ? 1024.0 / result.mediaInfo.audioSampleRate : frameInterval;
+        const double audioTimingTolerance = qMax(
+            result.mediaInfo.audioTimeBase.isValid() ? result.mediaInfo.audioTimeBase.value() : 0.0,
+            audioFrameDuration);
+        const bool audioPresent = !result.mediaInfo.audioCodecs.isEmpty();
+        const bool audioStartOk = !audioExpected
+            || qAbs(result.mediaInfo.audioStartTime - result.mediaInfo.videoStartTime)
+                <= audioTimingTolerance;
+        const bool audioDurationOk = !audioExpected
+            || qAbs(result.mediaInfo.audioDuration - requestedDuration) <= audioTimingTolerance;
+        const bool audioOk = !audioExpected || (audioPresent && audioStartOk && audioDurationOk);
         const auto finalValidationLog = [&](const QString &operation, const QString &name,
                                             const QVariant &expected, const QVariant &actual,
                                             const bool passed) {
@@ -791,14 +839,36 @@ ExportResult ExportEngine::exportVideo(
                            QStringLiteral("%1x%2").arg(result.mediaInfo.videoSize.width())
                                                     .arg(result.mediaInfo.videoSize.height()), dimensionsOk);
         finalValidationLog(QStringLiteral("checkDuration"), QStringLiteral("Duration"),
-                           QString::number(exportDuration, 'f', 3),
-                           QString::number(result.mediaInfo.duration, 'f', 3), durationOk);
+                           QString::number(exportDuration, 'f', 6),
+                           QString::number(videoDuration, 'f', 6), durationOk);
+        finalValidationLog(QStringLiteral("checkAverageFrameRate"), QStringLiteral("Average frame rate"),
+                           rateString(exportFrameRate), rateString(result.mediaInfo.averageFrameRate), averageRateOk);
+        finalValidationLog(QStringLiteral("checkNominalFrameRate"), QStringLiteral("Nominal frame rate"),
+                           rateString(exportFrameRate), rateString(result.mediaInfo.frameRate), nominalRateOk);
+        finalValidationLog(QStringLiteral("checkPacketCount"), QStringLiteral("Video packet count"),
+                           expectedFrames,
+                           packetCountAvailable ? QVariant::fromValue(result.mediaInfo.videoPacketCount)
+                                                : QVariant(QStringLiteral("unavailable")), packetCountOk);
+        finalValidationLog(QStringLiteral("checkVideoStart"), QStringLiteral("Video start"),
+                           QStringLiteral("0"),
+                           QString::number(result.mediaInfo.videoStartTime, 'f', 9), videoStartOk);
         finalValidationLog(QStringLiteral("checkAudio"), QStringLiteral("Audio"),
                            audioExpected ? QStringLiteral("yes") : QStringLiteral("not required"),
                            result.mediaInfo.audioCodecs.isEmpty()
                                ? QStringLiteral("none") : result.mediaInfo.audioCodecs.join(','), audioOk);
-        if (!codecOk || !dimensionsOk || !durationOk || !audioOk) {
-            result.error = QStringLiteral("Export failed validation (codec, size, or duration).");
+        if (audioExpected) {
+            finalValidationLog(QStringLiteral("checkAudioStart"), QStringLiteral("A/V start delta"),
+                               QStringLiteral("≤ %1 s").arg(audioTimingTolerance, 0, 'f', 6),
+                               QString::number(qAbs(result.mediaInfo.audioStartTime
+                                                    - result.mediaInfo.videoStartTime), 'f', 9),
+                               audioStartOk);
+            finalValidationLog(QStringLiteral("checkAudioDuration"), QStringLiteral("Audio duration"),
+                               QString::number(requestedDuration, 'f', 6),
+                               QString::number(result.mediaInfo.audioDuration, 'f', 6), audioDurationOk);
+        }
+        if (!codecOk || !dimensionsOk || !averageRateOk || !nominalRateOk || !packetCountOk
+            || !videoStartOk || !durationOk || !audioOk) {
+            result.error = QStringLiteral("Export failed final timing validation.");
             return result;
         }
         observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),

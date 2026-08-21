@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <numeric>
 #include <stdexcept>
 
 namespace FlappedEar {
@@ -27,6 +28,27 @@ QString stderrDiagnostic(const QByteArray &stderrOutput)
 QString secondsText(const qint64 milliseconds)
 {
     return QString::number(milliseconds / 1'000.0, 'f', milliseconds >= 1'000 ? 1 : 3);
+}
+
+double jsonNumber(const QJsonValue &value, const double fallback = 0.0)
+{
+    if (value.isDouble()) {
+        const double result = value.toDouble();
+        return std::isfinite(result) ? result : fallback;
+    }
+    bool ok = false;
+    const double result = value.toString().toDouble(&ok);
+    return ok && std::isfinite(result) ? result : fallback;
+}
+
+qsizetype jsonCount(const QJsonObject &object, const QString &primary, const QString &fallback = {})
+{
+    bool ok = false;
+    qint64 count = object.value(primary).toString().toLongLong(&ok);
+    if (!ok && !fallback.isEmpty()) {
+        count = object.value(fallback).toString().toLongLong(&ok);
+    }
+    return ok && count >= 0 ? static_cast<qsizetype>(count) : 0;
 }
 
 MediaInfo runProbe(
@@ -120,24 +142,41 @@ double MediaRational::value() const
 
 bool MediaRational::isValid() const { return numerator > 0 && denominator > 0; }
 
+bool MediaRational::isEquivalentTo(const MediaRational &other) const
+{
+    if (!isValid() || !other.isValid()) {
+        return false;
+    }
+    const qint64 thisDivisor = std::gcd(numerator, denominator);
+    const qint64 otherDivisor = std::gcd(other.numerator, other.denominator);
+    return numerator / thisDivisor == other.numerator / otherDivisor
+        && denominator / thisDivisor == other.denominator / otherDivisor;
+}
+
 MediaInfo MediaProbe::probe(
     const QString &path,
     const QString &requestedFfprobePath,
     const bool countVideoFrames,
     const int timeoutMilliseconds,
     const MediaProbeProgressCallback &progressCallback,
-    const MediaProbeCancellationCallback &cancellationCallback)
+    const MediaProbeCancellationCallback &cancellationCallback,
+    const bool countVideoPackets)
 {
     QStringList arguments{"-v", "error", "-print_format", "json"};
     if (countVideoFrames) {
         arguments.append("-count_frames");
+    }
+    if (countVideoPackets) {
+        arguments.append("-count_packets");
     }
     arguments.append({"-show_format", "-show_streams", path});
     const int effectiveTimeout = timeoutMilliseconds >= 0
         ? timeoutMilliseconds
         : (countVideoFrames ? frameCountProbeTimeoutMilliseconds : metadataProbeTimeoutMilliseconds);
     return runProbe(path, requestedFfprobePath, arguments, effectiveTimeout,
-                    countVideoFrames ? QStringLiteral("frameCount") : QStringLiteral("full"),
+                    countVideoFrames ? QStringLiteral("frameCount")
+                                     : (countVideoPackets ? QStringLiteral("packetCount")
+                                                          : QStringLiteral("full")),
                     progressCallback, cancellationCallback);
 }
 
@@ -151,7 +190,7 @@ MediaInfo MediaProbe::probeSummary(
     const QStringList arguments{
         "-v", "error",
         "-show_entries",
-        "format=duration:stream=index,codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate",
+        "format=duration,start_time:stream=index,codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,time_base,start_time,duration,nb_frames,nb_read_frames,nb_packets,nb_read_packets,sample_rate",
         "-of", "json",
         path,
     };
@@ -168,8 +207,8 @@ MediaInfo MediaProbe::parseJson(const QByteArray &json, const QString &path)
     MediaInfo info;
     info.path = path;
     const QJsonObject format = document.object().value("format").toObject();
-    info.duration = format.value("duration").toString().toDouble();
-    info.startTime = format.value("start_time").toString().toDouble();
+    info.duration = jsonNumber(format.value("duration"));
+    info.startTime = jsonNumber(format.value("start_time"));
     for (const QJsonValue &value : document.object().value("streams").toArray()) {
         const QJsonObject stream = value.toObject();
         if (stream.value("codec_type").toString() == "video" && info.videoCodec.isEmpty()) {
@@ -179,24 +218,29 @@ MediaInfo MediaProbe::parseJson(const QByteArray &json, const QString &path)
             info.timeBase = parseRational(stream.value("time_base").toString());
             info.videoCodec = stream.value("codec_name").toString();
             info.pixelFormat = stream.value("pix_fmt").toString();
-            bool frameCountOk = false;
-            const qint64 frameCount = stream.value("nb_read_frames").toString().toLongLong(&frameCountOk);
-            if (frameCountOk && frameCount >= 0) {
-                info.videoFrameCount = static_cast<qsizetype>(frameCount);
-            }
-            if (stream.contains("start_time")) {
-                info.startTime = stream.value("start_time").toString().toDouble();
-            }
+            info.videoFrameCount = jsonCount(stream, QStringLiteral("nb_read_frames"),
+                                              QStringLiteral("nb_frames"));
+            info.videoPacketCount = jsonCount(stream, QStringLiteral("nb_read_packets"),
+                                               QStringLiteral("nb_packets"));
+            info.videoStartTime = jsonNumber(stream.value("start_time"), info.startTime);
+            info.videoDuration = jsonNumber(stream.value("duration"), info.duration);
+            info.startTime = info.videoStartTime;
         } else if (stream.value("codec_type").toString() == "audio") {
             info.audioCodecs.append(stream.value("codec_name").toString());
+            if (info.audioCodecs.size() == 1) {
+                info.audioStartTime = jsonNumber(stream.value("start_time"), info.startTime);
+                info.audioDuration = jsonNumber(stream.value("duration"), info.duration);
+                info.audioTimeBase = parseRational(stream.value("time_base").toString());
+                info.audioSampleRate = stream.value("sample_rate").toString().toInt();
+            }
         }
     }
     if (info.videoSize.isEmpty() || info.videoCodec.isEmpty() || info.duration <= 0.0) {
         throw std::runtime_error("ffprobe did not find a usable video stream.");
     }
-    // r_frame_rate is the stream's nominal rate, while avg_frame_rate exposes
-    // actual presentation cadence. A meaningful mismatch is a conservative
-    // VFR warning; export remains explicit-CFR in this milestone.
+    // r_frame_rate is the stream's nominal codec rate; avg_frame_rate is the
+    // observed presentation cadence. A meaningful mismatch is a conservative
+    // signal that the source may have variable frame timing.
     if (info.frameRate.isValid() && info.averageFrameRate.isValid()) {
         const double nominal = info.frameRate.value();
         const double average = info.averageFrameRate.value();

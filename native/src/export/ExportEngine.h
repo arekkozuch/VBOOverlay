@@ -62,6 +62,8 @@ struct ExportResult {
     QString error;
     QString validationWarning;
     MediaInfo mediaInfo;
+    MediaRational exportFrameRate;
+    qsizetype expectedFrames = 0;
     qsizetype generatedFrames = 0;
     qsizetype renderedFrames = 0;
     qint64 elapsedMilliseconds = 0;
@@ -83,12 +85,16 @@ struct ExportResult {
 
 class ExportEngine final {
 public:
+    [[nodiscard]] static MediaRational effectiveFrameRate(
+        const MediaInfo &source, const MediaRational &requested = {});
     [[nodiscard]] static ExportResult exportVideo(
         const ExportSettings &settings, TelemetryFrameRenderer &renderer);
     [[nodiscard]] static qsizetype frameCount(
         double sourceRangeStart, double sourceRangeEnd, const MediaRational &frameRate);
     [[nodiscard]] static double exportRelativeTime(
         qsizetype frameIndex, const MediaRational &frameRate);
+    [[nodiscard]] static double outputDuration(
+        qsizetype frameCount, const MediaRational &frameRate);
     [[nodiscard]] static double sourceVideoTime(
         double sourceRangeStart, qsizetype frameIndex, const MediaRational &frameRate);
     [[nodiscard]] static double framePresentationTime(

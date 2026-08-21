@@ -12,6 +12,7 @@ struct MediaRational {
     qint64 denominator = 1;
     [[nodiscard]] double value() const;
     [[nodiscard]] bool isValid() const;
+    [[nodiscard]] bool isEquivalentTo(const MediaRational &other) const;
 };
 
 struct MediaInfo {
@@ -25,7 +26,14 @@ struct MediaInfo {
     QString pixelFormat;
     QStringList audioCodecs;
     qsizetype videoFrameCount = 0;
+    qsizetype videoPacketCount = 0;
     double startTime = 0.0;
+    double videoStartTime = 0.0;
+    double videoDuration = 0.0;
+    double audioStartTime = 0.0;
+    double audioDuration = 0.0;
+    MediaRational audioTimeBase;
+    int audioSampleRate = 0;
     bool likelyVariableFrameRate = false;
 };
 
@@ -51,7 +59,8 @@ public:
         bool countVideoFrames = false,
         int timeoutMilliseconds = -1,
         const MediaProbeProgressCallback &progressCallback = {},
-        const MediaProbeCancellationCallback &cancellationCallback = {});
+        const MediaProbeCancellationCallback &cancellationCallback = {},
+        bool countVideoPackets = false);
     [[nodiscard]] static MediaInfo probeSummary(
         const QString &path,
         const QString &ffprobePath = {},

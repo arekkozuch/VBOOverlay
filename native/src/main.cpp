@@ -71,7 +71,7 @@ int exportTest(const QString &inputPath, const QString &outputPath)
     settings.inputPath = inputPath;
     settings.outputPath = outputTransaction.stagingPath();
     settings.outputSize = input.videoSize;
-    settings.frameRate = input.averageFrameRate;
+    settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
     settings.endTime = input.duration;
     const FlappedEar::ExportResult result = FlappedEar::ExportEngine::exportVideo(settings, renderer);
     if (!result.success) {
@@ -250,7 +250,7 @@ int exportWorker(const QString &configPath)
         settings.inputPath = config.value("inputPath").toString();
         settings.outputPath = config.value("outputPath").toString();
         settings.outputSize = input.videoSize;
-        settings.frameRate = input.averageFrameRate;
+        settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
         settings.startTime = config.value("startTime").toDouble();
         settings.endTime = config.value("endTime").toDouble(input.duration);
         settings.quality = config.value("quality").toString("high");
@@ -368,7 +368,7 @@ int exportWorker(const QString &configPath)
                           {"diagnostics", result.diagnostics},
                           {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
                           {"generatedFrames", static_cast<qint64>(result.generatedFrames)},
-                          {"expectedFrames", static_cast<qint64>(result.renderedFrames)},
+                          {"expectedFrames", static_cast<qint64>(result.expectedFrames)},
                           {"elapsedMilliseconds", result.elapsedMilliseconds},
                           {"renderMilliseconds", result.renderMilliseconds},
                           {"renderNanoseconds", result.renderNanoseconds},
@@ -382,11 +382,20 @@ int exportWorker(const QString &configPath)
                           {"outputBytes", result.outputBytes},
                           {"encodedFrames", static_cast<qint64>(result.encodedFrames)},
                           {"encodedSeconds", result.encodedSeconds},
+                          {"exportFrameRateNumerator", result.exportFrameRate.numerator},
+                          {"exportFrameRateDenominator", result.exportFrameRate.denominator},
+                          {"exportFrameRate", result.exportFrameRate.value()},
                           {"outputVideoCodec", result.mediaInfo.videoCodec},
                           {"outputWidth", result.mediaInfo.videoSize.width()},
                           {"outputHeight", result.mediaInfo.videoSize.height()},
                           {"outputDuration", result.mediaInfo.duration},
-                          {"outputAudioCodecs", result.mediaInfo.audioCodecs.join(", ")}});
+                          {"outputVideoDuration", result.mediaInfo.videoDuration},
+                          {"outputVideoStart", result.mediaInfo.videoStartTime},
+                          {"outputVideoPacketCount", static_cast<qint64>(result.mediaInfo.videoPacketCount)},
+                          {"outputAverageFrameRate", result.mediaInfo.averageFrameRate.value()},
+                          {"outputAudioCodecs", result.mediaInfo.audioCodecs.join(", ")},
+                          {"outputAudioStart", result.mediaInfo.audioStartTime},
+                          {"outputAudioDuration", result.mediaInfo.audioDuration}});
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         emitEvent({{"type", "log"}, {"state", "failed"}, {"level", "error"},
