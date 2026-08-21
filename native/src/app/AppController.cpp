@@ -81,19 +81,18 @@ AppController::AppController(QObject *parent)
 
 AppController::~AppController()
 {
-    if (!exporting()) {
-        return;
+    if (exporting()) {
+        QFile cancellationFile(m_exportCancelPath);
+        if (cancellationFile.open(QIODevice::WriteOnly)) {
+            cancellationFile.close();
+        }
+        m_exportProcess->terminate();
+        if (!m_exportProcess->waitForFinished(5'000)) {
+            m_exportProcess->kill();
+            m_exportProcess->waitForFinished(5'000);
+        }
     }
-    QFile cancellationFile(m_exportCancelPath);
-    if (cancellationFile.open(QIODevice::WriteOnly)) {
-        cancellationFile.close();
-    }
-    m_exportProcess->terminate();
-    if (!m_exportProcess->waitForFinished(5'000)) {
-        m_exportProcess->kill();
-        m_exportProcess->waitForFinished(5'000);
-    }
-    QFile::remove(m_exportProgressInfo.value("outputPath").toString());
+    m_exportOutputTransaction.reset();
     QFile::remove(m_exportCancelPath);
 }
 
@@ -461,7 +460,8 @@ bool AppController::startExport(
     const bool audioEnabled,
     const bool customRange,
     const double rangeStart,
-    const double rangeEnd)
+    const double rangeEnd,
+    const bool overwriteAllowed)
 {
     if (exporting()) {
         return false;
@@ -490,11 +490,32 @@ bool AppController::startExport(
         emit exportChanged();
         return false;
     }
+    m_exportOutputTransaction = std::make_unique<ExportOutputTransaction>();
+    const auto preparation = m_exportOutputTransaction->prepare(
+        outputPath, inputPath, {m_telemetryPath}, overwriteAllowed);
+    if (preparation.status == ExportOutputTransaction::PreparationStatus::OverwriteConfirmationRequired) {
+        m_exportState = QStringLiteral("overwriteConfirmationRequired");
+        m_exportError.clear();
+        m_exportProgressInfo = {{"outputPath", m_exportOutputTransaction->userTargetPath()},
+                                {"outputName", QFileInfo(outputPath).fileName()},
+                                {"targetExistedBeforeExport", true}};
+        m_exportOutputTransaction.reset();
+        emit exportChanged();
+        return false;
+    }
+    if (preparation.status == ExportOutputTransaction::PreparationStatus::Error) {
+        m_exportError = preparation.error;
+        m_exportState = QStringLiteral("failed");
+        m_exportOutputTransaction.reset();
+        emit exportChanged();
+        return false;
+    }
     m_exportConfig = std::make_unique<QTemporaryFile>(
         QDir::temp().filePath(QStringLiteral("flappedear-export-XXXXXX.json")));
     if (!m_exportConfig->open()) {
         m_exportError = QStringLiteral("Could not create temporary export configuration.");
         m_exportState = QStringLiteral("failed");
+        m_exportOutputTransaction.reset();
         emit exportChanged();
         return false;
     }
@@ -502,7 +523,7 @@ bool AppController::startExport(
     QFile::remove(m_exportCancelPath);
     const QJsonObject config = {
         {"inputPath", inputPath},
-        {"outputPath", outputPath},
+        {"outputPath", m_exportOutputTransaction->stagingPath()},
         {"vboPath", m_telemetryPath},
         {"widgets", m_widgetModel.toJson()},
         {"sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}}},
@@ -515,6 +536,7 @@ bool AppController::startExport(
     if (m_exportConfig->write(QJsonDocument(config).toJson(QJsonDocument::Compact)) < 0) {
         m_exportError = QStringLiteral("Could not write temporary export configuration.");
         m_exportState = QStringLiteral("failed");
+        m_exportOutputTransaction.reset();
         m_exportConfig.reset();
         emit exportChanged();
         return false;
@@ -529,7 +551,10 @@ bool AppController::startExport(
     m_exportError.clear();
     m_exportMetrics.clear();
     m_exportDiagnosticLog.clear();
-    m_exportProgressInfo = {{"outputPath", outputPath}, {"outputName", QFileInfo(outputPath).fileName()},
+    m_exportProgressInfo = {{"outputPath", m_exportOutputTransaction->userTargetPath()},
+                            {"stagingPath", m_exportOutputTransaction->stagingPath()},
+                            {"outputName", QFileInfo(outputPath).fileName()},
+                            {"targetExistedBeforeExport", m_exportOutputTransaction->targetExistedBeforeExport()},
                             {"syncOffset", m_sync.offset}, {"timeScale", m_sync.timeScale},
                             {"audioLabel", audioEnabled ? QStringLiteral("AAC audio") : QStringLiteral("No audio")}};
     m_exportProgressVisible = true;
@@ -550,6 +575,7 @@ bool AppController::startExport(
         m_exportState = QStringLiteral("failed");
         m_exportProcess.reset();
         m_exportConfig.reset();
+        m_exportOutputTransaction.reset();
         emit exportChanged();
         return false;
     }
@@ -594,7 +620,7 @@ void AppController::cancelExportAndQuit()
         QTimer::singleShot(3'000, this, [this] {
             if (exporting()) {
                 m_exportProcess->kill();
-                QFile::remove(m_exportProgressInfo.value("outputPath").toString());
+                if (m_exportOutputTransaction) m_exportOutputTransaction->cleanup();
             }
         });
     });
@@ -747,15 +773,19 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         m_exportState = QStringLiteral("cancelled");
         m_exportError.clear();
         setStatus("Export cancelled.");
-    } else if (exitStatus == QProcess::NormalExit && exitCode == 0) {
-        m_exportProgress = 100;
-        if (m_exportState == QStringLiteral("validationWarning")) {
-            m_exportError = m_exportProgressInfo.value("warning").toString();
-            setStatus("Video export completed, but automatic validation failed.");
-        } else {
+    } else if (exitStatus == QProcess::NormalExit && exitCode == 0
+               && m_exportState == QStringLiteral("complete")) {
+        QString commitError;
+        if (m_exportOutputTransaction && m_exportOutputTransaction->commit(&commitError)) {
+            m_exportProgress = 100;
             m_exportState = QStringLiteral("complete");
             m_exportError.clear();
             setStatus("HEVC export finished and passed validation.");
+        } else {
+            m_exportState = QStringLiteral("failed");
+            m_exportError = commitError.isEmpty()
+                ? QStringLiteral("Validated export could not be committed to its target.") : commitError;
+            setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
         }
     } else {
         m_exportState = QStringLiteral("failed");
@@ -769,6 +799,7 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
     QFile::remove(m_exportCancelPath);
     m_exportProcess.reset();
     m_exportConfig.reset();
+    m_exportOutputTransaction.reset();
     emit exportChanged();
     if (m_quitAfterExport) {
         QCoreApplication::quit();

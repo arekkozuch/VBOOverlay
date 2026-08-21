@@ -3,6 +3,7 @@
 #include "export/ExportEngine.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
+#include "export/ExportOutputTransaction.h"
 #include "telemetry/VboParser.h"
 #include "telemetry/TrackGeometry.h"
 #include "widgets/WidgetModel.h"
@@ -48,6 +49,13 @@ int renderStill(const QString &path)
 
 int exportTest(const QString &inputPath, const QString &outputPath)
 {
+    FlappedEar::ExportOutputTransaction outputTransaction;
+    const auto preparation = outputTransaction.prepare(outputPath, inputPath, {}, true);
+    if (preparation.status != FlappedEar::ExportOutputTransaction::PreparationStatus::Ready) {
+        qCritical().noquote() << (preparation.error.isEmpty()
+            ? QStringLiteral("Export target requires explicit overwrite approval.") : preparation.error);
+        return EXIT_FAILURE;
+    }
     const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parse(
         u"[column names]\ntime speed\n[data]\n0 0\n10 100");
     FlappedEar::WidgetModel widgets;
@@ -61,7 +69,7 @@ int exportTest(const QString &inputPath, const QString &outputPath)
     }
     FlappedEar::ExportSettings settings;
     settings.inputPath = inputPath;
-    settings.outputPath = outputPath;
+    settings.outputPath = outputTransaction.stagingPath();
     settings.outputSize = input.videoSize;
     settings.frameRate = input.averageFrameRate;
     settings.endTime = input.duration;
@@ -69,6 +77,12 @@ int exportTest(const QString &inputPath, const QString &outputPath)
     if (!result.success) {
         qCritical().noquote() << result.error;
         if (!result.diagnostics.isEmpty()) qCritical().noquote() << result.diagnostics;
+        return EXIT_FAILURE;
+    }
+    QString commitError;
+    if (!result.validationWarning.isEmpty() || !outputTransaction.commit(&commitError)) {
+        qCritical().noquote() << (commitError.isEmpty()
+            ? QStringLiteral("Export validation did not pass; output was not committed.") : commitError);
         return EXIT_FAILURE;
     }
     if (!result.validationWarning.isEmpty()) {

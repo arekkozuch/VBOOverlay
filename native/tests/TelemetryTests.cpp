@@ -3,6 +3,7 @@
 #include "export/ExportEngine.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
+#include "export/ExportOutputTransaction.h"
 #include "export/FfmpegTools.h"
 #include "export/MediaProbe.h"
 #include "sync/TelemetrySyncEngine.h"
@@ -65,6 +66,10 @@ private slots:
     void parsesStructuredFfmpegProgress();
     void calculatesEncodedOutputProgress();
     void preservesFrameIdentityThroughCompletedOverlayComposition();
+    void rejectsUnsafeExportPaths();
+    void preservesExistingExportTargetOnFailures_data();
+    void preservesExistingExportTargetOnFailures();
+    void commitsNewAndReplacementExports();
     void syncsOptionalRealRecording();
 };
 
@@ -121,7 +126,126 @@ TelemetrySession speedSession(const double start, const double end, const double
     return session;
 }
 
+bool writeBytes(const QString &path, const QByteArray &bytes)
+{
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        && file.write(bytes) == bytes.size();
+}
+
 } // namespace
+
+void TelemetryTests::rejectsUnsafeExportPaths()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString input = directory.filePath("input.mp4");
+    const QString vbo = directory.filePath("telemetry.vbo");
+    QVERIFY(writeBytes(input, "input"));
+    QVERIFY(writeBytes(vbo, "vbo"));
+
+    ExportOutputTransaction sameInput;
+    QCOMPARE(sameInput.prepare(input, input, {vbo}, false).status,
+             ExportOutputTransaction::PreparationStatus::Error);
+
+    ExportOutputTransaction sameVbo;
+    QCOMPARE(sameVbo.prepare(vbo, input, {vbo}, false).status,
+             ExportOutputTransaction::PreparationStatus::Error);
+
+    ExportOutputTransaction missingDestination;
+    QCOMPARE(missingDestination.prepare(directory.filePath("missing/out.mp4"), input, {vbo}, false).status,
+             ExportOutputTransaction::PreparationStatus::Error);
+}
+
+void TelemetryTests::preservesExistingExportTargetOnFailures_data()
+{
+    QTest::addColumn<QString>("scenario");
+    QTest::addColumn<bool>("overwriteAllowed");
+    for (const QString &scenario : {
+             QStringLiteral("cancel during Stage A"),
+             QStringLiteral("Stage A FFmpeg failure"),
+             QStringLiteral("temporary overlay validation failure"),
+             QStringLiteral("Stage B failure"),
+             QStringLiteral("final validation failure"),
+             QStringLiteral("worker termination"),
+             QStringLiteral("application shutdown cleanup")}) {
+        QTest::newRow(qPrintable(scenario)) << scenario << true;
+    }
+    QTest::newRow("overwrite denied") << QStringLiteral("overwrite denied") << false;
+}
+
+void TelemetryTests::preservesExistingExportTargetOnFailures()
+{
+    QFETCH(QString, scenario);
+    QFETCH(bool, overwriteAllowed);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray original("known existing target bytes\0unchanged", 37);
+    const QString input = directory.filePath("input.mp4");
+    const QString target = directory.filePath("target.mp4");
+    QVERIFY(writeBytes(input, "input"));
+    QVERIFY(writeBytes(target, original));
+
+    {
+        ExportOutputTransaction transaction;
+        const auto prepared = transaction.prepare(target, input, {}, overwriteAllowed);
+        if (!overwriteAllowed) {
+            QCOMPARE(prepared.status,
+                     ExportOutputTransaction::PreparationStatus::OverwriteConfirmationRequired);
+            QVERIFY(transaction.stagingPath().isEmpty());
+        } else {
+            QCOMPARE(prepared.status, ExportOutputTransaction::PreparationStatus::Ready);
+            QVERIFY(transaction.ownsPath(transaction.stagingPath()));
+            QVERIFY(writeBytes(transaction.stagingPath(), "partial staged output"));
+            if (scenario != QStringLiteral("application shutdown cleanup")) {
+                transaction.cleanup();
+            }
+        }
+    }
+    QFile targetFile(target);
+    QVERIFY(targetFile.open(QIODevice::ReadOnly));
+    QCOMPARE(targetFile.readAll(), original);
+    const QStringList artifacts = QDir(directory.path()).entryList(
+        {QStringLiteral("*.part.*"), QStringLiteral("*.backup"), QStringLiteral("*.cancel")},
+        QDir::Files | QDir::Hidden);
+    QVERIFY2(artifacts.isEmpty(), qPrintable(artifacts.join(',')));
+}
+
+void TelemetryTests::commitsNewAndReplacementExports()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString input = directory.filePath("input.mp4");
+    QVERIFY(writeBytes(input, "input"));
+
+    const QString newTarget = directory.filePath("new.mp4");
+    ExportOutputTransaction newFile;
+    QCOMPARE(newFile.prepare(newTarget, input, {}, false).status,
+             ExportOutputTransaction::PreparationStatus::Ready);
+    QCOMPARE(QFileInfo(newFile.stagingPath()).absolutePath(), QFileInfo(newTarget).absolutePath());
+    QVERIFY(writeBytes(newFile.stagingPath(), "new valid output"));
+    QString error;
+    QVERIFY2(newFile.commit(&error), qPrintable(error));
+    QFile newTargetFile(newTarget);
+    QVERIFY(newTargetFile.open(QIODevice::ReadOnly));
+    QCOMPARE(newTargetFile.readAll(), QByteArray("new valid output"));
+
+    const QString existingTarget = directory.filePath("existing.mp4");
+    QVERIFY(writeBytes(existingTarget, "old known target"));
+    ExportOutputTransaction replacement;
+    QCOMPARE(replacement.prepare(existingTarget, input, {}, true).status,
+             ExportOutputTransaction::PreparationStatus::Ready);
+    QVERIFY(replacement.targetExistedBeforeExport());
+    QVERIFY(writeBytes(replacement.stagingPath(), "replacement output"));
+    QVERIFY2(replacement.commit(&error), qPrintable(error));
+    QFile replacementFile(existingTarget);
+    QVERIFY(replacementFile.open(QIODevice::ReadOnly));
+    QCOMPARE(replacementFile.readAll(), QByteArray("replacement output"));
+    const QStringList artifacts = QDir(directory.path()).entryList(
+        {QStringLiteral("*.part.*"), QStringLiteral("*.backup"), QStringLiteral("*.cancel")},
+        QDir::Files | QDir::Hidden);
+    QVERIFY2(artifacts.isEmpty(), qPrintable(artifacts.join(',')));
+}
 
 void TelemetryTests::parsesRealisticFixture()
 {

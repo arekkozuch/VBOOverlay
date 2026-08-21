@@ -394,7 +394,6 @@ ExportResult ExportEngine::exportVideo(
                 activeFfmpeg->kill();
                 activeFfmpeg->waitForFinished(5'000);
             }
-            QFile::remove(settings.outputPath);
         };
         const auto waitForQueueRoom = [&] {
             if (static_cast<qint64>(activeFfmpeg->bytesToWrite()) <= queueHighWaterMark) return true;
@@ -716,7 +715,6 @@ ExportResult ExportEngine::exportVideo(
             result.error = QStringLiteral("FFmpeg output advanced beyond the telemetry overlay.");
             result.diagnostics = QStringLiteral("Prepared %1 telemetry frames; FFmpeg reported %2 output frames.")
                                      .arg(expectedFrames).arg(lastFfmpegProgress.encodedFrames);
-            QFile::remove(settings.outputPath);
             return result;
         }
         observe(settings, QStringLiteral("status"), QStringLiteral("validatingOutput"),
@@ -763,13 +761,7 @@ ExportResult ExportEngine::exportVideo(
                 probeObservations(settings, QStringLiteral("validatingOutput"),
                                   QStringLiteral("probeFinalOutput")));
         } catch (const std::exception &error) {
-            // Stage B completed and produced a non-empty file. A probe process
-            // failure cannot establish that the encoded MP4 is corrupt, so
-            // preserve it and surface a distinct completion warning.
-            result.success = true;
-            result.validationWarning = QStringLiteral(
-                "Automatic media validation failed. The MP4 was kept at: %1")
-                                           .arg(settings.outputPath);
+            result.error = QStringLiteral("Automatic media validation failed; the staged output was not committed.");
             result.diagnostics = QString::fromUtf8(error.what());
             return result;
         }

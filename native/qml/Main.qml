@@ -140,6 +140,22 @@ ApplicationWindow {
         onAccepted: appController.cancelExportAndQuit()
     }
 
+    Dialog {
+        id: exportOverwriteDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Replace existing file?")
+        standardButtons: Dialog.Yes | Dialog.No
+        contentItem: Label {
+            width: 380
+            text: qsTr("The selected export target already exists. Replace it only after the new video has encoded and passed validation?")
+            wrapMode: Text.WordWrap
+            color: "#e8edf4"
+        }
+        onAccepted: exportDialog.startExport(true)
+    }
+
     menuBar: MenuBar {
         Menu {
             title: qsTr("File")
@@ -407,6 +423,21 @@ ApplicationWindow {
         width: 470
         anchors.centerIn: parent
         property url outputFile
+        function startExport(overwriteAllowed) {
+            const quality = ["fast", "high", "maximum"][exportQuality.currentIndex];
+            if (appController.startExport(
+                outputFile,
+                quality,
+                exportAudio.checked,
+                exportRangeMode.currentIndex === 1,
+                Number(exportRangeStart.text),
+                Number(exportRangeEnd.text),
+                overwriteAllowed)) {
+                close();
+            } else if (appController.exportState === "overwriteConfirmationRequired") {
+                exportOverwriteDialog.open();
+            }
+        }
         onOpened: {
             const duration = Number(appController.exportSourceInfo.duration || 0);
             exportRangeStart.text = "0.000";
@@ -538,17 +569,7 @@ ApplicationWindow {
                     accent: true
                     text: qsTr("Export")
                     enabled: exportDialog.outputFile.toString().length > 0
-                    onClicked: {
-                        const quality = ["fast", "high", "maximum"][exportQuality.currentIndex];
-                        if (appController.startExport(
-                            exportDialog.outputFile,
-                            quality,
-                            exportAudio.checked,
-                            exportRangeMode.currentIndex === 1,
-                            Number(exportRangeStart.text),
-                            Number(exportRangeEnd.text)))
-                            exportDialog.close();
-                    }
+                    onClicked: exportDialog.startExport(false)
                 }
             }
         }

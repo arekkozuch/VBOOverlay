@@ -5,6 +5,7 @@
 #include "telemetry/TrackGeometry.h"
 #include "export/MediaProbe.h"
 #include "export/ExportDiagnostics.h"
+#include "export/ExportOutputTransaction.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 
@@ -129,7 +130,8 @@ public:
         bool audioEnabled,
         bool customRange,
         double rangeStart,
-        double rangeEnd);
+        double rangeEnd,
+        bool overwriteAllowed = false);
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void cancelExportAndQuit();
     Q_INVOKABLE void dismissExportProgress();
@@ -193,6 +195,7 @@ private:
     QFutureWatcher<AutoSyncResult> m_syncWatcher;
     std::unique_ptr<QProcess> m_exportProcess;
     std::unique_ptr<QTemporaryFile> m_exportConfig;
+    std::unique_ptr<ExportOutputTransaction> m_exportOutputTransaction;
     QByteArray m_exportStdout;
     QString m_exportCancelPath;
     int m_exportProgress = 0;
