@@ -1,4 +1,5 @@
 #include "gopro/GoProTelemetrySource.h"
+#include "app/AppController.h"
 #include "export/EncoderDetector.h"
 #include "export/ExportEngine.h"
 #include "export/ExportDiagnostics.h"
@@ -16,7 +17,9 @@
 #include "project/ProjectDocumentState.h"
 
 #include <QFile>
+#include <QJsonDocument>
 #include <QProcess>
+#include <QSettings>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtEndian>
@@ -56,6 +59,7 @@ private slots:
     void rejectsInvalidMediaProbeJson();
     void classifiesMediaProbeProcessFailures();
     void reportsMediaProbeLifecycleHeartbeat();
+    void cancelsMediaProbeWithoutLeavingItRunning();
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
     void preservesAbsoluteExportTimestamps();
@@ -77,6 +81,8 @@ private slots:
     void gatesDirtyDestructiveActions_data();
     void gatesDirtyDestructiveActions();
     void resolvesDirtyDecisionsSafely();
+    void retainsTelemetryAfterFailedAsyncLoad();
+    void opensProjectsTransactionally();
     void syncsOptionalRealRecording();
 };
 
@@ -859,6 +865,107 @@ void TelemetryTests::reportsMediaProbeLifecycleHeartbeat()
 #else
     QSKIP("Lifecycle helper script requires a POSIX shell.");
 #endif
+}
+
+void TelemetryTests::cancelsMediaProbeWithoutLeavingItRunning()
+{
+#ifdef Q_OS_UNIX
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString probePath = directory.filePath("cancel-probe.sh");
+    QFile probe(probePath);
+    QVERIFY(probe.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(probe.write("#!/bin/sh\nsleep 10\n"), qint64(19));
+    probe.close();
+    QVERIFY(probe.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                 | QFileDevice::ExeOwner));
+    QString error;
+    try {
+        static_cast<void>(MediaProbe::probe(
+            "/fixture.mp4", probePath, false, 20'000, {}, [] { return true; }));
+    } catch (const std::exception &exception) {
+        error = QString::fromUtf8(exception.what());
+    }
+    QVERIFY2(error.startsWith("ffprobe cancelled while probing: /fixture.mp4"), qPrintable(error));
+#else
+    QSKIP("Lifecycle helper script requires a POSIX shell.");
+#endif
+}
+
+void TelemetryTests::retainsTelemetryAfterFailedAsyncLoad()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    AppController controller;
+    controller.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    const QString loadedName = controller.telemetryName();
+    const QStringList loadedChannels = controller.channelNames();
+    QVERIFY(!loadedName.isEmpty());
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString malformedPath = directory.filePath("malformed.vbo");
+    QVERIFY(writeBytes(malformedPath, "not a VBOX file"));
+    controller.loadVbo(QUrl::fromLocalFile(malformedPath));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("error"));
+    QCOMPARE(controller.telemetryName(), loadedName);
+    QCOMPARE(controller.channelNames(), loadedChannels);
+}
+
+void TelemetryTests::opensProjectsTransactionally()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    AppController controller;
+    controller.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    const QString oldTelemetryName = controller.telemetryName();
+    const QStringList oldChannels = controller.channelNames();
+    const QStringList oldAnalysisChannels = controller.analysisChannels();
+    const QJsonArray oldWidgets = controller.widgetModel()->toJson();
+    const double oldOffset = controller.syncOffset();
+    const double oldScale = controller.timeScale();
+    QVERIFY(controller.dirty());
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QJsonObject scene{{"widgets", controller.widgetModel()->toJson()}};
+    const QJsonObject failedProject{{"version", 2},
+                                    {"scene", scene},
+                                    {"vboPath", directory.filePath("missing.vbo")},
+                                    {"sync", QJsonObject{{"offset", 4.0}, {"timeScale", 1.0}}}};
+    const QString failedPath = directory.filePath("missing-source.fetproject");
+    QVERIFY(writeBytes(failedPath, QJsonDocument(failedProject).toJson()));
+    controller.requestOpenProject(QUrl::fromLocalFile(failedPath));
+    controller.resolveDestructiveAction("discard");
+    QTRY_VERIFY(!controller.projectLoading());
+    QVERIFY(!controller.projectLoadError().isEmpty());
+    QCOMPARE(controller.telemetryName(), oldTelemetryName);
+    QCOMPARE(controller.channelNames(), oldChannels);
+    QCOMPARE(controller.analysisChannels(), oldAnalysisChannels);
+    QCOMPARE(controller.widgetModel()->toJson(), oldWidgets);
+    QCOMPARE(controller.syncOffset(), oldOffset);
+    QCOMPARE(controller.timeScale(), oldScale);
+    QVERIFY(controller.projectPath().isEmpty());
+    QVERIFY(controller.dirty());
+
+    const QJsonObject successProject{{"version", 2},
+                                     {"scene", scene},
+                                     {"vboPath", QStringLiteral(TEST_FIXTURE_PATH)},
+                                     {"sync", QJsonObject{{"offset", 2.5}, {"timeScale", 1.0}}},
+                                     {"analysis", QJsonObject{{"channels", QJsonArray{}}, {"visible", true}}}};
+    const QString successPath = directory.filePath("valid.fetproject");
+    QVERIFY(writeBytes(successPath, QJsonDocument(successProject).toJson()));
+    controller.requestOpenProject(QUrl::fromLocalFile(successPath));
+    controller.resolveDestructiveAction("discard");
+    QTRY_VERIFY(!controller.projectLoading());
+    QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(successPath).canonicalFilePath());
+    QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
+    QCOMPARE(controller.syncOffset(), 2.5);
+    QVERIFY(!controller.dirty());
 }
 
 void TelemetryTests::tracksExportStageElapsedTime()

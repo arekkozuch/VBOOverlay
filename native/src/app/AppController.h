@@ -19,6 +19,7 @@
 #include <QSettings>
 #include <QUrl>
 #include <QVariant>
+#include <atomic>
 #include <memory>
 
 namespace FlappedEar {
@@ -70,6 +71,11 @@ class AppController final : public QObject {
     Q_PROPERTY(bool dirty READ dirty NOTIFY documentStateChanged)
     Q_PROPERTY(quint64 lastSavedRevision READ lastSavedRevision NOTIFY documentStateChanged)
     Q_PROPERTY(QString pendingDestructiveAction READ pendingDestructiveAction NOTIFY destructiveActionChanged)
+    Q_PROPERTY(QString videoLoadState READ videoLoadState NOTIFY sourceLoadStateChanged)
+    Q_PROPERTY(QString vboLoadState READ vboLoadState NOTIFY sourceLoadStateChanged)
+    Q_PROPERTY(bool projectLoading READ projectLoading NOTIFY projectLoadChanged)
+    Q_PROPERTY(QString projectLoadStage READ projectLoadStage NOTIFY projectLoadChanged)
+    Q_PROPERTY(QString projectLoadError READ projectLoadError NOTIFY projectLoadChanged)
 
 public:
     explicit AppController(QObject *parent = nullptr);
@@ -120,6 +126,11 @@ public:
     [[nodiscard]] bool dirty() const;
     [[nodiscard]] quint64 lastSavedRevision() const;
     [[nodiscard]] QString pendingDestructiveAction() const;
+    [[nodiscard]] QString videoLoadState() const;
+    [[nodiscard]] QString vboLoadState() const;
+    [[nodiscard]] bool projectLoading() const;
+    [[nodiscard]] QString projectLoadStage() const;
+    [[nodiscard]] QString projectLoadError() const;
 
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
@@ -174,6 +185,8 @@ signals:
     void analysisChanged();
     void documentStateChanged();
     void destructiveActionChanged();
+    void sourceLoadStateChanged();
+    void projectLoadChanged();
     void saveAsRequested();
     void quitApproved();
 
@@ -185,10 +198,54 @@ private:
         qsizetype packetCount = 0;
         qsizetype gpsSampleCount = 0;
         QString gpsStream;
+        quint64 generation = 0;
+        QString videoPath;
+        QString vboPath;
+    };
+
+    struct VideoProbeResult {
+        bool success = false;
+        QString path;
+        MediaInfo mediaInfo;
+        QString error;
+        quint64 generation = 0;
+    };
+
+    struct VboLoadResult {
+        bool success = false;
+        QString path;
+        TelemetrySession session;
+        TrackGeometry geometry;
+        QString error;
+        quint64 generation = 0;
+    };
+
+    struct ProjectLoadResult {
+        bool success = false;
+        QString projectPath;
+        QJsonObject project;
+        QJsonArray widgets;
+        QStringList analysisChannels;
+        bool analysisVisible = true;
+        SyncTransform sync;
+        VideoProbeResult video;
+        VboLoadResult vbo;
+        QString error;
+        quint64 generation = 0;
     };
 
     [[nodiscard]] QVariant semanticValue(const QString &alias) const;
     void setStatus(QString status);
+    [[nodiscard]] quint64 beginSourceGeneration();
+    void cancelSourceJobs();
+    void startVideoProbe(const QString &path, quint64 generation, bool markDocumentDirty);
+    void startVboLoad(const QString &path, quint64 generation, bool markDocumentDirty);
+    void commitProjectLoad(const ProjectLoadResult &result);
+    void commitVideoProbe(const VideoProbeResult &result, bool markDocumentDirty);
+    void commitVboLoad(const VboLoadResult &result, bool markDocumentDirty);
+    void setProjectLoadState(bool loading, QString stage = {}, QString error = {});
+    [[nodiscard]] static QString normalizedSourcePath(const QString &path);
+    [[nodiscard]] static QVariantList trackPointsFor(const TrackGeometry &geometry);
     void saveSessionSettings();
     void saveWidgetSettings();
     void markPersistentChange();
@@ -198,7 +255,6 @@ private:
     void performPendingDestructiveAction();
     void restoreSources();
     void reconcileAnalysisChannels();
-    void probeExportSource();
     void handleExportOutput();
     void finishExport(int exitCode, QProcess::ExitStatus exitStatus);
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
@@ -220,6 +276,23 @@ private:
     double m_playbackTime = 0.0;
     SyncTransform m_sync;
     QFutureWatcher<AutoSyncResult> m_syncWatcher;
+    QFutureWatcher<VideoProbeResult> m_videoProbeWatcher;
+    QFutureWatcher<VboLoadResult> m_vboLoadWatcher;
+    QFutureWatcher<ProjectLoadResult> m_projectLoadWatcher;
+    quint64 m_sourceGeneration = 0;
+    std::shared_ptr<std::atomic_bool> m_videoProbeCancellation;
+    std::shared_ptr<std::atomic_bool> m_vboLoadCancellation;
+    std::shared_ptr<std::atomic_bool> m_projectLoadCancellation;
+    std::shared_ptr<std::atomic_bool> m_syncCancellation;
+    bool m_videoLoadMarksDocumentDirty = true;
+    bool m_vboLoadMarksDocumentDirty = true;
+    QString m_videoLoadState = QStringLiteral("idle");
+    QString m_vboLoadState = QStringLiteral("idle");
+    QString m_pendingVideoPath;
+    QString m_pendingVboPath;
+    bool m_projectLoading = false;
+    QString m_projectLoadStage;
+    QString m_projectLoadError;
     std::unique_ptr<QProcess> m_exportProcess;
     std::unique_ptr<QTemporaryFile> m_exportConfig;
     std::unique_ptr<ExportOutputTransaction> m_exportOutputTransaction;

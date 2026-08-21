@@ -35,7 +35,8 @@ MediaInfo runProbe(
     const QStringList &arguments,
     const int timeoutMilliseconds,
     const QString &mode,
-    const MediaProbeProgressCallback &progressCallback)
+    const MediaProbeProgressCallback &progressCallback,
+    const MediaProbeCancellationCallback &cancellationCallback)
 {
     const QString executable = requestedFfprobePath.isEmpty()
         ? FfmpegTools::ffprobePath()
@@ -60,6 +61,15 @@ MediaInfo runProbe(
     DiagnosticHeartbeat heartbeat(500);
     bool finished = false;
     while (!finished && elapsed.elapsed() < timeoutMilliseconds) {
+        if (cancellationCallback && cancellationCallback()) {
+            process.terminate();
+            if (!process.waitForFinished(processShutdownTimeoutMilliseconds)) {
+                process.kill();
+                process.waitForFinished();
+            }
+            throw std::runtime_error(
+                QStringLiteral("ffprobe cancelled while probing: %1").arg(path).toStdString());
+        }
         const qint64 remaining = timeoutMilliseconds - elapsed.elapsed();
         finished = process.waitForFinished(static_cast<int>(qMin<qint64>(250, remaining)));
         if (!finished && progressCallback && heartbeat.shouldEmit(elapsed.elapsed())) {
@@ -115,7 +125,8 @@ MediaInfo MediaProbe::probe(
     const QString &requestedFfprobePath,
     const bool countVideoFrames,
     const int timeoutMilliseconds,
-    const MediaProbeProgressCallback &progressCallback)
+    const MediaProbeProgressCallback &progressCallback,
+    const MediaProbeCancellationCallback &cancellationCallback)
 {
     QStringList arguments{"-v", "error", "-print_format", "json"};
     if (countVideoFrames) {
@@ -127,14 +138,15 @@ MediaInfo MediaProbe::probe(
         : (countVideoFrames ? frameCountProbeTimeoutMilliseconds : metadataProbeTimeoutMilliseconds);
     return runProbe(path, requestedFfprobePath, arguments, effectiveTimeout,
                     countVideoFrames ? QStringLiteral("frameCount") : QStringLiteral("full"),
-                    progressCallback);
+                    progressCallback, cancellationCallback);
 }
 
 MediaInfo MediaProbe::probeSummary(
     const QString &path,
     const QString &requestedFfprobePath,
     const int timeoutMilliseconds,
-    const MediaProbeProgressCallback &progressCallback)
+    const MediaProbeProgressCallback &progressCallback,
+    const MediaProbeCancellationCallback &cancellationCallback)
 {
     const QStringList arguments{
         "-v", "error",
@@ -144,7 +156,7 @@ MediaInfo MediaProbe::probeSummary(
         path,
     };
     return runProbe(path, requestedFfprobePath, arguments, timeoutMilliseconds,
-                    QStringLiteral("summary"), progressCallback);
+                    QStringLiteral("summary"), progressCallback, cancellationCallback);
 }
 
 MediaInfo MediaProbe::parseJson(const QByteArray &json, const QString &path)

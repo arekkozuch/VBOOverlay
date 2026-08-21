@@ -18,6 +18,7 @@
 #include <QtConcurrent>
 #include <QtGlobal>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <utility>
 
@@ -46,6 +47,11 @@ AppController::AppController(QObject *parent)
     connect(&m_syncWatcher, &QFutureWatcher<AutoSyncResult>::finished, this, [this] {
         const AutoSyncResult result = m_syncWatcher.result();
         emit syncingChanged();
+        if (result.generation != m_sourceGeneration
+            || result.videoPath != normalizedSourcePath(m_videoSource.toLocalFile())
+            || result.vboPath != normalizedSourcePath(m_telemetryPath)) {
+            return;
+        }
         if (!result.success) {
             m_syncCandidate.clear();
             emit syncCandidateChanged();
@@ -79,6 +85,44 @@ AppController::AppController(QObject *parent)
                       .arg(result.candidate.diagnostics.correlation, 0, 'f', 3)
                       .arg(result.candidate.confidence * 100.0, 0, 'f', 0)
                       .arg(result.gpsSampleCount));
+    });
+    connect(&m_videoProbeWatcher, &QFutureWatcher<VideoProbeResult>::finished, this, [this] {
+        const VideoProbeResult result = m_videoProbeWatcher.result();
+        if (result.generation != m_sourceGeneration) {
+            return;
+        }
+        if (!result.success) {
+            m_videoLoadState = QStringLiteral("error");
+            emit sourceLoadStateChanged();
+            setStatus(QStringLiteral("Could not open video: %1\n%2").arg(result.path, result.error));
+            return;
+        }
+        commitVideoProbe(result, m_videoLoadMarksDocumentDirty);
+    });
+    connect(&m_vboLoadWatcher, &QFutureWatcher<VboLoadResult>::finished, this, [this] {
+        const VboLoadResult result = m_vboLoadWatcher.result();
+        if (result.generation != m_sourceGeneration) {
+            return;
+        }
+        if (!result.success) {
+            m_vboLoadState = QStringLiteral("error");
+            emit sourceLoadStateChanged();
+            setStatus(QStringLiteral("Could not parse VBO: %1\n%2").arg(result.path, result.error));
+            return;
+        }
+        commitVboLoad(result, m_vboLoadMarksDocumentDirty);
+    });
+    connect(&m_projectLoadWatcher, &QFutureWatcher<ProjectLoadResult>::finished, this, [this] {
+        const ProjectLoadResult result = m_projectLoadWatcher.result();
+        if (result.generation != m_sourceGeneration) {
+            return;
+        }
+        if (!result.success) {
+            setProjectLoadState(false, {}, result.error);
+            setStatus(QStringLiteral("Project could not be opened: %1").arg(result.error));
+            return;
+        }
+        commitProjectLoad(result);
     });
     restoreSources();
     const QString restoredProjectPath = m_settings.value("project/path").toString();
@@ -182,6 +226,156 @@ QString AppController::pendingDestructiveAction() const
     return ProjectDocumentState::actionName(m_documentState.pendingAction());
 }
 
+QString AppController::videoLoadState() const { return m_videoLoadState; }
+QString AppController::vboLoadState() const { return m_vboLoadState; }
+bool AppController::projectLoading() const { return m_projectLoading; }
+QString AppController::projectLoadStage() const { return m_projectLoadStage; }
+QString AppController::projectLoadError() const { return m_projectLoadError; }
+
+QString AppController::normalizedSourcePath(const QString &path)
+{
+    const QFileInfo info(path);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+}
+
+QVariantList AppController::trackPointsFor(const TrackGeometry &geometry)
+{
+    QVariantList points;
+    points.reserve(geometry.points.size());
+    for (const QPointF &point : geometry.points) {
+        points.append(point);
+    }
+    return points;
+}
+
+quint64 AppController::beginSourceGeneration()
+{
+    ++m_sourceGeneration;
+    cancelSourceJobs();
+    if (m_videoProbeWatcher.isRunning()) {
+        m_videoLoadState = QStringLiteral("idle");
+    }
+    if (m_vboLoadWatcher.isRunning()) {
+        m_vboLoadState = QStringLiteral("idle");
+    }
+    emit sourceLoadStateChanged();
+    setProjectLoadState(false);
+    if (m_syncCancellation) {
+        m_syncCancellation->store(true);
+    }
+    return m_sourceGeneration;
+}
+
+void AppController::cancelSourceJobs()
+{
+    for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
+                                     m_projectLoadCancellation}) {
+        if (cancellation) {
+            cancellation->store(true);
+        }
+    }
+}
+
+void AppController::startVideoProbe(
+    const QString &path, const quint64 generation, const bool markDocumentDirty)
+{
+    m_videoProbeCancellation = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation = m_videoProbeCancellation;
+    m_videoLoadMarksDocumentDirty = markDocumentDirty;
+    m_videoLoadState = QStringLiteral("loading");
+    emit sourceLoadStateChanged();
+    m_videoProbeWatcher.setFuture(QtConcurrent::run([path, generation, cancellation] {
+        VideoProbeResult result;
+        result.path = path;
+        result.generation = generation;
+        try {
+            result.mediaInfo = MediaProbe::probe(
+                path, {}, false, -1, {}, [cancellation] { return cancellation->load(); });
+            result.success = !cancellation->load();
+            if (!result.success) {
+                result.error = QStringLiteral("Video loading was cancelled.");
+            }
+        } catch (const std::exception &error) {
+            result.error = QString::fromUtf8(error.what());
+        }
+        return result;
+    }));
+}
+
+void AppController::startVboLoad(
+    const QString &path, const quint64 generation, const bool markDocumentDirty)
+{
+    m_vboLoadCancellation = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation = m_vboLoadCancellation;
+    m_vboLoadMarksDocumentDirty = markDocumentDirty;
+    m_vboLoadState = QStringLiteral("loading");
+    emit sourceLoadStateChanged();
+    m_vboLoadWatcher.setFuture(QtConcurrent::run([path, generation, cancellation] {
+        VboLoadResult result;
+        result.path = path;
+        result.generation = generation;
+        try {
+            result.session = VboParser::parseFile(path);
+            if (cancellation->load()) {
+                result.error = QStringLiteral("Telemetry loading was cancelled.");
+                return result;
+            }
+            result.geometry = buildTrackGeometry(result.session);
+            result.success = !cancellation->load();
+            if (!result.success) {
+                result.error = QStringLiteral("Telemetry loading was cancelled.");
+            }
+        } catch (const std::exception &error) {
+            result.error = QString::fromUtf8(error.what());
+        }
+        return result;
+    }));
+}
+
+void AppController::commitVideoProbe(const VideoProbeResult &result, const bool markDocumentDirty)
+{
+    m_videoSource = QUrl::fromLocalFile(result.path);
+    m_exportSourceInfo = result.mediaInfo;
+    m_videoLoadState = QStringLiteral("ready");
+    m_pendingVideoPath.clear();
+    m_syncCandidate.clear();
+    m_settings.setValue("sources/video", result.path);
+    emit videoSourceChanged();
+    emit exportChanged();
+    emit syncCandidateChanged();
+    emit sourceLoadStateChanged();
+    if (markDocumentDirty) {
+        markPersistentChange();
+    }
+    setStatus(QStringLiteral("Video opened: %1").arg(QFileInfo(result.path).fileName()));
+}
+
+void AppController::commitVboLoad(const VboLoadResult &result, const bool markDocumentDirty)
+{
+    m_session = std::make_unique<TelemetrySession>(result.session);
+    m_trackGeometry = result.geometry;
+    m_trackPoints = trackPointsFor(m_trackGeometry);
+    m_telemetryPath = result.path;
+    m_vboLoadState = QStringLiteral("ready");
+    m_pendingVboPath.clear();
+    m_syncCandidate.clear();
+    m_previewRenderContext.setSession(m_session.get());
+    m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
+    m_settings.setValue("sources/vbo", m_telemetryPath);
+    reconcileAnalysisChannels();
+    emit telemetryChanged();
+    emit liveValuesChanged();
+    emit syncCandidateChanged();
+    emit sourceLoadStateChanged();
+    if (markDocumentDirty) {
+        markPersistentChange();
+    }
+    setStatus(QStringLiteral("VBO opened: %1 samples, %2 numeric channels.")
+                  .arg(m_session->sampleCount)
+                  .arg(m_session->channels.size()));
+}
+
 void AppController::loadVideo(const QUrl &url)
 {
     const QString path = url.toLocalFile();
@@ -191,59 +385,55 @@ void AppController::loadVideo(const QUrl &url)
         setStatus("Choose an existing MP4 or MOV video.");
         return;
     }
-    const QUrl newSource = QUrl::fromLocalFile(info.absoluteFilePath());
-    if (newSource == m_videoSource) {
+    const QString normalizedPath = normalizedSourcePath(info.absoluteFilePath());
+    if (normalizedPath == normalizedSourcePath(m_videoSource.toLocalFile())) {
         return;
     }
-    m_videoSource = newSource;
-    probeExportSource();
-    m_syncCandidate.clear();
-    m_settings.setValue("sources/video", info.absoluteFilePath());
-    emit videoSourceChanged();
-    emit syncCandidateChanged();
-    markPersistentChange();
-    setStatus(QStringLiteral("Video opened: %1").arg(info.fileName()));
+    const bool restartVbo = m_vboLoadState == QStringLiteral("loading") && !m_pendingVboPath.isEmpty();
+    const QString pendingVboPath = m_pendingVboPath;
+    const quint64 generation = beginSourceGeneration();
+    m_pendingVideoPath = normalizedPath;
+    startVideoProbe(normalizedPath, generation, true);
+    if (restartVbo) {
+        startVboLoad(pendingVboPath, generation, true);
+    }
+    setStatus(QStringLiteral("Loading video metadata: %1").arg(info.fileName()));
 }
 
 void AppController::loadVbo(const QUrl &url)
 {
     const QString path = url.toLocalFile();
-    const QString absolutePath = QFileInfo(path).absoluteFilePath();
+    const QFileInfo info(path);
+    const QString absolutePath = normalizedSourcePath(path);
+    if (!info.isFile() || info.suffix().compare("vbo", Qt::CaseInsensitive) != 0) {
+        setStatus("Choose an existing VBOX .vbo telemetry file.");
+        return;
+    }
     if (!m_telemetryPath.isEmpty()
         && ExportOutputTransaction::normalizedComparisonPath(absolutePath)
             == ExportOutputTransaction::normalizedComparisonPath(m_telemetryPath)) {
         return;
     }
-    try {
-        auto session = std::make_unique<TelemetrySession>(VboParser::parseFile(path));
-        m_session = std::move(session);
-        m_syncCandidate.clear();
-        m_trackGeometry = buildTrackGeometry(*m_session);
-        m_previewRenderContext.setSession(m_session.get());
-        m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
-        m_trackPoints.clear();
-        m_trackPoints.reserve(m_trackGeometry.points.size());
-        for (const QPointF &point : m_trackGeometry.points) {
-            m_trackPoints.append(point);
-        }
-        m_telemetryPath = absolutePath;
-        m_settings.setValue("sources/vbo", m_telemetryPath);
-        reconcileAnalysisChannels();
-        emit telemetryChanged();
-        emit syncCandidateChanged();
-        emit liveValuesChanged();
-        markPersistentChange();
-        setStatus(QStringLiteral("VBO opened: %1 samples, %2 numeric channels.")
-                      .arg(m_session->sampleCount)
-                      .arg(m_session->channels.size()));
-    } catch (const std::exception &error) {
-        setStatus(QStringLiteral("VBO error: %1").arg(error.what()));
+    const bool restartVideo = m_videoLoadState == QStringLiteral("loading") && !m_pendingVideoPath.isEmpty();
+    const QString pendingVideoPath = m_pendingVideoPath;
+    const quint64 generation = beginSourceGeneration();
+    m_pendingVboPath = absolutePath;
+    startVboLoad(absolutePath, generation, true);
+    if (restartVideo) {
+        startVideoProbe(pendingVideoPath, generation, true);
     }
+    setStatus(QStringLiteral("Loading telemetry: %1").arg(info.fileName()));
 }
 
 void AppController::performClearProject()
 {
     const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
+    static_cast<void>(beginSourceGeneration());
+    m_videoLoadState = QStringLiteral("idle");
+    m_vboLoadState = QStringLiteral("idle");
+    m_pendingVideoPath.clear();
+    m_pendingVboPath.clear();
+    setProjectLoadState(false);
     m_videoSource = QUrl();
     m_exportSourceInfo = {};
     m_exportMetrics.clear();
@@ -269,6 +459,7 @@ void AppController::performClearProject()
     emit playbackTimeChanged();
     emit syncChanged();
     emit syncCandidateChanged();
+    emit sourceLoadStateChanged();
     emit liveValuesChanged();
     m_documentState.reset();
     m_pendingOpenProject = QUrl();
@@ -428,40 +619,147 @@ bool AppController::performOpenProject(const QUrl &url)
         setStatus("Project error: unsupported or invalid .fetproject file.");
         return false;
     }
-    const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
-    performClearProject();
-    if (!m_widgetModel.fromJson(scene.value("widgets").toArray())) {
-        setStatus("Project error: widget scene could not be applied.");
+    const QJsonObject sync = project.value("sync").toObject();
+    const double offset = sync.value("offset").toDouble();
+    const double timeScale = sync.value("timeScale").toDouble(1.0);
+    if (!std::isfinite(offset) || !std::isfinite(timeScale) || timeScale <= 0.0) {
+        setStatus("Project error: synchronization state is invalid.");
         return false;
     }
-    m_projectTemplate = project;
-    const QJsonObject sync = project.value("sync").toObject();
-    setSyncOffset(sync.value("offset").toDouble());
-    setTimeScale(sync.value("timeScale").toDouble(1.0));
-    const QString videoPath = project.value("videoPath").toString();
-    const QString vboPath = project.value("vboPath").toString();
-    if (!videoPath.isEmpty()) {
-        loadVideo(QUrl::fromLocalFile(videoPath));
-    }
-    if (!vboPath.isEmpty()) {
-        loadVbo(QUrl::fromLocalFile(vboPath));
-    }
     const QJsonObject analysis = project.value("analysis").toObject();
+    QStringList channels;
     if (analysis.value("channels").isArray()) {
-        QStringList channels;
         for (const QJsonValue &value : analysis.value("channels").toArray()) {
             channels.append(value.toString());
         }
-        setAnalysisChannels(channels);
     }
-    if (analysis.contains("visible")) {
-        setAnalysisVisible(analysis.value("visible").toBool(true));
-    }
-    m_settings.setValue("project/path", file.fileName());
-    m_documentState.reset(file.fileName());
-    emit documentStateChanged();
-    setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(file).fileName()));
+    const quint64 generation = beginSourceGeneration();
+    m_projectLoadCancellation = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation = m_projectLoadCancellation;
+    const QString projectPath = normalizedSourcePath(file.fileName());
+    const QString videoPath = project.value("videoPath").toString();
+    const QString vboPath = project.value("vboPath").toString();
+    const QString normalizedVideoPath = videoPath.isEmpty() ? QString() : normalizedSourcePath(videoPath);
+    const QString normalizedVboPath = vboPath.isEmpty() ? QString() : normalizedSourcePath(vboPath);
+    m_pendingVideoPath.clear();
+    m_pendingVboPath.clear();
+    setProjectLoadState(true, normalizedVideoPath.isEmpty()
+                                  ? QStringLiteral("Loading telemetry")
+                                  : QStringLiteral("Loading video metadata"));
+    m_projectLoadWatcher.setFuture(QtConcurrent::run(
+        [projectPath, project, widgets = scene.value("widgets").toArray(), channels,
+         analysisVisible = analysis.value("visible").toBool(true),
+         syncTransform = SyncTransform{offset, timeScale}, normalizedVideoPath, normalizedVboPath,
+         generation, cancellation] {
+            ProjectLoadResult result;
+            result.projectPath = projectPath;
+            result.project = project;
+            result.widgets = widgets;
+            result.analysisChannels = channels;
+            result.analysisVisible = analysisVisible;
+            result.sync = syncTransform;
+            result.generation = generation;
+            if (!normalizedVideoPath.isEmpty()) {
+                result.video.path = normalizedVideoPath;
+                result.video.generation = generation;
+                try {
+                    result.video.mediaInfo = MediaProbe::probe(
+                        normalizedVideoPath, {}, false, -1, {},
+                        [cancellation] { return cancellation->load(); });
+                    result.video.success = !cancellation->load();
+                } catch (const std::exception &error) {
+                    result.error = QStringLiteral("video source %1: %2")
+                                       .arg(normalizedVideoPath, QString::fromUtf8(error.what()));
+                    return result;
+                }
+                if (!result.video.success) {
+                    result.error = QStringLiteral("video source loading was cancelled.");
+                    return result;
+                }
+            }
+            if (!normalizedVboPath.isEmpty()) {
+                result.vbo.path = normalizedVboPath;
+                result.vbo.generation = generation;
+                try {
+                    result.vbo.session = VboParser::parseFile(normalizedVboPath);
+                    if (cancellation->load()) {
+                        result.error = QStringLiteral("telemetry source loading was cancelled.");
+                        return result;
+                    }
+                    result.vbo.geometry = buildTrackGeometry(result.vbo.session);
+                    result.vbo.success = !cancellation->load();
+                } catch (const std::exception &error) {
+                    result.error = QStringLiteral("telemetry source %1: %2")
+                                       .arg(normalizedVboPath, QString::fromUtf8(error.what()));
+                    return result;
+                }
+                if (!result.vbo.success) {
+                    result.error = QStringLiteral("telemetry source loading was cancelled.");
+                    return result;
+                }
+            }
+            result.success = true;
+            return result;
+        }));
     return true;
+}
+
+void AppController::setProjectLoadState(bool loading, QString stage, QString error)
+{
+    if (m_projectLoading == loading && m_projectLoadStage == stage && m_projectLoadError == error) {
+        return;
+    }
+    m_projectLoading = loading;
+    m_projectLoadStage = std::move(stage);
+    m_projectLoadError = std::move(error);
+    emit projectLoadChanged();
+}
+
+void AppController::commitProjectLoad(const ProjectLoadResult &result)
+{
+    const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
+    setProjectLoadState(true, QStringLiteral("Applying project"));
+    if (!m_widgetModel.fromJson(result.widgets)) {
+        setProjectLoadState(false, {}, QStringLiteral("widget scene could not be applied."));
+        setStatus("Project could not be opened: widget scene could not be applied.");
+        return;
+    }
+    m_projectTemplate = result.project;
+    m_videoSource = result.video.path.isEmpty() ? QUrl() : QUrl::fromLocalFile(result.video.path);
+    m_exportSourceInfo = result.video.mediaInfo;
+    m_videoLoadState = result.video.path.isEmpty() ? QStringLiteral("idle") : QStringLiteral("ready");
+    m_telemetryPath = result.vbo.path;
+    m_session = result.vbo.path.isEmpty()
+        ? nullptr : std::make_unique<TelemetrySession>(result.vbo.session);
+    m_trackGeometry = result.vbo.geometry;
+    m_trackPoints = trackPointsFor(m_trackGeometry);
+    m_vboLoadState = result.vbo.path.isEmpty() ? QStringLiteral("idle") : QStringLiteral("ready");
+    m_previewRenderContext.setSession(m_session.get());
+    m_previewRenderContext.setTrackGeometry(m_session ? &m_trackGeometry : nullptr);
+    m_sync = result.sync;
+    m_previewRenderContext.setSyncTransform(m_sync);
+    m_playbackTime = 0.0;
+    m_syncCandidate.clear();
+    m_analysisChannels.clear();
+    setAnalysisChannels(result.analysisChannels);
+    setAnalysisVisible(result.analysisVisible);
+    reconcileAnalysisChannels();
+    m_settings.setValue("sources/video", result.video.path);
+    m_settings.setValue("sources/vbo", result.vbo.path);
+    m_settings.setValue("project/path", result.projectPath);
+    saveSessionSettings();
+    m_documentState.reset(result.projectPath);
+    emit videoSourceChanged();
+    emit telemetryChanged();
+    emit exportChanged();
+    emit playbackTimeChanged();
+    emit syncChanged();
+    emit syncCandidateChanged();
+    emit liveValuesChanged();
+    emit sourceLoadStateChanged();
+    emit documentStateChanged();
+    setProjectLoadState(false);
+    setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(result.projectPath).fileName()));
 }
 
 bool AppController::saveProject(const QUrl &url)
@@ -518,14 +816,32 @@ void AppController::autoSync()
         return;
     }
     const TelemetrySession telemetry = *m_session;
+    const quint64 generation = m_sourceGeneration;
+    const QString normalizedVideoPath = normalizedSourcePath(videoPath);
+    const QString normalizedVboPath = normalizedSourcePath(m_telemetryPath);
+    m_syncCancellation = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation = m_syncCancellation;
     m_syncCandidate.clear();
     emit syncCandidateChanged();
     setStatus("Indexing GoPro telemetry and matching GPS speed…");
-    m_syncWatcher.setFuture(QtConcurrent::run([videoPath, telemetry] {
+    m_syncWatcher.setFuture(QtConcurrent::run(
+        [normalizedVideoPath, normalizedVboPath, telemetry, generation, cancellation] {
         AutoSyncResult result;
+        result.generation = generation;
+        result.videoPath = normalizedVideoPath;
+        result.vboPath = normalizedVboPath;
         try {
-            const GoProTelemetryResult videoTelemetry = GoProTelemetrySource::load(videoPath);
+            if (cancellation->load()) {
+                return result;
+            }
+            const GoProTelemetryResult videoTelemetry = GoProTelemetrySource::load(normalizedVideoPath);
+            if (cancellation->load()) {
+                return result;
+            }
             result.candidate = TelemetrySyncEngine::synchronize(videoTelemetry.session, telemetry);
+            if (cancellation->load()) {
+                return result;
+            }
             result.packetCount = videoTelemetry.packetCount;
             result.gpsSampleCount = videoTelemetry.session.sampleCount;
             result.gpsStream = videoTelemetry.gpsStream;
@@ -588,7 +904,10 @@ bool AppController::startExport(
         return false;
     }
     if (!m_exportSourceInfo.videoSize.isValid()) {
-        probeExportSource();
+        m_exportError = QStringLiteral("Video metadata is still loading or unavailable.");
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return false;
     }
     const double sourceDuration = m_exportSourceInfo.duration;
     const double startTime = customRange ? rangeStart : 0.0;
@@ -1098,44 +1417,30 @@ void AppController::performPendingDestructiveAction()
 void AppController::restoreSources()
 {
     const QString videoPath = m_settings.value("sources/video").toString();
-    if (QFileInfo::exists(videoPath)) {
-        m_videoSource = QUrl::fromLocalFile(videoPath);
-        probeExportSource();
-    }
     const QString vboPath = m_settings.value("sources/vbo").toString();
-    if (!QFileInfo::exists(vboPath)) {
+    if (videoPath.isEmpty() && vboPath.isEmpty()) {
         return;
     }
-    try {
-        m_session = std::make_unique<TelemetrySession>(VboParser::parseFile(vboPath));
-        m_trackGeometry = buildTrackGeometry(*m_session);
-        m_previewRenderContext.setSession(m_session.get());
-        m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
-        m_trackPoints.clear();
-        m_trackPoints.reserve(m_trackGeometry.points.size());
-        for (const QPointF &point : m_trackGeometry.points) {
-            m_trackPoints.append(point);
+    const quint64 generation = beginSourceGeneration();
+    if (!videoPath.isEmpty()) {
+        if (QFileInfo(videoPath).isFile()) {
+            startVideoProbe(normalizedSourcePath(videoPath), generation, false);
+        } else {
+            m_videoLoadState = QStringLiteral("error");
+            emit sourceLoadStateChanged();
+            setStatus(QStringLiteral("Could not restore video: %1").arg(videoPath));
         }
-        m_telemetryPath = vboPath;
-        reconcileAnalysisChannels();
-        m_statusText = QStringLiteral("Previous native session restored.");
-    } catch (const std::exception &error) {
-        m_statusText = QStringLiteral("Could not restore VBO: %1").arg(error.what());
     }
-}
-
-void AppController::probeExportSource()
-{
-    m_exportSourceInfo = {};
-    if (m_videoSource.isEmpty()) {
-        return;
+    if (!vboPath.isEmpty()) {
+        if (QFileInfo(vboPath).isFile()) {
+            startVboLoad(normalizedSourcePath(vboPath), generation, false);
+        } else {
+            m_vboLoadState = QStringLiteral("error");
+            emit sourceLoadStateChanged();
+            setStatus(QStringLiteral("Could not restore VBO: %1").arg(vboPath));
+        }
     }
-    try {
-        m_exportSourceInfo = MediaProbe::probe(m_videoSource.toLocalFile());
-    } catch (const std::exception &) {
-        // Video playback/import must remain available without FFmpeg tooling.
-    }
-    emit exportChanged();
+    setStatus("Restoring previous sources…");
 }
 
 void AppController::reconcileAnalysisChannels()

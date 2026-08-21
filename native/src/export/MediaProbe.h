@@ -41,6 +41,7 @@ struct MediaProbeEvent {
 };
 
 using MediaProbeProgressCallback = std::function<void(const MediaProbeEvent &event)>;
+using MediaProbeCancellationCallback = std::function<bool()>;
 
 class MediaProbe final {
 public:
@@ -49,12 +50,14 @@ public:
         const QString &ffprobePath = {},
         bool countVideoFrames = false,
         int timeoutMilliseconds = -1,
-        const MediaProbeProgressCallback &progressCallback = {});
+        const MediaProbeProgressCallback &progressCallback = {},
+        const MediaProbeCancellationCallback &cancellationCallback = {});
     [[nodiscard]] static MediaInfo probeSummary(
         const QString &path,
         const QString &ffprobePath = {},
         int timeoutMilliseconds = 30'000,
-        const MediaProbeProgressCallback &progressCallback = {});
+        const MediaProbeProgressCallback &progressCallback = {},
+        const MediaProbeCancellationCallback &cancellationCallback = {});
     [[nodiscard]] static MediaInfo parseJson(const QByteArray &json, const QString &path = {});
     [[nodiscard]] static MediaRational parseRational(const QString &value);
 };
