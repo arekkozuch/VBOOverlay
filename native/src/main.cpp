@@ -66,11 +66,12 @@ int exportTest(const QString &inputPath, const QString &outputPath)
     const FlappedEar::ExportResult result = FlappedEar::ExportEngine::exportVideo(settings, renderer);
     if (!result.success) {
         qCritical().noquote() << result.error;
+        if (!result.diagnostics.isEmpty()) qCritical().noquote() << result.diagnostics;
         return EXIT_FAILURE;
     }
     qInfo().noquote() << QStringLiteral(
         "HEVC export completed: %1 submitted / %10 encoded frames in %2 ms (%3 fps); render=%4 ms, polish=%5 ms, "
-        "syncRender=%6 ms, readback=%7 ms, cpuCopy=%8 ms, ffmpegWrite=%9 ms, maxQueued=%11 MiB.")
+        "syncRender=%6 ms, readback=%7 ms, cpuCopy=%8 ms, ffmpegWrite=%9 ms, maxQueued=%11 MiB, temporaryOverlay=%12 MiB.")
                              .arg(result.renderedFrames).arg(result.elapsedMilliseconds)
                              .arg(result.renderedFrames * 1000.0 / qMax<qint64>(1, result.elapsedMilliseconds), 0, 'f', 2)
                              .arg(result.renderMilliseconds)
@@ -80,7 +81,8 @@ int exportTest(const QString &inputPath, const QString &outputPath)
                              .arg(result.cpuCopyNanoseconds / 1'000'000)
                              .arg(result.ffmpegWriteNanoseconds / 1'000'000)
                              .arg(result.encodedFrames)
-                             .arg(result.maximumQueuedBytes / (1024.0 * 1024.0), 0, 'f', 1);
+                             .arg(result.maximumQueuedBytes / (1024.0 * 1024.0), 0, 'f', 1)
+                             .arg(result.temporaryOverlayBytes / (1024.0 * 1024.0), 0, 'f', 1);
     return EXIT_SUCCESS;
 }
 
@@ -187,6 +189,7 @@ int exportWorker(const QString &configPath)
                 ? 97.0 : encodedPercent;
             QJsonObject event{{"state", pipeline.stage},
                               {"renderedFrames", static_cast<qint64>(pipeline.submittedFrames)},
+                              {"generatedFrames", static_cast<qint64>(pipeline.generatedFrames)},
                               {"totalFrames", static_cast<qint64>(pipeline.totalFrames)},
                               {"sourceTime", pipeline.submittedSourceTime},
                               {"endTime", settings.endTime},
@@ -198,6 +201,7 @@ int exportWorker(const QString &configPath)
                               {"encoderRealtimeFactor", pipeline.encoderRealtimeFactor},
                               {"queuedBytes", pipeline.queuedBytes},
                               {"maximumQueuedBytes", pipeline.maximumQueuedBytes},
+                              {"temporaryOverlayBytes", pipeline.temporaryOverlayBytes},
                               {"elapsedMilliseconds", elapsedMilliseconds},
                               {"visibleProgress", visiblePercent},
                               {"outputBytes", QFileInfo(settings.outputPath).size()}};
@@ -225,6 +229,7 @@ int exportWorker(const QString &configPath)
             return EXIT_FAILURE;
         }
         writeExportEvent({{"state", "complete"}, {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
+                          {"generatedFrames", static_cast<qint64>(result.generatedFrames)},
                           {"totalFrames", static_cast<qint64>(result.renderedFrames)},
                           {"elapsedMilliseconds", result.elapsedMilliseconds},
                           {"renderMilliseconds", result.renderMilliseconds},
@@ -235,6 +240,7 @@ int exportWorker(const QString &configPath)
                           {"cpuCopyNanoseconds", result.cpuCopyNanoseconds},
                           {"ffmpegWriteNanoseconds", result.ffmpegWriteNanoseconds},
                           {"maximumQueuedBytes", result.maximumQueuedBytes},
+                          {"temporaryOverlayBytes", result.temporaryOverlayBytes},
                           {"encodedFrames", static_cast<qint64>(result.encodedFrames)},
                           {"encodedSeconds", result.encodedSeconds},
                           {"renderedFrames", static_cast<qint64>(result.renderedFrames)}});

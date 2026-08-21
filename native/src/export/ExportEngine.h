@@ -11,6 +11,7 @@ namespace FlappedEar {
 class TelemetryFrameRenderer;
 
 struct ExportPipelineProgress {
+    qsizetype generatedFrames = 0;
     qsizetype submittedFrames = 0;
     qsizetype totalFrames = 0;
     double submittedSourceTime = 0.0;
@@ -19,6 +20,7 @@ struct ExportPipelineProgress {
     double outputDurationSeconds = 0.0;
     qint64 queuedBytes = 0;
     qint64 maximumQueuedBytes = 0;
+    qint64 temporaryOverlayBytes = 0;
     double encoderFps = 0.0;
     double encoderRealtimeFactor = 0.0;
     QString stage = QStringLiteral("rendering");
@@ -44,6 +46,7 @@ struct ExportResult {
     bool success = false;
     QString error;
     MediaInfo mediaInfo;
+    qsizetype generatedFrames = 0;
     qsizetype renderedFrames = 0;
     qint64 elapsedMilliseconds = 0;
     qint64 renderMilliseconds = 0;
@@ -54,6 +57,7 @@ struct ExportResult {
     qint64 cpuCopyNanoseconds = 0;
     qint64 ffmpegWriteNanoseconds = 0;
     qint64 maximumQueuedBytes = 0;
+    qint64 temporaryOverlayBytes = 0;
     qsizetype encodedFrames = 0;
     double encodedSeconds = 0.0;
     QString diagnostics;

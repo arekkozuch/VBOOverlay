@@ -612,7 +612,7 @@ void AppController::handleExportOutput()
         if (!state.isEmpty()) {
             m_exportState = state;
         }
-        for (const QString &key : {QStringLiteral("renderedFrames"), QStringLiteral("totalFrames"),
+        for (const QString &key : {QStringLiteral("generatedFrames"), QStringLiteral("renderedFrames"), QStringLiteral("totalFrames"),
                                    QStringLiteral("sourceTime"), QStringLiteral("endTime"),
                                    QStringLiteral("telemetryTime"), QStringLiteral("elapsedMilliseconds"),
                                    QStringLiteral("throughputFps"), QStringLiteral("realtimeFactor"),
@@ -623,7 +623,8 @@ void AppController::handleExportOutput()
                                    QStringLiteral("encodedSeconds"), QStringLiteral("encodedProgress"),
                                    QStringLiteral("encoderFps"), QStringLiteral("encoderRealtimeFactor"),
                                    QStringLiteral("rendererFps"), QStringLiteral("queuedBytes"),
-                                   QStringLiteral("maximumQueuedBytes"), QStringLiteral("diagnostics")}) {
+                                   QStringLiteral("maximumQueuedBytes"), QStringLiteral("temporaryOverlayBytes"),
+                                   QStringLiteral("diagnostics")}) {
             if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
         }
         if (!state.isEmpty()) m_exportProgressInfo.insert("stage", state);

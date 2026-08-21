@@ -624,7 +624,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 columns: 3
                 Label { text: qsTr("Elapsed\n%1").arg(window.formatTime(Number(appController.exportProgressInfo.elapsedMilliseconds || 0))); color: "#aeb9c7" }
-                Label { text: qsTr("Renderer\n%1 fps").arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1)); color: "#aeb9c7" }
+                Label { text: qsTr("Overlay feed\n%1 fps").arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1)); color: "#aeb9c7" }
                 Label { text: qsTr("Encoder\n%1 fps · %2x").arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1)).arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2)); color: "#aeb9c7" }
             }
             Label {
@@ -651,11 +651,12 @@ ApplicationWindow {
                     wrapMode: TextEdit.WrapAnywhere
                     color: "#9eabba"
                     font.pixelSize: 11
-                    text: qsTr("Overlay prepared: %1 / %2\nFFmpeg encoded: %3 frames\nQueued to FFmpeg: %4 MiB (maximum %5 MiB)\nRenderer: %6 fps\nEncoder: %7 fps · %8x realtime\nEncoder ID: %9\nOutput: %10")
-                        .arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
+                    text: qsTr("Overlay generated/submitted: %1 / %2 of %3\nFFmpeg encoded: %4 frames\nQueued to FFmpeg: %5 MiB (maximum %6 MiB)\nTemporary overlay: %7 MiB\nOverlay feed: %8 fps\nEncoder: %9 fps · %10x realtime\nEncoder ID: %11\nOutput: %12")
+                        .arg(appController.exportProgressInfo.generatedFrames || 0).arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
                         .arg(appController.exportProgressInfo.encodedFrames || 0)
                         .arg((Number(appController.exportProgressInfo.queuedBytes || 0) / 1048576).toFixed(1))
                         .arg((Number(appController.exportProgressInfo.maximumQueuedBytes || 0) / 1048576).toFixed(1))
+                        .arg((Number(appController.exportProgressInfo.temporaryOverlayBytes || 0) / 1048576).toFixed(1))
                         .arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1))
                         .arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1))
                         .arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2))

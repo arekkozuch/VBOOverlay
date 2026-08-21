@@ -2,6 +2,7 @@
 #include "export/EncoderDetector.h"
 #include "export/ExportEngine.h"
 #include "export/ExportProgress.h"
+#include "export/FfmpegTools.h"
 #include "export/MediaProbe.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
@@ -11,6 +12,7 @@
 #include "widgets/WidgetModel.h"
 
 #include <QFile>
+#include <QProcess>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtEndian>
@@ -52,6 +54,7 @@ private slots:
     void estimatesExportProgress();
     void parsesStructuredFfmpegProgress();
     void calculatesEncodedOutputProgress();
+    void preservesFrameIdentityThroughCompletedOverlayComposition();
     void syncsOptionalRealRecording();
 };
 
@@ -541,6 +544,70 @@ void TelemetryTests::calculatesEncodedOutputProgress()
     QCOMPARE(FfmpegProgressParser::overallPercent(5.0, 10.0), 47.5);
     QCOMPARE(FfmpegProgressParser::overallPercent(12.0, 10.0), 95.0);
     QCOMPARE(FfmpegProgressParser::overallPercent(-1.0, 10.0), 0.0);
+}
+
+void TelemetryTests::preservesFrameIdentityThroughCompletedOverlayComposition()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the frame-identity integration test.");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    constexpr int width = 64;
+    constexpr int height = 16;
+    constexpr int frameCount = 150;
+    const QString primary = directory.filePath("primary.mkv");
+    const QString rawOverlay = directory.filePath("identity.rgba");
+    const QString overlay = directory.filePath("overlay.mkv");
+    const QString composed = directory.filePath("composed.mkv");
+    const QString decoded = directory.filePath("decoded.rgba");
+    QFile rawFile(rawOverlay);
+    QVERIFY(rawFile.open(QIODevice::WriteOnly));
+    for (int frame = 0; frame < frameCount; ++frame) {
+        QByteArray pixels(width * height * 4, '\0');
+        for (int bit = 0; bit < 8; ++bit) {
+            const int offset = bit * 4;
+            const char value = (frame & (1 << bit)) ? static_cast<char>(255) : 0;
+            pixels[offset] = value;
+            pixels[offset + 1] = value;
+            pixels[offset + 2] = value;
+            pixels[offset + 3] = static_cast<char>(255);
+        }
+        QCOMPARE(rawFile.write(pixels), qint64(pixels.size()));
+    }
+    rawFile.close();
+    const auto runFfmpeg = [&ffmpeg](const QStringList &arguments) {
+        QProcess process;
+        process.start(ffmpeg, arguments);
+        QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+        QVERIFY2(process.waitForFinished(30'000), qPrintable(process.errorString()));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    };
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+               QStringLiteral("color=c=black:s=%1x%2:r=30").arg(width).arg(height),
+               "-frames:v", QString::number(frameCount), "-c:v", "ffv1", "-pix_fmt", "bgra", primary});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format",
+               "rgba", "-video_size", QStringLiteral("%1x%2").arg(width).arg(height), "-framerate", "30",
+               "-i", rawOverlay, "-frames:v", QString::number(frameCount), "-c:v", "ffv1", "-pix_fmt",
+               "bgra", overlay});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", primary, "-i", overlay,
+               "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=rgb[v]",
+               "-map", "[v]", "-c:v", "ffv1", "-pix_fmt", "bgra", composed});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", composed, "-f", "rawvideo",
+               "-pixel_format", "rgba", decoded});
+    QFile decodedFile(decoded);
+    QVERIFY(decodedFile.open(QIODevice::ReadOnly));
+    const QByteArray output = decodedFile.readAll();
+    const qsizetype bytesPerFrame = width * height * 4;
+    QCOMPARE(output.size(), frameCount * bytesPerFrame);
+    for (int frame = 0; frame < frameCount; ++frame) {
+        const char *pixels = output.constData() + frame * bytesPerFrame;
+        int identity = 0;
+        for (int bit = 0; bit < 8; ++bit) {
+            if (static_cast<uchar>(pixels[bit * 4]) > 127) identity |= 1 << bit;
+        }
+        QCOMPARE(identity, frame);
+    }
 }
 
 void TelemetryTests::decodesGps9Gpmf()
