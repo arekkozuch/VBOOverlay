@@ -1,6 +1,7 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "export/EncoderDetector.h"
 #include "export/ExportEngine.h"
+#include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
 #include "export/FfmpegTools.h"
 #include "export/MediaProbe.h"
@@ -51,11 +52,16 @@ private slots:
     void parsesMediaSummaryJson();
     void rejectsInvalidMediaProbeJson();
     void classifiesMediaProbeProcessFailures();
+    void reportsMediaProbeLifecycleHeartbeat();
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
     void preservesAbsoluteExportTimestamps();
     void composesNonZeroExportRangeWithZeroBasedOutput();
     void estimatesExportProgress();
+    void tracksExportStageElapsedTime();
+    void boundsVerboseDiagnosticStorage();
+    void throttlesDiagnosticHeartbeats();
+    void tracksValidationSubstepStages();
     void parsesStructuredFfmpegProgress();
     void calculatesEncodedOutputProgress();
     void preservesFrameIdentityThroughCompletedOverlayComposition();
@@ -548,6 +554,93 @@ void TelemetryTests::classifiesMediaProbeProcessFailures()
     QVERIFY2(crashError.startsWith("ffprobe crashed while probing: /fixture.mp4"),
              qPrintable(crashError));
 #endif
+}
+
+void TelemetryTests::reportsMediaProbeLifecycleHeartbeat()
+{
+#ifdef Q_OS_UNIX
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString probePath = directory.filePath("heartbeat-ffprobe");
+    QFile probe(probePath);
+    QVERIFY(probe.open(QIODevice::WriteOnly));
+    QVERIFY(probe.write(
+        "#!/bin/sh\n"
+        "sleep 0.7\n"
+        "printf '%s\\n' '{\"format\":{\"duration\":\"1.0\"},\"streams\":[{\"codec_type\":\"video\",\"codec_name\":\"hevc\",\"width\":16,\"height\":16,\"r_frame_rate\":\"30/1\",\"avg_frame_rate\":\"30/1\"}]}'\n") > 0);
+    probe.close();
+    QVERIFY(probe.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                 | QFileDevice::ExeOwner));
+    QList<MediaProbeEvent::Phase> phases;
+    const MediaInfo info = MediaProbe::probe(
+        "/fixture.mp4", probePath, false, 2'000,
+        [&phases](const MediaProbeEvent &event) { phases.append(event.phase); });
+    QCOMPARE(info.videoCodec, QStringLiteral("hevc"));
+    QCOMPARE(phases.first(), MediaProbeEvent::Phase::Started);
+    QVERIFY(phases.contains(MediaProbeEvent::Phase::Heartbeat));
+    QCOMPARE(phases.last(), MediaProbeEvent::Phase::Finished);
+#else
+    QSKIP("Lifecycle helper script requires a POSIX shell.");
+#endif
+}
+
+void TelemetryTests::tracksExportStageElapsedTime()
+{
+    ExportStageTimer timer;
+    timer.start(100, QStringLiteral("preparing"));
+    QCOMPARE(timer.totalElapsedMilliseconds(250), 150);
+    QCOMPARE(timer.stageElapsedMilliseconds(250), 150);
+    timer.transition(300, QStringLiteral("renderingOverlay"));
+    QCOMPARE(timer.totalElapsedMilliseconds(350), 250);
+    QCOMPARE(timer.stageElapsedMilliseconds(350), 50);
+    timer.transition(375, QStringLiteral("renderingOverlay"));
+    QCOMPARE(timer.stageElapsedMilliseconds(400), 100);
+    QCOMPARE(timer.completedStageDurations().value(QStringLiteral("preparing")), 200);
+}
+
+void TelemetryTests::boundsVerboseDiagnosticStorage()
+{
+    BoundedDiagnosticLog log(4);
+    log.append(QStringLiteral("one"));
+    log.append(QStringLiteral("two"));
+    log.append(QStringLiteral("three"));
+    log.append(QStringLiteral("four"));
+    log.append(QStringLiteral("five\nwith details"));
+    QCOMPARE(log.size(), 4);
+    QCOMPARE(log.maximumEntries(), 4);
+    QVERIFY(log.text().startsWith(QStringLiteral("[older diagnostic entries omitted]\n")));
+    QVERIFY(!log.text().contains(QStringLiteral("one")));
+    QVERIFY(log.text().endsWith(QStringLiteral("five\nwith details")));
+}
+
+void TelemetryTests::throttlesDiagnosticHeartbeats()
+{
+    DiagnosticHeartbeat heartbeat(500);
+    QVERIFY(!heartbeat.shouldEmit(0));
+    QVERIFY(!heartbeat.shouldEmit(499));
+    QVERIFY(heartbeat.shouldEmit(500));
+    QVERIFY(!heartbeat.shouldEmit(999));
+    QVERIFY(heartbeat.shouldEmit(1'000));
+}
+
+void TelemetryTests::tracksValidationSubstepStages()
+{
+    ExportStageTimer timer;
+    timer.start(0, QStringLiteral("preparing"));
+    timer.transition(10, QStringLiteral("renderingOverlay"));
+    timer.transition(20, QStringLiteral("validatingOverlay"));
+    QCOMPARE(timer.stage(), QStringLiteral("validatingOverlay"));
+    QCOMPARE(timer.stageElapsedMilliseconds(25), 5);
+    timer.transition(30, QStringLiteral("encodingVideo"));
+    timer.transition(40, QStringLiteral("validatingOutput"));
+    timer.transition(50, QStringLiteral("cleaningUp"));
+    timer.transition(60, QStringLiteral("complete"));
+    const auto durations = timer.completedStageDurations();
+    for (const QString &stage : {QStringLiteral("preparing"), QStringLiteral("renderingOverlay"),
+                                 QStringLiteral("validatingOverlay"), QStringLiteral("encodingVideo"),
+                                 QStringLiteral("validatingOutput"), QStringLiteral("cleaningUp")}) {
+        QCOMPARE(durations.value(stage), 10);
+    }
 }
 
 void TelemetryTests::detectsHevcEncoders()

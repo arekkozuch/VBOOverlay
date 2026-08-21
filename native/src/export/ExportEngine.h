@@ -3,12 +3,22 @@
 #include "export/MediaProbe.h"
 
 #include <QSize>
+#include <QVariantMap>
 #include <QString>
 #include <functional>
 
 namespace FlappedEar {
 
 class TelemetryFrameRenderer;
+
+struct ExportObservation {
+    QString type = QStringLiteral("status");
+    QString state;
+    QString operation;
+    QString message;
+    QString component = QStringLiteral("export");
+    QVariantMap details;
+};
 
 struct ExportPipelineProgress {
     qsizetype generatedFrames = 0;
@@ -44,6 +54,7 @@ struct ExportSettings {
     std::function<void(const QString &state)> stateCallback;
     std::function<void(const ExportPipelineProgress &progress)> progressCallback;
     std::function<void(const QString &id, const QString &displayName)> encoderCallback;
+    std::function<void(const ExportObservation &observation)> observationCallback;
 };
 
 struct ExportResult {
@@ -63,6 +74,7 @@ struct ExportResult {
     qint64 ffmpegWriteNanoseconds = 0;
     qint64 maximumQueuedBytes = 0;
     qint64 temporaryOverlayBytes = 0;
+    qint64 outputBytes = 0;
     qsizetype encodedFrames = 0;
     double encodedSeconds = 0.0;
     QString diagnostics;

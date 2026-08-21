@@ -5,6 +5,9 @@
 #include "telemetry/VboParser.h"
 
 #include <QFileInfo>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QFontDatabase>
 #include <QFile>
 #include <QDir>
 #include <QJsonDocument>
@@ -13,6 +16,7 @@
 #include <QTimer>
 #include <QtConcurrent>
 #include <QtGlobal>
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -133,6 +137,11 @@ QVariantMap AppController::exportSourceInfo() const
 QVariantMap AppController::exportMetrics() const { return m_exportMetrics; }
 QVariantMap AppController::exportProgressInfo() const { return m_exportProgressInfo; }
 bool AppController::exportProgressVisible() const { return m_exportProgressVisible; }
+QString AppController::exportDiagnosticLog() const { return m_exportDiagnosticLog.text(); }
+QString AppController::fixedFontFamily() const
+{
+    return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+}
 QVariantMap AppController::syncCandidate() const { return m_syncCandidate; }
 QVariant AppController::speed() const { return semanticValue("speed"); }
 QVariant AppController::rpm() const { return semanticValue("rpm"); }
@@ -209,6 +218,7 @@ void AppController::clearProject()
     m_videoSource = QUrl();
     m_exportSourceInfo = {};
     m_exportMetrics.clear();
+    m_exportDiagnosticLog.clear();
     m_exportProgressInfo.clear();
     m_exportProgressVisible = false;
     m_telemetryPath.clear();
@@ -518,6 +528,7 @@ bool AppController::startExport(
     m_exportProgress = 0;
     m_exportError.clear();
     m_exportMetrics.clear();
+    m_exportDiagnosticLog.clear();
     m_exportProgressInfo = {{"outputPath", outputPath}, {"outputName", QFileInfo(outputPath).fileName()},
                             {"syncOffset", m_sync.offset}, {"timeScale", m_sync.timeScale},
                             {"audioLabel", audioEnabled ? QStringLiteral("AAC audio") : QStringLiteral("No audio")}};
@@ -600,6 +611,58 @@ void AppController::dismissExportProgress()
     emit exportChanged();
 }
 
+void AppController::copyExportDiagnostics()
+{
+    if (QGuiApplication::clipboard()) {
+        QGuiApplication::clipboard()->setText(m_exportDiagnosticLog.text());
+    }
+}
+
+namespace {
+
+QString diagnosticTimestamp(const qint64 elapsedMilliseconds)
+{
+    const qint64 hours = elapsedMilliseconds / 3'600'000;
+    const qint64 minutes = (elapsedMilliseconds / 60'000) % 60;
+    const qint64 seconds = (elapsedMilliseconds / 1'000) % 60;
+    const qint64 milliseconds = elapsedMilliseconds % 1'000;
+    return QStringLiteral("%1:%2:%3.%4")
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0'))
+        .arg(milliseconds, 3, 10, QLatin1Char('0'));
+}
+
+QString diagnosticValue(const QVariant &value)
+{
+    if (value.metaType().id() == QMetaType::QStringList) {
+        return value.toStringList().join(QLatin1Char(' '));
+    }
+    if (value.metaType().id() == QMetaType::QVariantList) {
+        QStringList items;
+        for (const QVariant &item : value.toList()) items.append(item.toString());
+        return items.join(QLatin1Char(' '));
+    }
+    return value.toString();
+}
+
+QString formatDiagnosticEvent(const QJsonObject &event)
+{
+    QString result = QStringLiteral("[%1] %2")
+                         .arg(diagnosticTimestamp(event.value("timestampMilliseconds").toInteger()),
+                              event.value("message").toString());
+    const QVariantMap details = event.value("details").toObject().toVariantMap();
+    QStringList keys = details.keys();
+    std::sort(keys.begin(), keys.end());
+    for (const QString &key : std::as_const(keys)) {
+        const QString value = diagnosticValue(details.value(key));
+        if (!value.isEmpty()) result += QStringLiteral("\n    %1: %2").arg(key, value);
+    }
+    return result;
+}
+
+} // namespace
+
 void AppController::handleExportOutput()
 {
     if (!m_exportProcess) {
@@ -611,6 +674,9 @@ void AppController::handleExportOutput()
         const QByteArray line = m_exportStdout.left(newline);
         m_exportStdout.remove(0, newline + 1);
         const QJsonObject event = QJsonDocument::fromJson(line).object();
+        if (event.value("type").toString() == QStringLiteral("log")) {
+            m_exportDiagnosticLog.append(formatDiagnosticEvent(event));
+        }
         const QString state = event.value("state").toString();
         if (!state.isEmpty()) {
             m_exportState = state;
@@ -629,21 +695,31 @@ void AppController::handleExportOutput()
                                    QStringLiteral("encoderFps"), QStringLiteral("encoderRealtimeFactor"),
                                    QStringLiteral("rendererFps"), QStringLiteral("queuedBytes"),
                                    QStringLiteral("maximumQueuedBytes"), QStringLiteral("temporaryOverlayBytes"),
-                                   QStringLiteral("diagnostics"), QStringLiteral("warning")}) {
+                                   QStringLiteral("outputBytes"), QStringLiteral("currentOperation"),
+                                   QStringLiteral("operation"), QStringLiteral("stageElapsedMilliseconds"),
+                                   QStringLiteral("totalElapsedMilliseconds"), QStringLiteral("stageDurations"),
+                                   QStringLiteral("outputVideoCodec"), QStringLiteral("outputWidth"),
+                                   QStringLiteral("outputHeight"), QStringLiteral("outputDuration"),
+                                   QStringLiteral("outputAudioCodecs"), QStringLiteral("diagnostics"),
+                                   QStringLiteral("warning")}) {
             if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
         }
         if (!state.isEmpty()) m_exportProgressInfo.insert("stage", state);
         if (event.contains("visibleProgress")) {
             m_exportProgress = qRound(event.value("visibleProgress").toDouble());
             m_exportProgressInfo.insert("progressPercent", event.value("visibleProgress").toDouble());
-        } else if (state == "validating") {
-            m_exportProgress = qMax(m_exportProgress, 96);
+        } else if (state == "validatingOverlay") {
+            m_exportProgress = qMax(m_exportProgress, 60);
+            m_exportProgressInfo.insert("progressPercent", m_exportProgress);
         }
-        if (state == "validating") m_exportProgress = qMax(m_exportProgress, 99);
+        if (state == "validatingOutput" || state == "validating") {
+            m_exportProgress = qMax(m_exportProgress, 99);
+            m_exportProgressInfo.insert("progressPercent", m_exportProgress);
+        }
         if (event.contains("error")) {
             m_exportError = event.value("error").toString();
         }
-        if (event.contains("elapsedMilliseconds")) {
+        if (event.contains("renderMilliseconds")) {
             m_exportMetrics = {
                 {"elapsedMilliseconds", event.value("elapsedMilliseconds").toInteger()},
                 {"renderMilliseconds", event.value("renderMilliseconds").toInteger()},

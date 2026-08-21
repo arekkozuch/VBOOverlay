@@ -13,6 +13,8 @@ endfunction()
 qt_add_library(flappedear_core STATIC
     src/export/EncoderDetector.cpp
     src/export/EncoderDetector.h
+    src/export/ExportDiagnostics.cpp
+    src/export/ExportDiagnostics.h
     src/export/ExportEngine.cpp
     src/export/ExportEngine.h
     src/export/ExportProgress.cpp

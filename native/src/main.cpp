@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 #include "export/TelemetryFrameRenderer.h"
 #include "export/ExportEngine.h"
+#include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
 #include "telemetry/VboParser.h"
 #include "telemetry/TrackGeometry.h"
@@ -12,6 +13,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -142,7 +144,60 @@ int exportWorker(const QString &configPath)
         return EXIT_FAILURE;
     }
     const QJsonObject config = QJsonDocument::fromJson(configFile.readAll()).object();
+    QElapsedTimer elapsed;
+    elapsed.start();
+    FlappedEar::ExportStageTimer stageTimer;
+    stageTimer.start(0, QStringLiteral("preparing"));
+    QString currentOperation = QStringLiteral("prepareTelemetryScene");
+    QString currentMessage = QStringLiteral("Preparing telemetry scene");
+    const auto stageDurationsJson = [&] {
+        QJsonObject durations;
+        const auto values = stageTimer.completedStageDurations();
+        for (auto it = values.cbegin(); it != values.cend(); ++it) {
+            durations.insert(it.key(), it.value());
+        }
+        return durations;
+    };
+    const auto emitEvent = [&](QJsonObject event) {
+        const QString state = event.value("state").toString();
+        if (!state.isEmpty() && state != stageTimer.stage()) {
+            stageTimer.transition(elapsed.elapsed(), state);
+        }
+        if (event.contains("operation")) currentOperation = event.value("operation").toString();
+        if (event.value("type").toString() != QStringLiteral("log") && event.contains("message")) {
+            currentMessage = event.value("message").toString();
+        }
+        event.insert("state", stageTimer.stage());
+        event.insert("operation", currentOperation);
+        event.insert("currentOperation", currentMessage);
+        event.insert("stageElapsedMilliseconds", stageTimer.stageElapsedMilliseconds(elapsed.elapsed()));
+        event.insert("totalElapsedMilliseconds", stageTimer.totalElapsedMilliseconds(elapsed.elapsed()));
+        event.insert("elapsedMilliseconds", stageTimer.totalElapsedMilliseconds(elapsed.elapsed()));
+        event.insert("timestampMilliseconds", stageTimer.totalElapsedMilliseconds(elapsed.elapsed()));
+        event.insert("stageDurations", stageDurationsJson());
+        writeExportEvent(event);
+    };
+    const auto emitProbeEvent = [&](const FlappedEar::MediaProbeEvent &probe) {
+        QJsonObject details{{"mode", probe.mode}, {"target", probe.targetPath},
+                            {"probeElapsedMilliseconds", probe.elapsedMilliseconds}};
+        QString message;
+        if (probe.phase == FlappedEar::MediaProbeEvent::Phase::Started) {
+            details.insert("executable", probe.executable);
+            details.insert("arguments", QJsonArray::fromStringList(probe.arguments));
+            message = QStringLiteral("ffprobe started");
+        } else if (probe.phase == FlappedEar::MediaProbeEvent::Phase::Heartbeat) {
+            message = QStringLiteral("ffprobe running · %1 s")
+                          .arg(probe.elapsedMilliseconds / 1000.0, 0, 'f', 1);
+        } else {
+            details.insert("exitCode", probe.exitCode);
+            message = QStringLiteral("ffprobe exited · code %1").arg(probe.exitCode);
+        }
+        emitEvent({{"type", "log"}, {"level", "debug"}, {"component", "ffprobe"},
+                   {"message", message}, {"details", details}});
+    };
     try {
+        emitEvent({{"type", "log"}, {"level", "info"}, {"component", "export"},
+                   {"message", "Export worker started"}});
         const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parseFile(
             config.value("vboPath").toString());
         FlappedEar::WidgetModel widgets;
@@ -154,13 +209,29 @@ int exportWorker(const QString &configPath)
         const QJsonObject syncJson = config.value("sync").toObject();
         const FlappedEar::SyncTransform sync{
             syncJson.value("offset").toDouble(), syncJson.value("timeScale").toDouble(1.0)};
+        currentOperation = QStringLiteral("probeInput");
+        currentMessage = QStringLiteral("Reading input metadata with ffprobe");
+        emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
         const FlappedEar::MediaInfo input = FlappedEar::MediaProbe::probe(
-            config.value("inputPath").toString());
+            config.value("inputPath").toString(), {}, false, -1, emitProbeEvent);
+        emitEvent({{"type", "log"}, {"level", "info"}, {"component", "ffprobe"},
+                   {"message", "Input probed"},
+                   {"details", QJsonObject{{"codec", input.videoCodec},
+                                            {"width", input.videoSize.width()},
+                                            {"height", input.videoSize.height()},
+                                            {"duration", input.duration}}}});
+        currentOperation = QStringLiteral("initializeRenderer");
+        currentMessage = QStringLiteral("Preparing telemetry scene");
+        emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
         FlappedEar::TelemetryFrameRenderer renderer;
         if (!renderer.initialize(&widgets, &session, &geometry, sync, input.videoSize)) {
             writeExportEvent({{"state", "failed"}, {"error", renderer.errorString()}});
             return EXIT_FAILURE;
         }
+        emitEvent({{"type", "log"}, {"level", "info"}, {"component", "renderer"},
+                   {"message", "Renderer initialized"},
+                   {"details", QJsonObject{{"width", input.videoSize.width()},
+                                            {"height", input.videoSize.height()}}}});
         FlappedEar::ExportSettings settings;
         settings.inputPath = config.value("inputPath").toString();
         settings.outputPath = config.value("outputPath").toString();
@@ -177,10 +248,11 @@ int exportWorker(const QString &configPath)
         const qsizetype expectedFrames = FlappedEar::ExportEngine::frameCount(
             settings.startTime, settings.endTime, settings.frameRate);
         FlappedEar::ExportProgressEstimator rendererProgress;
-        QElapsedTimer elapsed;
-        elapsed.start();
         qint64 lastUpdate = -125;
-        writeExportEvent({{"state", "preparing"}, {"sourceRangeStart", sourceRangeStart},
+        emitEvent({{"type", "status"}, {"state", "preparing"},
+                          {"operation", "prepareTelemetryScene"},
+                          {"message", "Preparing telemetry scene"},
+                          {"sourceRangeStart", sourceRangeStart},
                           {"sourceRangeEnd", sourceRangeEnd}, {"exportDuration", exportDuration},
                           {"sourceVideoTime", sourceRangeStart},
                           {"exportRelativeTime", 0.0},
@@ -201,7 +273,19 @@ int exportWorker(const QString &configPath)
             const double visiblePercent = pipeline.stage == QStringLiteral("renderingOverlay") ? overlayPercent
                 : pipeline.stage == QStringLiteral("encodingVideo") ? 60.0 + 0.35 * encodedPercent
                 : pipeline.stage == QStringLiteral("finalizing") ? 97.0 : encodedPercent;
-            QJsonObject event{{"state", pipeline.stage},
+            const QString eventStage = pipeline.stage == QStringLiteral("renderingOverlay")
+                ? QStringLiteral("renderingOverlay") : QStringLiteral("encodingVideo");
+            const QString operation = pipeline.stage == QStringLiteral("renderingOverlay")
+                ? QStringLiteral("renderTelemetryOverlay")
+                : pipeline.stage == QStringLiteral("finalizing")
+                    ? QStringLiteral("flushOutputContainer") : QStringLiteral("encodeFinalVideo");
+            const QString operationMessage = pipeline.stage == QStringLiteral("renderingOverlay")
+                ? QStringLiteral("Rendering telemetry overlay")
+                : pipeline.stage == QStringLiteral("finalizing")
+                    ? QStringLiteral("Flushing MP4 container")
+                    : QStringLiteral("Encoding final HEVC video");
+            QJsonObject event{{"type", "progress"}, {"state", eventStage},
+                              {"operation", operation}, {"message", operationMessage},
                               {"renderedFrames", static_cast<qint64>(pipeline.submittedFrames)},
                               {"generatedFrames", static_cast<qint64>(pipeline.generatedFrames)},
                               {"expectedFrames", static_cast<qint64>(pipeline.expectedFrames)},
@@ -219,32 +303,53 @@ int exportWorker(const QString &configPath)
                               {"queuedBytes", pipeline.queuedBytes},
                               {"maximumQueuedBytes", pipeline.maximumQueuedBytes},
                               {"temporaryOverlayBytes", pipeline.temporaryOverlayBytes},
-                              {"elapsedMilliseconds", elapsedMilliseconds},
                               {"visibleProgress", visiblePercent},
                               {"outputBytes", QFileInfo(settings.outputPath).size()}};
             if (rendererSnapshot.etaAvailable) {
                 event.insert("rendererFps", rendererSnapshot.throughputFps);
             }
-            writeExportEvent(event);
+            emitEvent(event);
         };
-        settings.stateCallback = [](const QString &state) {
-            writeExportEvent({{"state", state}});
+        settings.stateCallback = [](const QString &) {};
+        settings.encoderCallback = [&](const QString &id, const QString &name) {
+            emitEvent({{"type", "log"}, {"state", "preparing"}, {"level", "info"},
+                       {"component", "encoder"}, {"message", "Final encoder selected"},
+                       {"encoderId", id}, {"encoderName", name},
+                       {"details", QJsonObject{{"id", id}, {"name", name}}}});
         };
-        settings.encoderCallback = [](const QString &id, const QString &name) {
-            writeExportEvent({{"state", "preparing"}, {"encoderId", id}, {"encoderName", name}});
+        settings.observationCallback = [&](const FlappedEar::ExportObservation &observation) {
+            QJsonObject event{{"type", observation.type}, {"state", observation.state},
+                              {"operation", observation.operation},
+                              {"message", observation.message},
+                              {"component", observation.component}};
+            if (!observation.details.isEmpty()) {
+                event.insert("details", QJsonObject::fromVariantMap(observation.details));
+            }
+            emitEvent(event);
         };
         const FlappedEar::ExportResult result = FlappedEar::ExportEngine::exportVideo(settings, renderer);
         if (result.cancelled) {
-            writeExportEvent({{"state", "cancelled"}, {"elapsedMilliseconds", elapsed.elapsed()}});
+            emitEvent({{"type", "log"}, {"state", "cancelled"}, {"level", "warning"},
+                       {"operation", "cancelled"}, {"message", "Export cancelled"}});
             return EXIT_SUCCESS;
         }
         if (!result.success) {
-            writeExportEvent({{"state", "failed"}, {"error", result.error}, {"diagnostics", result.diagnostics}});
+            emitEvent({{"type", "log"}, {"state", "failed"}, {"level", "error"},
+                       {"operation", "failed"}, {"message", "Export failed"},
+                       {"error", result.error}, {"diagnostics", result.diagnostics}});
             return EXIT_FAILURE;
         }
         const QString completionState = result.validationWarning.isEmpty()
             ? QStringLiteral("complete") : QStringLiteral("validationWarning");
-        writeExportEvent({{"state", completionState},
+        emitEvent({{"type", "log"}, {"state", completionState},
+                   {"level", result.validationWarning.isEmpty() ? "info" : "warning"},
+                   {"operation", "complete"},
+                   {"component", "export"},
+                   {"message", result.validationWarning.isEmpty()
+                       ? QStringLiteral("Export complete")
+                       : QStringLiteral("Export completed with validation warning")}});
+        emitEvent({{"type", "status"}, {"state", completionState},
+                          {"operation", "complete"}, {"message", "Export complete"},
                           {"warning", result.validationWarning},
                           {"diagnostics", result.diagnostics},
                           {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
@@ -260,13 +365,19 @@ int exportWorker(const QString &configPath)
                           {"ffmpegWriteNanoseconds", result.ffmpegWriteNanoseconds},
                           {"maximumQueuedBytes", result.maximumQueuedBytes},
                           {"temporaryOverlayBytes", result.temporaryOverlayBytes},
+                          {"outputBytes", result.outputBytes},
                           {"encodedFrames", static_cast<qint64>(result.encodedFrames)},
                           {"encodedSeconds", result.encodedSeconds},
-                          {"renderedFrames", static_cast<qint64>(result.renderedFrames)}});
+                          {"outputVideoCodec", result.mediaInfo.videoCodec},
+                          {"outputWidth", result.mediaInfo.videoSize.width()},
+                          {"outputHeight", result.mediaInfo.videoSize.height()},
+                          {"outputDuration", result.mediaInfo.duration},
+                          {"outputAudioCodecs", result.mediaInfo.audioCodecs.join(", ")}});
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
-        writeExportEvent(
-            {{"state", "failed"}, {"error", QString::fromUtf8(error.what())}});
+        emitEvent({{"type", "log"}, {"state", "failed"}, {"level", "error"},
+                   {"operation", "failed"}, {"message", "Export failed"},
+                   {"error", QString::fromUtf8(error.what())}});
         return EXIT_FAILURE;
     }
 }

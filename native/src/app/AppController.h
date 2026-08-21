@@ -4,6 +4,7 @@
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
 #include "export/MediaProbe.h"
+#include "export/ExportDiagnostics.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 
@@ -40,6 +41,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap exportMetrics READ exportMetrics NOTIFY exportChanged)
     Q_PROPERTY(QVariantMap exportProgressInfo READ exportProgressInfo NOTIFY exportChanged)
     Q_PROPERTY(bool exportProgressVisible READ exportProgressVisible NOTIFY exportChanged)
+    Q_PROPERTY(QString exportDiagnosticLog READ exportDiagnosticLog NOTIFY exportChanged)
+    Q_PROPERTY(QString fixedFontFamily READ fixedFontFamily CONSTANT)
     Q_PROPERTY(QVariantMap syncCandidate READ syncCandidate NOTIFY syncCandidateChanged)
     Q_PROPERTY(QVariant speed READ speed NOTIFY liveValuesChanged)
     Q_PROPERTY(QVariant rpm READ rpm NOTIFY liveValuesChanged)
@@ -84,6 +87,8 @@ public:
     [[nodiscard]] QVariantMap exportMetrics() const;
     [[nodiscard]] QVariantMap exportProgressInfo() const;
     [[nodiscard]] bool exportProgressVisible() const;
+    [[nodiscard]] QString exportDiagnosticLog() const;
+    [[nodiscard]] QString fixedFontFamily() const;
     [[nodiscard]] QVariantMap syncCandidate() const;
     [[nodiscard]] QVariant speed() const;
     [[nodiscard]] QVariant rpm() const;
@@ -128,6 +133,7 @@ public:
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void cancelExportAndQuit();
     Q_INVOKABLE void dismissExportProgress();
+    Q_INVOKABLE void copyExportDiagnostics();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
         int x, int y, int width, int height, int sidebarWidth, int videoHeight);
@@ -195,6 +201,7 @@ private:
     MediaInfo m_exportSourceInfo;
     QVariantMap m_exportMetrics;
     QVariantMap m_exportProgressInfo;
+    BoundedDiagnosticLog m_exportDiagnosticLog{1500};
     bool m_exportProgressVisible = false;
     bool m_quitAfterExport = false;
     QVariantMap m_syncCandidate;

@@ -563,7 +563,7 @@ ApplicationWindow {
         anchors.centerIn: parent
         width: Math.min(window.width - 40, 680)
         height: Math.min(window.height - 40, exportDetails.checked || appController.exportState === "failed"
-            || appController.exportState === "validationWarning" ? 610 : 430)
+            || appController.exportState === "validationWarning" ? 700 : 460)
         background: Rectangle {
             radius: 14
             color: "#0d141d"
@@ -596,8 +596,10 @@ ApplicationWindow {
             Label {
                 text: {
                     const names = { "preparing": qsTr("Preparing"), "renderingOverlay": qsTr("Rendering overlay"),
+                        "validatingOverlay": qsTr("Validating temporary overlay"),
                         "encodingVideo": qsTr("Encoding video"), "rendering": qsTr("Rendering & encoding"),
                         "finalizing": qsTr("Finalizing"), "validating": qsTr("Validating"),
+                        "validatingOutput": qsTr("Validating output"), "cleaningUp": qsTr("Cleaning up"),
                         "cancelling": qsTr("Cancelling"), "complete": qsTr("Complete"),
                         "validationWarning": qsTr("Completed with warning"), "failed": qsTr("Failed") };
                     return names[appController.exportProgressInfo.stage] || qsTr("Preparing");
@@ -638,39 +640,151 @@ ApplicationWindow {
                     + " · " + Number(appController.exportProgressInfo.frameRate || 0).toFixed(3) + " fps\n" + (appController.exportProgressInfo.audioLabel || "")
                 color: "#8b98a8"; font.pixelSize: 11
             }
-            FeCheckBox {
-                id: exportDetails
-                text: qsTr("Details")
-                checked: false
+            RowLayout {
+                Layout.fillWidth: true
+                FeCheckBox {
+                    id: exportDetails
+                    text: qsTr("Details")
+                    checked: false
+                }
+                FeCheckBox {
+                    id: exportVeryVerbose
+                    visible: exportDetails.checked || appController.exportState === "failed"
+                        || appController.exportState === "validationWarning"
+                    text: qsTr("Very verbose")
+                    checked: false
+                }
+                Item { Layout.fillWidth: true }
+                FeButton {
+                    visible: exportVeryVerbose.visible && exportVeryVerbose.checked
+                    text: qsTr("Copy all")
+                    onClicked: appController.copyExportDiagnostics()
+                }
+                FeButton {
+                    visible: exportVeryVerbose.visible && exportVeryVerbose.checked && !verboseText.followTail
+                    text: qsTr("Jump to latest")
+                    onClicked: {
+                        verboseText.followTail = true;
+                        verboseText.cursorPosition = verboseText.length;
+                        verboseBar.position = Math.max(0, 1 - verboseBar.size);
+                    }
+                }
             }
             ScrollView {
-                visible: exportDetails.checked || appController.exportState === "failed"
-                    || appController.exportState === "validationWarning"
+                id: normalDetailsScroll
+                visible: (exportDetails.checked || appController.exportState === "failed"
+                    || appController.exportState === "validationWarning") && !exportVeryVerbose.checked
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 110
+                Layout.minimumHeight: 140
                 clip: true
                 TextArea {
+                    width: normalDetailsScroll.availableWidth
                     readOnly: true
                     selectByMouse: true
+                    persistentSelection: true
                     wrapMode: TextEdit.WrapAnywhere
                     color: "#9eabba"
                     font.pixelSize: 11
-                    text: qsTr("Overlay generated/submitted: %1 / %2 of %3\nSource range: %4 → %5\nCurrent source time: %6\nTelemetry time: %7\nFFmpeg encoded: %8 frames\nQueued to FFmpeg: %9 MiB (maximum %10 MiB)\nTemporary overlay: %11 MiB\nOverlay feed: %12 fps\nEncoder: %13 fps · %14x realtime\nEncoder ID: %15\nOutput: %16")
-                        .arg(appController.exportProgressInfo.generatedFrames || 0).arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.expectedFrames || 0)
-                        .arg(window.formatTime(Number(appController.exportProgressInfo.sourceRangeStart || 0) * 1000))
-                        .arg(window.formatTime(Number(appController.exportProgressInfo.sourceRangeEnd || 0) * 1000))
-                        .arg(window.formatTime(Number(appController.exportProgressInfo.sourceVideoTime || 0) * 1000))
-                        .arg(window.formatTime(Number(appController.exportProgressInfo.telemetryTime || 0) * 1000))
-                        .arg(appController.exportProgressInfo.encodedFrames || 0)
-                        .arg((Number(appController.exportProgressInfo.queuedBytes || 0) / 1048576).toFixed(1))
-                        .arg((Number(appController.exportProgressInfo.maximumQueuedBytes || 0) / 1048576).toFixed(1))
-                        .arg((Number(appController.exportProgressInfo.temporaryOverlayBytes || 0) / 1048576).toFixed(1))
-                        .arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1))
-                        .arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1))
-                        .arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2))
-                        .arg(appController.exportProgressInfo.encoderId || "—").arg(appController.exportProgressInfo.outputPath || "")
-                        + (appController.exportProgressInfo.diagnostics ? "\n\nDiagnostics\n" + appController.exportProgressInfo.diagnostics : "")
+                    Keys.onPressed: function(event) {
+                        if (event.matches(StandardKey.SelectAll)) {
+                            selectAll();
+                            event.accepted = true;
+                        } else if (event.matches(StandardKey.Copy)) {
+                            copy();
+                            event.accepted = true;
+                        }
+                    }
+                    text: {
+                        const p = appController.exportProgressInfo;
+                        const names = { "preparing": qsTr("Preparing"), "renderingOverlay": qsTr("Rendering overlay"),
+                            "validatingOverlay": qsTr("Validating temporary overlay"),
+                            "encodingVideo": qsTr("Encoding video"), "validatingOutput": qsTr("Validating output"),
+                            "cleaningUp": qsTr("Cleaning up"), "complete": qsTr("Complete"),
+                            "validationWarning": qsTr("Completed with warning"), "failed": qsTr("Failed"),
+                            "cancelled": qsTr("Cancelled") };
+                        let value = qsTr("Stage: %1\nCurrent operation: %2\nStage elapsed: %3\nTotal elapsed: %4\n\nOverlay generated/submitted: %5 / %6 of %7\nSource range: %8 → %9\nCurrent source time: %10\nTelemetry time: %11\nFinal encoded frames: %12\nQueued to FFmpeg: %13 MiB (maximum %14 MiB)\nTemporary overlay: %15 MiB\nFinal output: %16 MiB\nOverlay feed: %17 fps\nEncoder: %18 fps · %19x realtime\nFinal encoder: %20\nOutput: %21")
+                            .arg(names[p.stage] || p.stage || qsTr("Preparing"))
+                            .arg(p.currentOperation || qsTr("Preparing telemetry scene"))
+                            .arg(window.formatTime(Number(p.stageElapsedMilliseconds || 0)))
+                            .arg(window.formatTime(Number(p.totalElapsedMilliseconds || 0)))
+                            .arg(p.generatedFrames || 0).arg(p.renderedFrames || 0).arg(p.expectedFrames || 0)
+                            .arg(window.formatTime(Number(p.sourceRangeStart || 0) * 1000))
+                            .arg(window.formatTime(Number(p.sourceRangeEnd || 0) * 1000))
+                            .arg(window.formatTime(Number(p.sourceVideoTime || 0) * 1000))
+                            .arg(window.formatTime(Number(p.telemetryTime || 0) * 1000))
+                            .arg(p.encodedFrames || 0)
+                            .arg((Number(p.queuedBytes || 0) / 1048576).toFixed(1))
+                            .arg((Number(p.maximumQueuedBytes || 0) / 1048576).toFixed(1))
+                            .arg((Number(p.temporaryOverlayBytes || 0) / 1048576).toFixed(1))
+                            .arg((Number(p.outputBytes || 0) / 1048576).toFixed(1))
+                            .arg(Number(p.rendererFps || 0).toFixed(1))
+                            .arg(Number(p.encoderFps || 0).toFixed(1))
+                            .arg(Number(p.encoderRealtimeFactor || 0).toFixed(2))
+                            .arg(p.encoderName || p.encoderId || "—").arg(p.outputPath || "");
+                        const timings = p.stageDurations || {};
+                        if (p.stage === "complete" || p.stage === "validationWarning") {
+                            value += qsTr("\n\nStage timings\nTotal: %1\nOverlay render: %2\nOverlay validation: %3\nFinal encode: %4\nFinal validation: %5\nCleanup: %6")
+                                .arg(window.formatTime(Number(p.totalElapsedMilliseconds || 0)))
+                                .arg(window.formatTime(Number(timings.renderingOverlay || 0)))
+                                .arg(window.formatTime(Number(timings.validatingOverlay || 0)))
+                                .arg(window.formatTime(Number(timings.encodingVideo || 0)))
+                                .arg(window.formatTime(Number(timings.validatingOutput || 0)))
+                                .arg(window.formatTime(Number(timings.cleaningUp || 0)));
+                        }
+                        if (p.diagnostics) value += "\n\nFailure diagnostics\n" + p.diagnostics;
+                        return value;
+                    }
+                }
+            }
+            ScrollView {
+                id: verboseScroll
+                visible: exportVeryVerbose.visible && exportVeryVerbose.checked
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 180
+                clip: true
+                ScrollBar.vertical: ScrollBar {
+                    id: verboseBar
+                    onPositionChanged: {
+                        if (pressed)
+                            verboseText.followTail = position + size >= 0.98;
+                    }
+                }
+                Connections {
+                    target: verboseScroll.contentItem
+                    function onMovementStarted() { verboseText.followTail = false; }
+                    function onMovementEnded() {
+                        verboseText.followTail = verboseBar.position + verboseBar.size >= 0.98;
+                    }
+                }
+                TextArea {
+                    id: verboseText
+                    width: verboseScroll.availableWidth
+                    property bool followTail: true
+                    readOnly: true
+                    selectByMouse: true
+                    persistentSelection: true
+                    wrapMode: TextEdit.WrapAnywhere
+                    color: "#aeb9c7"
+                    font.pixelSize: 11
+                    font.family: appController.fixedFontFamily
+                    text: appController.exportDiagnosticLog
+                    onTextChanged: {
+                        if (followTail) Qt.callLater(function() {
+                            verboseText.cursorPosition = verboseText.length;
+                            verboseBar.position = Math.max(0, 1 - verboseBar.size);
+                        });
+                    }
+                    Keys.onPressed: function(event) {
+                        if (event.matches(StandardKey.SelectAll)) {
+                            selectAll();
+                            event.accepted = true;
+                        } else if (event.matches(StandardKey.Copy)) {
+                            copy();
+                            event.accepted = true;
+                        }
+                    }
                 }
             }
             Label { visible: appController.exportState === "cancelling"; text: qsTr("Finishing current operation and cleaning up."); color: "#ffc66d"; font.pixelSize: 11 }
