@@ -7,6 +7,8 @@
 #include "widgets/WidgetModel.h"
 
 #include <QFutureWatcher>
+#include <QProcess>
+#include <QTemporaryFile>
 #include <QObject>
 #include <QJsonObject>
 #include <QSettings>
@@ -29,6 +31,10 @@ class AppController final : public QObject {
     Q_PROPERTY(double syncOffset READ syncOffset WRITE setSyncOffset NOTIFY syncChanged)
     Q_PROPERTY(double timeScale READ timeScale WRITE setTimeScale NOTIFY syncChanged)
     Q_PROPERTY(bool syncing READ syncing NOTIFY syncingChanged)
+    Q_PROPERTY(bool exporting READ exporting NOTIFY exportChanged)
+    Q_PROPERTY(int exportProgress READ exportProgress NOTIFY exportChanged)
+    Q_PROPERTY(QString exportState READ exportState NOTIFY exportChanged)
+    Q_PROPERTY(QString exportError READ exportError NOTIFY exportChanged)
     Q_PROPERTY(QVariantMap syncCandidate READ syncCandidate NOTIFY syncCandidateChanged)
     Q_PROPERTY(QVariant speed READ speed NOTIFY liveValuesChanged)
     Q_PROPERTY(QVariant rpm READ rpm NOTIFY liveValuesChanged)
@@ -64,6 +70,10 @@ public:
     [[nodiscard]] double syncOffset() const;
     [[nodiscard]] double timeScale() const;
     [[nodiscard]] bool syncing() const;
+    [[nodiscard]] bool exporting() const;
+    [[nodiscard]] int exportProgress() const;
+    [[nodiscard]] QString exportState() const;
+    [[nodiscard]] QString exportError() const;
     [[nodiscard]] QVariantMap syncCandidate() const;
     [[nodiscard]] QVariant speed() const;
     [[nodiscard]] QVariant rpm() const;
@@ -98,6 +108,8 @@ public:
     Q_INVOKABLE void autoSync();
     Q_INVOKABLE void applySyncCandidate();
     Q_INVOKABLE void ignoreSyncCandidate();
+    Q_INVOKABLE void startExport(const QUrl &output, const QString &quality, bool audioEnabled);
+    Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
         int x, int y, int width, int height, int sidebarWidth, int videoHeight);
@@ -116,6 +128,7 @@ signals:
     void playbackTimeChanged();
     void syncChanged();
     void syncingChanged();
+    void exportChanged();
     void syncCandidateChanged();
     void liveValuesChanged();
     void analysisChanged();
@@ -136,6 +149,8 @@ private:
     void saveWidgetSettings();
     void restoreSources();
     void reconcileAnalysisChannels();
+    void handleExportOutput();
+    void finishExport(int exitCode, QProcess::ExitStatus exitStatus);
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
 
     QSettings m_settings;
@@ -151,6 +166,13 @@ private:
     double m_playbackTime = 0.0;
     SyncTransform m_sync;
     QFutureWatcher<AutoSyncResult> m_syncWatcher;
+    std::unique_ptr<QProcess> m_exportProcess;
+    std::unique_ptr<QTemporaryFile> m_exportConfig;
+    QByteArray m_exportStdout;
+    QString m_exportCancelPath;
+    int m_exportProgress = 0;
+    QString m_exportState = QStringLiteral("idle");
+    QString m_exportError;
     QVariantMap m_syncCandidate;
     QStringList m_analysisChannels;
     bool m_analysisVisible = true;

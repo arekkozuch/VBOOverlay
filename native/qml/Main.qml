@@ -143,6 +143,11 @@ ApplicationWindow {
                 shortcut: StandardKey.SaveAs
                 onTriggered: projectSaveDialog.open()
             }
+            Action {
+                text: qsTr("Export…")
+                enabled: appController.videoName.length > 0 && appController.telemetryName.length > 0
+                onTriggered: exportDialog.open()
+            }
             MenuSeparator {}
             Action {
                 text: qsTr("Open Video…")
@@ -342,6 +347,14 @@ ApplicationWindow {
         onAccepted: appController.saveProject(selectedFile)
     }
     FileDialog {
+        id: exportOutputDialog
+        title: qsTr("Export HEVC video")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "mp4"
+        nameFilters: [qsTr("HEVC MP4 video (*.mp4)")]
+        onAccepted: exportDialog.outputFile = selectedFile
+    }
+    FileDialog {
         id: templateImportDialog
         title: qsTr("Import layout template")
         nameFilters: [qsTr("FlappedEar templates (*.fettemplate *.json)")]
@@ -361,6 +374,130 @@ ApplicationWindow {
             const item = window.selectedTemplate();
             if (item)
                 appController.widgetModel.exportTemplate(item.id, selectedFile);
+        }
+    }
+
+    Dialog {
+        id: exportDialog
+        title: qsTr("Export H.265 / HEVC")
+        modal: true
+        width: 470
+        anchors.centerIn: parent
+        property url outputFile
+        background: Rectangle {
+            radius: 14
+            color: "#0d141d"
+            border.color: "#334253"
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Source resolution and frame rate are preserved. Audio is encoded to AAC when present.")
+                color: "#8b98a8"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 11
+            }
+            Label {
+                Layout.fillWidth: true
+                text: exportDialog.outputFile.toString().length > 0
+                    ? exportDialog.outputFile.toString().replace("file://", "")
+                    : qsTr("Choose output file…")
+                color: exportDialog.outputFile.toString().length > 0 ? "#e8edf4" : "#718092"
+                elide: Text.ElideMiddle
+            }
+            FeButton {
+                Layout.fillWidth: true
+                text: qsTr("Choose output…")
+                onClicked: exportOutputDialog.open()
+            }
+            Label {
+                text: qsTr("Quality")
+                color: "#8b98a8"
+                font.pixelSize: 11
+            }
+            FeComboBox {
+                id: exportQuality
+                Layout.fillWidth: true
+                model: [qsTr("Fast"), qsTr("High"), qsTr("Maximum")]
+                currentIndex: 1
+            }
+            FeCheckBox {
+                id: exportAudio
+                text: qsTr("Preserve audio (AAC)")
+                checked: true
+            }
+            Label {
+                visible: appController.exportState === "failed" && appController.exportError.length > 0
+                Layout.fillWidth: true
+                text: appController.exportError
+                color: "#ff8a92"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 11
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                FeButton {
+                    text: qsTr("Cancel")
+                    onClicked: exportDialog.close()
+                }
+                FeButton {
+                    accent: true
+                    text: qsTr("Export")
+                    enabled: exportDialog.outputFile.toString().length > 0
+                    onClicked: {
+                        const quality = ["fast", "high", "maximum"][exportQuality.currentIndex];
+                        appController.startExport(exportDialog.outputFile, quality, exportAudio.checked);
+                        exportDialog.close();
+                    }
+                }
+            }
+        }
+    }
+
+    Popup {
+        id: exportProgressPopup
+        visible: appController.exporting || appController.exportState === "cancelling"
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        anchors.centerIn: parent
+        width: 360
+        height: 172
+        background: Rectangle {
+            radius: 14
+            color: "#0d141d"
+            border.color: "#334253"
+        }
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 10
+            Label {
+                text: appController.exportState === "cancelling" ? qsTr("Cancelling export…") : qsTr("Exporting HEVC…")
+                color: "#f2f6fb"
+                font.pixelSize: 17
+                font.weight: Font.DemiBold
+            }
+            ProgressBar {
+                Layout.fillWidth: true
+                from: 0
+                to: 100
+                value: appController.exportProgress
+            }
+            Label {
+                text: qsTr("%1%").arg(appController.exportProgress)
+                color: "#8b98a8"
+                font.pixelSize: 12
+            }
+            Item { Layout.fillHeight: true }
+            FeButton {
+                Layout.alignment: Qt.AlignRight
+                text: appController.exportState === "cancelling" ? qsTr("Cancelling…") : qsTr("Cancel")
+                enabled: appController.exportState !== "cancelling"
+                onClicked: appController.cancelExport()
+            }
         }
     }
 
@@ -564,9 +701,8 @@ ApplicationWindow {
                     compact: true
                     accent: true
                     text: qsTr("Export")
-                    enabled: false
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Native HEVC export is the next milestone")
+                    enabled: appController.videoName.length > 0 && appController.telemetryName.length > 0
+                    onClicked: exportDialog.open()
                 }
             }
         }

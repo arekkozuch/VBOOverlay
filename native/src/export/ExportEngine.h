@@ -4,6 +4,7 @@
 
 #include <QSize>
 #include <QString>
+#include <functional>
 
 namespace FlappedEar {
 
@@ -17,6 +18,11 @@ struct ExportSettings {
     double startTime = 0.0;
     double endTime = 0.0;
     QString encoder;
+    QString quality = QStringLiteral("high");
+    bool audioEnabled = true;
+    QString cancellationFilePath;
+    std::function<void(const QString &state)> stateCallback;
+    std::function<bool(qsizetype currentFrame, qsizetype totalFrames)> progressCallback;
 };
 
 struct ExportResult {
@@ -24,6 +30,7 @@ struct ExportResult {
     QString error;
     MediaInfo mediaInfo;
     qsizetype renderedFrames = 0;
+    bool cancelled = false;
 };
 
 class ExportEngine final {

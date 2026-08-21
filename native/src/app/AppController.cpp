@@ -6,6 +6,7 @@
 
 #include <QFileInfo>
 #include <QFile>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -84,6 +85,10 @@ double AppController::playbackTime() const { return m_playbackTime; }
 double AppController::syncOffset() const { return m_sync.offset; }
 double AppController::timeScale() const { return m_sync.timeScale; }
 bool AppController::syncing() const { return m_syncWatcher.isRunning(); }
+bool AppController::exporting() const { return m_exportProcess && m_exportProcess->state() != QProcess::NotRunning; }
+int AppController::exportProgress() const { return m_exportProgress; }
+QString AppController::exportState() const { return m_exportState; }
+QString AppController::exportError() const { return m_exportError; }
 QVariantMap AppController::syncCandidate() const { return m_syncCandidate; }
 QVariant AppController::speed() const { return semanticValue("speed"); }
 QVariant AppController::rpm() const { return semanticValue("rpm"); }
@@ -389,6 +394,153 @@ void AppController::ignoreSyncCandidate()
     m_syncCandidate.clear();
     emit syncCandidateChanged();
     setStatus("Synchronization candidate ignored; existing timing was retained.");
+}
+
+void AppController::startExport(
+    const QUrl &output, const QString &quality, const bool audioEnabled)
+{
+    if (exporting()) {
+        return;
+    }
+    const QString inputPath = m_videoSource.toLocalFile();
+    const QString outputPath = output.toLocalFile();
+    if (!m_session || inputPath.isEmpty() || m_telemetryPath.isEmpty() || outputPath.isEmpty()) {
+        m_exportError = QStringLiteral("Open a video and VBO telemetry, then choose an output file.");
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return;
+    }
+    m_exportConfig = std::make_unique<QTemporaryFile>(
+        QDir::temp().filePath(QStringLiteral("flappedear-export-XXXXXX.json")));
+    if (!m_exportConfig->open()) {
+        m_exportError = QStringLiteral("Could not create temporary export configuration.");
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return;
+    }
+    m_exportCancelPath = m_exportConfig->fileName() + QStringLiteral(".cancel");
+    QFile::remove(m_exportCancelPath);
+    const QJsonObject config = {
+        {"inputPath", inputPath},
+        {"outputPath", outputPath},
+        {"vboPath", m_telemetryPath},
+        {"widgets", m_widgetModel.toJson()},
+        {"sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}}},
+        {"quality", quality},
+        {"audioEnabled", audioEnabled},
+        {"cancelPath", m_exportCancelPath},
+    };
+    if (m_exportConfig->write(QJsonDocument(config).toJson(QJsonDocument::Compact)) < 0) {
+        m_exportError = QStringLiteral("Could not write temporary export configuration.");
+        m_exportState = QStringLiteral("failed");
+        m_exportConfig.reset();
+        emit exportChanged();
+        return;
+    }
+    m_exportConfig->flush();
+    // The worker is a separate process; closing before it starts avoids a
+    // Windows sharing violation while the controller retains ownership for
+    // cleanup after completion.
+    m_exportConfig->close();
+    m_exportStdout.clear();
+    m_exportProgress = 0;
+    m_exportError.clear();
+    m_exportState = QStringLiteral("starting");
+    m_exportProcess = std::make_unique<QProcess>(this);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("QT_QUICK_BACKEND"), QStringLiteral("software"));
+    m_exportProcess->setProcessEnvironment(environment);
+    m_exportProcess->setProcessChannelMode(QProcess::SeparateChannels);
+    connect(m_exportProcess.get(), &QProcess::readyReadStandardOutput, this, &AppController::handleExportOutput);
+    connect(
+        m_exportProcess.get(),
+        qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+        this,
+        &AppController::finishExport);
+    m_exportProcess->start(
+        QCoreApplication::applicationFilePath(), {"--export-worker", m_exportConfig->fileName()});
+    if (!m_exportProcess->waitForStarted(5'000)) {
+        m_exportError = QStringLiteral("Could not start export worker: %1")
+                            .arg(m_exportProcess->errorString());
+        m_exportState = QStringLiteral("failed");
+        m_exportProcess.reset();
+        m_exportConfig.reset();
+    }
+    emit exportChanged();
+}
+
+void AppController::cancelExport()
+{
+    if (!exporting()) {
+        return;
+    }
+    QFile cancellationFile(m_exportCancelPath);
+    if (!cancellationFile.open(QIODevice::WriteOnly)) {
+        m_exportError = QStringLiteral("Could not request export cancellation.");
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return;
+    }
+    cancellationFile.close();
+    m_exportState = QStringLiteral("cancelling");
+    emit exportChanged();
+}
+
+void AppController::handleExportOutput()
+{
+    if (!m_exportProcess) {
+        return;
+    }
+    m_exportStdout.append(m_exportProcess->readAllStandardOutput());
+    qsizetype newline = -1;
+    while ((newline = m_exportStdout.indexOf('\n')) >= 0) {
+        const QByteArray line = m_exportStdout.left(newline);
+        m_exportStdout.remove(0, newline + 1);
+        const QJsonObject event = QJsonDocument::fromJson(line).object();
+        const QString state = event.value("state").toString();
+        if (!state.isEmpty()) {
+            m_exportState = state;
+        }
+        if (event.contains("current") && event.value("total").toInt() > 0) {
+            m_exportProgress = qBound(
+                0,
+                qRound(100.0 * event.value("current").toDouble() / event.value("total").toDouble()),
+                100);
+        }
+        if (event.contains("error")) {
+            m_exportError = event.value("error").toString();
+        }
+        emit exportChanged();
+    }
+}
+
+void AppController::finishExport(const int exitCode, const QProcess::ExitStatus exitStatus)
+{
+    handleExportOutput();
+    const bool cancelled = QFileInfo::exists(m_exportCancelPath);
+    const QString workerError = m_exportProcess
+        ? QString::fromUtf8(m_exportProcess->readAllStandardError()).trimmed()
+        : QString();
+    if (cancelled) {
+        m_exportState = QStringLiteral("cancelled");
+        m_exportError.clear();
+        setStatus("Export cancelled.");
+    } else if (exitStatus == QProcess::NormalExit && exitCode == 0) {
+        m_exportProgress = 100;
+        m_exportState = QStringLiteral("finished");
+        m_exportError.clear();
+        setStatus("HEVC export finished and passed validation.");
+    } else {
+        m_exportState = QStringLiteral("failed");
+        if (m_exportError.isEmpty()) {
+            m_exportError = workerError.isEmpty() ? QStringLiteral("Export worker failed.") : workerError;
+        }
+        setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
+    }
+    QFile::remove(m_exportCancelPath);
+    m_exportProcess.reset();
+    m_exportConfig.reset();
+    emit exportChanged();
 }
 
 void AppController::saveWindowState(const int x, const int y, const int width, const int height)

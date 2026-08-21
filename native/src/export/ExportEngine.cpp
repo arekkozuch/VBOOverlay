@@ -29,6 +29,22 @@ QString rateString(const MediaRational &rate)
     return QStringLiteral("%1/%2").arg(rate.numerator).arg(rate.denominator);
 }
 
+QString qualityBitrate(const QString &quality)
+{
+    if (quality == "fast") {
+        return QStringLiteral("6M");
+    }
+    if (quality == "maximum") {
+        return QStringLiteral("24M");
+    }
+    return QStringLiteral("12M");
+}
+
+bool isCancelled(const ExportSettings &settings)
+{
+    return !settings.cancellationFilePath.isEmpty() && QFileInfo::exists(settings.cancellationFilePath);
+}
+
 } // namespace
 
 qsizetype ExportEngine::frameCount(
@@ -48,6 +64,9 @@ ExportResult ExportEngine::exportVideo(
 {
     ExportResult result;
     try {
+        if (settings.stateCallback) {
+            settings.stateCallback(QStringLiteral("starting"));
+        }
         const MediaInfo source = MediaProbe::probe(settings.inputPath);
         const QSize outputSize = settings.outputSize.isValid() ? settings.outputSize : source.videoSize;
         const MediaRational frameRate = settings.frameRate.isValid()
@@ -74,21 +93,44 @@ ExportResult ExportEngine::exportVideo(
         QProcess ffmpeg;
         const QString duration = QString::number(end - start, 'f', 9);
         const QString size = QStringLiteral("%1x%2").arg(outputSize.width()).arg(outputSize.height());
-        const QStringList arguments = {
+        QStringList arguments = {
             "-hide_banner", "-y", "-ss", QString::number(start, 'f', 9), "-i", settings.inputPath,
             "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", size,
             "-framerate", rateString(frameRate), "-i", "pipe:0", "-t", duration,
             "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto[v]", "-map", "[v]",
-            "-c:v", encoder, "-b:v", "12M", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-an",
-            settings.outputPath,
+            "-c:v", encoder, "-b:v", qualityBitrate(settings.quality), "-tag:v", "hvc1",
+            "-pix_fmt", "yuv420p",
         };
+        if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
+            arguments.append({"-map", "0:a?", "-c:a", "aac", "-b:a", "192k"});
+        } else {
+            arguments.append("-an");
+        }
+        arguments.append(settings.outputPath);
         ffmpeg.setProcessChannelMode(QProcess::SeparateChannels);
         ffmpeg.start(FfmpegTools::ffmpegPath(), arguments);
         if (!ffmpeg.waitForStarted()) {
             result.error = QStringLiteral("Could not start FFmpeg: %1").arg(ffmpeg.errorString());
             return result;
         }
+        if (isCancelled(settings)) {
+            result.cancelled = true;
+            ffmpeg.kill();
+            ffmpeg.waitForFinished();
+            return result;
+        }
         for (qsizetype frame = 0; frame < frames; ++frame) {
+            if (isCancelled(settings)) {
+                result.cancelled = true;
+                ffmpeg.closeWriteChannel();
+                ffmpeg.terminate();
+                if (!ffmpeg.waitForFinished(5'000)) {
+                    ffmpeg.kill();
+                    ffmpeg.waitForFinished();
+                }
+                QFile::remove(settings.outputPath);
+                return result;
+            }
             const double presentationTime = start
                 + static_cast<double>(frame) * static_cast<double>(frameRate.denominator)
                     / static_cast<double>(frameRate.numerator);
@@ -110,8 +152,22 @@ ExportResult ExportEngine::exportVideo(
                 return result;
             }
             ++result.renderedFrames;
+            if (settings.progressCallback && !settings.progressCallback(result.renderedFrames, frames)) {
+                result.cancelled = true;
+                ffmpeg.closeWriteChannel();
+                ffmpeg.terminate();
+                if (!ffmpeg.waitForFinished(5'000)) {
+                    ffmpeg.kill();
+                    ffmpeg.waitForFinished();
+                }
+                QFile::remove(settings.outputPath);
+                return result;
+            }
         }
         ffmpeg.closeWriteChannel();
+        if (settings.stateCallback) {
+            settings.stateCallback(QStringLiteral("encoding"));
+        }
         if (!ffmpeg.waitForFinished(120'000) || ffmpeg.exitStatus() != QProcess::NormalExit
             || ffmpeg.exitCode() != 0) {
             result.error = QStringLiteral("FFmpeg export failed: %1")
@@ -122,10 +178,15 @@ ExportResult ExportEngine::exportVideo(
             result.error = QStringLiteral("FFmpeg did not create an output file.");
             return result;
         }
+        if (settings.stateCallback) {
+            settings.stateCallback(QStringLiteral("validating"));
+        }
         result.mediaInfo = MediaProbe::probe(settings.outputPath);
         if (result.mediaInfo.videoCodec != "hevc" || result.mediaInfo.videoSize != outputSize
             || qAbs(result.mediaInfo.duration - (end - start))
-                > 2.0 / qMax(1.0, frameRate.value())) {
+                > 2.0 / qMax(1.0, frameRate.value())
+            || (settings.audioEnabled && !source.audioCodecs.isEmpty()
+                && result.mediaInfo.audioCodecs.isEmpty())) {
             result.error = QStringLiteral("Export failed validation (codec, size, or duration).");
             return result;
         }
