@@ -50,6 +50,8 @@ private slots:
     void calculatesTimestampDrivenExportFrames();
     void preservesAbsoluteExportTimestamps();
     void estimatesExportProgress();
+    void parsesStructuredFfmpegProgress();
+    void calculatesEncodedOutputProgress();
     void syncsOptionalRealRecording();
 };
 
@@ -508,6 +510,37 @@ void TelemetryTests::estimatesExportProgress()
     QCOMPARE(ExportProgressEstimator::stageProgress("validating", 1.0), 99.0);
     QCOMPARE(ExportProgressEstimator::stageProgress("complete", 0.0), 100.0);
     QCOMPARE(ExportProgressEstimator::stageProgress("cancelled", 1.0), 0.0);
+}
+
+void TelemetryTests::parsesStructuredFfmpegProgress()
+{
+    FfmpegProgressParser parser;
+    const QList<FfmpegProgress> first = parser.append(
+        "frame=42\nfps=27.5\nout_time_us=700700\nspeed=0.46x\nprogress=continue\n");
+    QCOMPARE(first.size(), 1);
+    QCOMPARE(first.front().encodedFrames, qsizetype(42));
+    QCOMPARE(first.front().outputMicroseconds, qint64(700700));
+    QVERIFY(qAbs(first.front().encoderFps - 27.5) < 0.001);
+    QVERIFY(qAbs(first.front().realtimeFactor - 0.46) < 0.001);
+    QVERIFY(!first.front().complete);
+
+    const QList<FfmpegProgress> split = parser.append("frame=60\nout_time_ms=1001000\nprogress=");
+    QVERIFY(split.isEmpty());
+    const QList<FfmpegProgress> last = parser.append("end\n");
+    QCOMPARE(last.size(), 1);
+    QCOMPARE(last.front().encodedFrames, qsizetype(60));
+    QCOMPARE(last.front().outputMicroseconds, qint64(1001000));
+    QVERIFY(last.front().complete);
+}
+
+void TelemetryTests::calculatesEncodedOutputProgress()
+{
+    QCOMPARE(FfmpegProgressParser::overallPercent(0.0, 10.0), 0.0);
+    QVERIFY(FfmpegProgressParser::overallPercent(2.5, 10.0)
+            < FfmpegProgressParser::overallPercent(5.0, 10.0));
+    QCOMPARE(FfmpegProgressParser::overallPercent(5.0, 10.0), 47.5);
+    QCOMPARE(FfmpegProgressParser::overallPercent(12.0, 10.0), 95.0);
+    QCOMPARE(FfmpegProgressParser::overallPercent(-1.0, 10.0), 0.0);
 }
 
 void TelemetryTests::decodesGps9Gpmf()

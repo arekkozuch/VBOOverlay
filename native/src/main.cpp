@@ -69,8 +69,8 @@ int exportTest(const QString &inputPath, const QString &outputPath)
         return EXIT_FAILURE;
     }
     qInfo().noquote() << QStringLiteral(
-        "HEVC export completed: %1 frames in %2 ms (%3 fps); render=%4 ms, polish=%5 ms, "
-        "syncRender=%6 ms, readback=%7 ms, cpuCopy=%8 ms, ffmpegWrite=%9 ms.")
+        "HEVC export completed: %1 submitted / %10 encoded frames in %2 ms (%3 fps); render=%4 ms, polish=%5 ms, "
+        "syncRender=%6 ms, readback=%7 ms, cpuCopy=%8 ms, ffmpegWrite=%9 ms, maxQueued=%11 MiB.")
                              .arg(result.renderedFrames).arg(result.elapsedMilliseconds)
                              .arg(result.renderedFrames * 1000.0 / qMax<qint64>(1, result.elapsedMilliseconds), 0, 'f', 2)
                              .arg(result.renderMilliseconds)
@@ -78,7 +78,9 @@ int exportTest(const QString &inputPath, const QString &outputPath)
                              .arg(result.syncRenderNanoseconds / 1'000'000)
                              .arg(result.readbackNanoseconds / 1'000'000)
                              .arg(result.cpuCopyNanoseconds / 1'000'000)
-                             .arg(result.ffmpegWriteNanoseconds / 1'000'000);
+                             .arg(result.ffmpegWriteNanoseconds / 1'000'000)
+                             .arg(result.encodedFrames)
+                             .arg(result.maximumQueuedBytes / (1024.0 * 1024.0), 0, 'f', 1);
     return EXIT_SUCCESS;
 }
 
@@ -164,7 +166,7 @@ int exportWorker(const QString &configPath)
         settings.cancellationFilePath = config.value("cancelPath").toString();
         const qsizetype totalFrames = FlappedEar::ExportEngine::frameCount(
             settings.startTime, settings.endTime, settings.frameRate);
-        FlappedEar::ExportProgressEstimator progress;
+        FlappedEar::ExportProgressEstimator rendererProgress;
         QElapsedTimer elapsed;
         elapsed.start();
         qint64 lastUpdate = -125;
@@ -172,23 +174,37 @@ int exportWorker(const QString &configPath)
                           {"endTime", settings.endTime}, {"totalFrames", static_cast<qint64>(totalFrames)},
                           {"width", input.videoSize.width()}, {"height", input.videoSize.height()},
                           {"frameRate", settings.frameRate.value()}, {"audioEnabled", settings.audioEnabled}});
-        settings.progressCallback = [&](const qsizetype current, const qsizetype total, const double sourceTime) {
+        settings.progressCallback = [&](const FlappedEar::ExportPipelineProgress &pipeline) {
             const qint64 elapsedMilliseconds = elapsed.elapsed();
-            if (current != total && elapsedMilliseconds - lastUpdate < 125) return true;
+            if (pipeline.submittedFrames != pipeline.totalFrames
+                && elapsedMilliseconds - lastUpdate < 125) return;
             lastUpdate = elapsedMilliseconds;
-            const auto snapshot = progress.update(current, total, elapsedMilliseconds, settings.frameRate);
-            QJsonObject event{{"state", "rendering"}, {"renderedFrames", static_cast<qint64>(current)},
-                              {"totalFrames", static_cast<qint64>(total)}, {"sourceTime", sourceTime},
-                              {"endTime", settings.endTime}, {"telemetryTime", FlappedEar::videoToTelemetryTime(sourceTime, sync)},
-                              {"elapsedMilliseconds", elapsedMilliseconds}, {"visibleProgress", snapshot.visiblePercent},
+            const auto rendererSnapshot = rendererProgress.update(
+                pipeline.submittedFrames, pipeline.totalFrames, elapsedMilliseconds, settings.frameRate);
+            const double encodedPercent = FlappedEar::FfmpegProgressParser::overallPercent(
+                pipeline.encodedSeconds, pipeline.outputDurationSeconds);
+            const double visiblePercent = pipeline.stage == QStringLiteral("finalizing")
+                ? 97.0 : encodedPercent;
+            QJsonObject event{{"state", pipeline.stage},
+                              {"renderedFrames", static_cast<qint64>(pipeline.submittedFrames)},
+                              {"totalFrames", static_cast<qint64>(pipeline.totalFrames)},
+                              {"sourceTime", pipeline.submittedSourceTime},
+                              {"endTime", settings.endTime},
+                              {"telemetryTime", FlappedEar::videoToTelemetryTime(pipeline.submittedSourceTime, sync)},
+                              {"encodedFrames", static_cast<qint64>(pipeline.encodedFrames)},
+                              {"encodedSeconds", pipeline.encodedSeconds},
+                              {"encodedProgress", encodedPercent},
+                              {"encoderFps", pipeline.encoderFps},
+                              {"encoderRealtimeFactor", pipeline.encoderRealtimeFactor},
+                              {"queuedBytes", pipeline.queuedBytes},
+                              {"maximumQueuedBytes", pipeline.maximumQueuedBytes},
+                              {"elapsedMilliseconds", elapsedMilliseconds},
+                              {"visibleProgress", visiblePercent},
                               {"outputBytes", QFileInfo(settings.outputPath).size()}};
-            if (snapshot.etaAvailable) {
-                event.insert("throughputFps", snapshot.throughputFps);
-                event.insert("realtimeFactor", snapshot.realtimeFactor);
-                event.insert("etaSeconds", snapshot.etaSeconds);
+            if (rendererSnapshot.etaAvailable) {
+                event.insert("rendererFps", rendererSnapshot.throughputFps);
             }
             writeExportEvent(event);
-            return true;
         };
         settings.stateCallback = [](const QString &state) {
             const QString progressState = state == "encoding" ? QStringLiteral("finalizing")
@@ -205,7 +221,7 @@ int exportWorker(const QString &configPath)
             return EXIT_SUCCESS;
         }
         if (!result.success) {
-            writeExportEvent({{"state", "failed"}, {"error", result.error}});
+            writeExportEvent({{"state", "failed"}, {"error", result.error}, {"diagnostics", result.diagnostics}});
             return EXIT_FAILURE;
         }
         writeExportEvent({{"state", "complete"}, {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
@@ -218,6 +234,9 @@ int exportWorker(const QString &configPath)
                           {"readbackNanoseconds", result.readbackNanoseconds},
                           {"cpuCopyNanoseconds", result.cpuCopyNanoseconds},
                           {"ffmpegWriteNanoseconds", result.ffmpegWriteNanoseconds},
+                          {"maximumQueuedBytes", result.maximumQueuedBytes},
+                          {"encodedFrames", static_cast<qint64>(result.encodedFrames)},
+                          {"encodedSeconds", result.encodedSeconds},
                           {"renderedFrames", static_cast<qint64>(result.renderedFrames)}});
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {

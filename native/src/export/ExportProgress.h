@@ -3,6 +3,8 @@
 #include "export/MediaProbe.h"
 
 #include <QList>
+#include <QByteArray>
+#include <QString>
 
 namespace FlappedEar {
 
@@ -12,6 +14,26 @@ struct ExportProgressSnapshot {
     double realtimeFactor = 0.0;
     double etaSeconds = -1.0;
     bool etaAvailable = false;
+};
+
+// FFmpeg's machine-readable -progress pipe output. Keep this independent of
+// QProcess so its parsing and progress semantics remain deterministic in tests.
+struct FfmpegProgress {
+    qsizetype encodedFrames = 0;
+    qint64 outputMicroseconds = -1;
+    double encoderFps = 0.0;
+    double realtimeFactor = 0.0;
+    bool complete = false;
+};
+
+class FfmpegProgressParser final {
+public:
+    [[nodiscard]] QList<FfmpegProgress> append(QByteArray data);
+    [[nodiscard]] static double overallPercent(double outputSeconds, double durationSeconds);
+
+private:
+    QByteArray m_pending;
+    FfmpegProgress m_current;
 };
 
 class ExportProgressEstimator final {

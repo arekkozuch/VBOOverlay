@@ -10,6 +10,20 @@ namespace FlappedEar {
 
 class TelemetryFrameRenderer;
 
+struct ExportPipelineProgress {
+    qsizetype submittedFrames = 0;
+    qsizetype totalFrames = 0;
+    double submittedSourceTime = 0.0;
+    qsizetype encodedFrames = 0;
+    double encodedSeconds = 0.0;
+    double outputDurationSeconds = 0.0;
+    qint64 queuedBytes = 0;
+    qint64 maximumQueuedBytes = 0;
+    double encoderFps = 0.0;
+    double encoderRealtimeFactor = 0.0;
+    QString stage = QStringLiteral("rendering");
+};
+
 struct ExportSettings {
     QString inputPath;
     QString outputPath;
@@ -22,7 +36,7 @@ struct ExportSettings {
     bool audioEnabled = true;
     QString cancellationFilePath;
     std::function<void(const QString &state)> stateCallback;
-    std::function<bool(qsizetype currentFrame, qsizetype totalFrames, double sourceTime)> progressCallback;
+    std::function<void(const ExportPipelineProgress &progress)> progressCallback;
     std::function<void(const QString &id, const QString &displayName)> encoderCallback;
 };
 
@@ -39,6 +53,10 @@ struct ExportResult {
     qint64 readbackNanoseconds = 0;
     qint64 cpuCopyNanoseconds = 0;
     qint64 ffmpegWriteNanoseconds = 0;
+    qint64 maximumQueuedBytes = 0;
+    qsizetype encodedFrames = 0;
+    double encodedSeconds = 0.0;
+    QString diagnostics;
     bool cancelled = false;
 };
 

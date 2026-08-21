@@ -619,26 +619,20 @@ void AppController::handleExportOutput()
                                    QStringLiteral("etaSeconds"), QStringLiteral("outputBytes"),
                                    QStringLiteral("encoderId"), QStringLiteral("encoderName"),
                                    QStringLiteral("width"), QStringLiteral("height"), QStringLiteral("frameRate"),
-                                   QStringLiteral("audioEnabled")}) {
+                                   QStringLiteral("audioEnabled"), QStringLiteral("encodedFrames"),
+                                   QStringLiteral("encodedSeconds"), QStringLiteral("encodedProgress"),
+                                   QStringLiteral("encoderFps"), QStringLiteral("encoderRealtimeFactor"),
+                                   QStringLiteral("rendererFps"), QStringLiteral("queuedBytes"),
+                                   QStringLiteral("maximumQueuedBytes"), QStringLiteral("diagnostics")}) {
             if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
         }
         if (!state.isEmpty()) m_exportProgressInfo.insert("stage", state);
         if (event.contains("visibleProgress")) {
             m_exportProgress = qRound(event.value("visibleProgress").toDouble());
             m_exportProgressInfo.insert("progressPercent", event.value("visibleProgress").toDouble());
-        } else if (state == "rendering" && event.contains("current") && event.value("total").toInt() > 0) {
-            // Rendering is the dominant step, but validation still has to pass
-            // before the UI is allowed to show completion.
-            m_exportProgress = qBound(
-                0,
-                qRound(90.0 * event.value("current").toDouble() / event.value("total").toDouble()),
-                90);
-        } else if (state == "encoding") {
-            m_exportProgress = qMax(m_exportProgress, 92);
         } else if (state == "validating") {
             m_exportProgress = qMax(m_exportProgress, 96);
         }
-        if (state == "finalizing") m_exportProgress = qMax(m_exportProgress, 97);
         if (state == "validating") m_exportProgress = qMax(m_exportProgress, 99);
         if (event.contains("error")) {
             m_exportError = event.value("error").toString();

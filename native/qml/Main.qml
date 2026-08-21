@@ -561,8 +561,8 @@ ApplicationWindow {
         focus: true
         closePolicy: Popup.NoAutoClose
         anchors.centerIn: parent
-        width: 500
-        height: exportDetails.checked ? 520 : 390
+        width: Math.min(window.width - 40, 680)
+        height: Math.min(window.height - 40, exportDetails.checked || appController.exportState === "failed" ? 610 : 430)
         background: Rectangle {
             radius: 14
             color: "#0d141d"
@@ -614,9 +614,9 @@ ApplicationWindow {
             }
             Label {
                 Layout.fillWidth: true
-                text: window.formatTime(Number(appController.exportProgressInfo.sourceTime || 0) * 1000)
+                text: window.formatTime(Number(appController.exportProgressInfo.encodedSeconds || 0) * 1000)
                     + " / " + window.formatTime(Number(appController.exportProgressInfo.endTime || 0) * 1000)
-                    + "    ·    " + qsTr("Frame %1 / %2").arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
+                    + "    ·    " + qsTr("Encoded frame %1").arg(appController.exportProgressInfo.encodedFrames || 0)
                 color: "#d8e0e9"
                 font.pixelSize: 12
             }
@@ -624,8 +624,8 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 columns: 3
                 Label { text: qsTr("Elapsed\n%1").arg(window.formatTime(Number(appController.exportProgressInfo.elapsedMilliseconds || 0))); color: "#aeb9c7" }
-                Label { text: qsTr("Remaining\n%1").arg(appController.exportProgressInfo.etaSeconds === undefined ? qsTr("Calculating…") : "~" + window.formatTime(Number(appController.exportProgressInfo.etaSeconds) * 1000)); color: "#aeb9c7" }
-                Label { text: qsTr("Speed\n%1 fps\n%2x realtime").arg(Number(appController.exportProgressInfo.throughputFps || 0).toFixed(1)).arg(Number(appController.exportProgressInfo.realtimeFactor || 0).toFixed(2)); color: "#aeb9c7" }
+                Label { text: qsTr("Renderer\n%1 fps").arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1)); color: "#aeb9c7" }
+                Label { text: qsTr("Encoder\n%1 fps · %2x").arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1)).arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2)); color: "#aeb9c7" }
             }
             Label {
                 Layout.fillWidth: true
@@ -639,16 +639,29 @@ ApplicationWindow {
                 text: qsTr("Details")
                 checked: false
             }
-            Label {
-                visible: exportDetails.checked
+            ScrollView {
+                visible: exportDetails.checked || appController.exportState === "failed"
                 Layout.fillWidth: true
-                text: qsTr("Source time: %1\nTelemetry time: %2\nSync offset: %3 s\nRendered: %4 / %5\nEncoder ID: %6\nOutput: %7")
-                    .arg(window.formatTime(Number(appController.exportProgressInfo.sourceTime || 0) * 1000))
-                    .arg(window.formatTime(Number(appController.exportProgressInfo.telemetryTime || 0) * 1000))
-                    .arg(Number(appController.exportProgressInfo.syncOffset || 0).toFixed(3))
-                    .arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
-                    .arg(appController.exportProgressInfo.encoderId || "—").arg(appController.exportProgressInfo.outputPath || "")
-                color: "#9eabba"; font.pixelSize: 11; wrapMode: Text.WrapAnywhere
+                Layout.fillHeight: true
+                Layout.minimumHeight: 110
+                clip: true
+                TextArea {
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.WrapAnywhere
+                    color: "#9eabba"
+                    font.pixelSize: 11
+                    text: qsTr("Overlay prepared: %1 / %2\nFFmpeg encoded: %3 frames\nQueued to FFmpeg: %4 MiB (maximum %5 MiB)\nRenderer: %6 fps\nEncoder: %7 fps · %8x realtime\nEncoder ID: %9\nOutput: %10")
+                        .arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
+                        .arg(appController.exportProgressInfo.encodedFrames || 0)
+                        .arg((Number(appController.exportProgressInfo.queuedBytes || 0) / 1048576).toFixed(1))
+                        .arg((Number(appController.exportProgressInfo.maximumQueuedBytes || 0) / 1048576).toFixed(1))
+                        .arg(Number(appController.exportProgressInfo.rendererFps || 0).toFixed(1))
+                        .arg(Number(appController.exportProgressInfo.encoderFps || 0).toFixed(1))
+                        .arg(Number(appController.exportProgressInfo.encoderRealtimeFactor || 0).toFixed(2))
+                        .arg(appController.exportProgressInfo.encoderId || "—").arg(appController.exportProgressInfo.outputPath || "")
+                        + (appController.exportProgressInfo.diagnostics ? "\n\nDiagnostics\n" + appController.exportProgressInfo.diagnostics : "")
+                }
             }
             Label { visible: appController.exportState === "cancelling"; text: qsTr("Finishing current operation and cleaning up."); color: "#ffc66d"; font.pixelSize: 11 }
             Label { visible: appController.exportState === "failed"; text: appController.exportError; color: "#ff8a92"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
