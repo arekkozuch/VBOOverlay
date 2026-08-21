@@ -20,7 +20,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [ ] Expand final-media validation across a broader real-media matrix.
 - [ ] Validate rotation, sample aspect ratio, color, HDR, and 10-bit media policy.
 - [x] Establish process-tree termination guarantees for FFmpeg/ffprobe (macOS/Unix runtime-tested; Windows compile-only).
-- [x] Add disk-space preflight and manifest-owned temporary-file management policy.
+- [x] Add disk-space preflight and manifest-owned temporary-file management policy, including representative FFV1 sampling.
 - [ ] Validate the QML preview/export result against broader real media.
 - [ ] Validate Windows runtime behavior with installed dependencies.
 - [ ] Define the packaging, signing, and release gate.

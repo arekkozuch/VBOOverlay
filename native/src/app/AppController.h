@@ -300,6 +300,7 @@ private:
     std::unique_ptr<ExportOutputTransaction> m_exportOutputTransaction;
     QByteArray m_exportStdout;
     QString m_exportCancelPath;
+    QString m_exportSupervisionReadyPath;
     QString m_exportManifestPath;
     int m_exportProgress = 0;
     QString m_exportState = QStringLiteral("idle");

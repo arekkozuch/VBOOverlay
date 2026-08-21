@@ -8,10 +8,13 @@
 
 namespace FlappedEar {
 namespace {
-constexpr qint64 kMiB = 1024LL * 1024LL;
 constexpr qint64 kGiB = 1024LL * 1024LL * 1024LL;
-constexpr qint64 kFallbackOverlayBytesPerFrame = 6LL * kMiB;
-constexpr double kOverlaySafetyMargin = 1.30;
+// The fallback is intentionally still far above the observed 4K telemetry
+// overlay (~71 KiB/frame), while avoiding a false 50+ GiB prediction for a
+// mostly transparent QML scene when measurement is unavailable.
+constexpr qint64 kFallbackOverlayBytesPerFrame = 512LL * 1024LL;
+constexpr double kFallbackOverlaySafetyMargin = 1.75;
+constexpr double kMeasuredOverlaySafetyMargin = 1.50;
 constexpr double kOutputSafetyMargin = 1.25;
 constexpr qint64 kMinimumReserve = 2LL * kGiB;
 
@@ -26,7 +29,7 @@ qint64 withMargin(const qint64 value, const double margin)
 {
     if (value <= 0) return 0;
     const long double expanded = static_cast<long double>(value) * margin;
-    return expanded >= std::numeric_limits<qint64>::max()
+    return expanded >= static_cast<long double>(std::numeric_limits<qint64>::max())
         ? std::numeric_limits<qint64>::max() : static_cast<qint64>(std::ceil(expanded));
 }
 
@@ -55,8 +58,32 @@ ExportStorageEstimate ExportStoragePolicy::estimate(
     const qint64 finalRaw = static_cast<qint64>(std::ceil(
         qMax(0.0, durationSeconds) * static_cast<double>(targetBitrate(quality)) / 8.0));
     Q_UNUSED(size);
-    return {withMargin(overlayRaw, kOverlaySafetyMargin), withMargin(finalRaw, kOutputSafetyMargin),
-            kMinimumReserve};
+    return {withMargin(overlayRaw, kFallbackOverlaySafetyMargin), withMargin(finalRaw, kOutputSafetyMargin),
+            kMinimumReserve, kFallbackOverlayBytesPerFrame, 0, 0, kFallbackOverlaySafetyMargin,
+            ExportStorageEstimate::Basis::ConservativeFallback};
+}
+
+ExportStorageEstimate ExportStoragePolicy::estimateFromSample(
+    const qint64 sampleBytes, const qsizetype sampleFrames, const qsizetype expectedFrames,
+    const double durationSeconds, const QString &quality)
+{
+    if (sampleBytes <= 0 || sampleFrames <= 0) {
+        return estimate(expectedFrames, {}, durationSeconds, quality);
+    }
+    const qint64 frameCount = static_cast<qint64>(sampleFrames);
+    const qint64 bytesPerFrame = sampleBytes / frameCount + (sampleBytes % frameCount == 0 ? 0 : 1);
+    const qint64 overlayRaw = saturatedMultiply(bytesPerFrame, static_cast<qint64>(expectedFrames));
+    const qint64 finalRaw = static_cast<qint64>(std::ceil(
+        qMax(0.0, durationSeconds) * static_cast<double>(targetBitrate(quality)) / 8.0));
+    return {withMargin(overlayRaw, kMeasuredOverlaySafetyMargin), withMargin(finalRaw, kOutputSafetyMargin),
+            kMinimumReserve, bytesPerFrame, sampleFrames, sampleBytes, kMeasuredOverlaySafetyMargin,
+            ExportStorageEstimate::Basis::MeasuredSample};
+}
+
+QString ExportStoragePolicy::estimateBasisText(const ExportStorageEstimate::Basis basis)
+{
+    return basis == ExportStorageEstimate::Basis::MeasuredSample
+        ? QStringLiteral("Measured sample") : QStringLiteral("Conservative fallback");
 }
 
 ExportStoragePreflight ExportStoragePolicy::evaluate(

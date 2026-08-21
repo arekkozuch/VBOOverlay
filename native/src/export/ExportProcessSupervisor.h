@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QProcess>
+#include <QString>
 
 namespace FlappedEar {
 
@@ -16,10 +17,14 @@ public:
     [[nodiscard]] bool waitForStarted(int milliseconds = 30'000);
     [[nodiscard]] bool stopAndWait(int gracefulMilliseconds = 5'000, int forceMilliseconds = 5'000);
     [[nodiscard]] bool isRunning() const;
+    [[nodiscard]] bool supervisionActive() const;
+    [[nodiscard]] QString supervisionError() const;
 private:
     QProcess &m_process;
     bool m_isolateProcessGroup = true;
     qint64 m_pid = 0;
+    bool m_supervisionActive = false;
+    QString m_supervisionError;
 #ifdef Q_OS_WIN
     void *m_job = nullptr;
 #endif

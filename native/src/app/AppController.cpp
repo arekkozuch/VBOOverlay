@@ -969,7 +969,9 @@ bool AppController::startExport(
         return false;
     }
     m_exportCancelPath = m_exportConfig->fileName() + QStringLiteral(".cancel");
+    m_exportSupervisionReadyPath = m_exportConfig->fileName() + QStringLiteral(".supervision-ready");
     QFile::remove(m_exportCancelPath);
+    QFile::remove(m_exportSupervisionReadyPath);
     const QJsonObject config = {
         {"inputPath", inputPath},
         {"outputPath", m_exportOutputTransaction->stagingPath()},
@@ -981,6 +983,7 @@ bool AppController::startExport(
         {"startTime", startTime},
         {"endTime", endTime},
         {"cancelPath", m_exportCancelPath},
+        {"supervisionReadyPath", m_exportSupervisionReadyPath},
         {"temporaryOverlayPath", temporaryOverlayPath},
         {"manifestPath", m_exportManifestPath},
     };
@@ -1024,8 +1027,10 @@ bool AppController::startExport(
     m_exportSupervisor->start(
         QCoreApplication::applicationFilePath(), {"--export-worker", m_exportConfig->fileName()});
     if (!m_exportSupervisor->waitForStarted(5'000)) {
-        m_exportError = QStringLiteral("Could not start export worker: %1")
-                            .arg(m_exportProcess->errorString());
+        const QString supervisionError = m_exportSupervisor->supervisionError();
+        m_exportError = supervisionError.isEmpty()
+            ? QStringLiteral("Could not start export worker: %1").arg(m_exportProcess->errorString())
+            : QStringLiteral("Could not establish export process supervision: %1").arg(supervisionError);
         m_exportState = QStringLiteral("failed");
         static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
         m_exportManifestPath.clear();
@@ -1033,6 +1038,13 @@ bool AppController::startExport(
         m_exportProcess.reset();
         m_exportConfig.reset();
         m_exportOutputTransaction.reset();
+        emit exportChanged();
+        return false;
+    }
+    if (!m_exportSupervisor->supervisionActive()) {
+        m_exportError = QStringLiteral("Export process supervision was not established.");
+        static_cast<void>(m_exportSupervisor->stopAndWait());
+        m_exportState = QStringLiteral("failed");
         emit exportChanged();
         return false;
     }
@@ -1052,6 +1064,16 @@ bool AppController::startExport(
         emit exportChanged();
         return false;
     }
+    QFile supervisionReady(m_exportSupervisionReadyPath);
+    if (!supervisionReady.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+        m_exportError = QStringLiteral("Could not release supervised export worker: %1")
+                            .arg(supervisionReady.errorString());
+        static_cast<void>(m_exportSupervisor->stopAndWait());
+        m_exportState = QStringLiteral("failed");
+        emit exportChanged();
+        return false;
+    }
+    supervisionReady.close();
     emit exportChanged();
     return true;
 }
@@ -1194,6 +1216,9 @@ void AppController::handleExportOutput()
                                    QStringLiteral("estimatedTemporaryOverlayBytes"),
                                    QStringLiteral("estimatedFinalOutputBytes"),
                                    QStringLiteral("safetyReserveBytes"),
+                                   QStringLiteral("estimateBasis"), QStringLiteral("sampleFrames"),
+                                   QStringLiteral("sampleEncodedBytes"), QStringLiteral("sampleBytesPerFrame"),
+                                   QStringLiteral("sampleSafetyMargin"), QStringLiteral("sampleError"),
                                    QStringLiteral("temporaryFilesystemRoot"),
                                    QStringLiteral("temporaryFilesystemAvailableBytes"),
                                    QStringLiteral("destinationFilesystemRoot"),
@@ -1286,6 +1311,7 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
     m_exportProgressInfo.insert("stage", m_exportState);
     m_exportProgressInfo.insert("progressPercent", m_exportProgress);
     QFile::remove(m_exportCancelPath);
+    QFile::remove(m_exportSupervisionReadyPath);
     QString cleanupError;
     if (!m_exportManifestPath.isEmpty()
         && !ExportArtifactManifest::cleanupOwned(m_exportManifestPath, &cleanupError)) {

@@ -28,3 +28,5 @@ paths where Qt can resolve them, including existing symlinks and canonicalized p
 Before a worker is started, the controller writes an atomic versioned JSON manifest in the system temporary directory. It records the export UUID, creation time, worker PID, state, temporary FFV1 path, staging path, and final target for diagnostics. The manifest is the authorization record: only its validated overlay and staging paths may be removed automatically; the final target is never a cleanup candidate.
 
 On normal success, cancellation, or failure the controller removes those owned artifacts and the manifest. If cleanup cannot finish, the manifest remains. At application startup the janitor reads only FlappedEar manifest files, rejects malformed records, skips a record whose PID is still active, and removes only paths proven by the valid manifest. Names such as `*.mkv` or `*.part.mp4` alone never authorize deletion.
+
+PID reuse can conservatively cause an old manifest to be retained when an unrelated process has reused its recorded PID. That may leave recoverable temporary files behind, but it never broadens deletion authority.

@@ -21,6 +21,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QTextStream>
+#include <QThread>
 
 namespace {
 
@@ -159,6 +160,23 @@ int exportWorker(const QString &configPath)
         return EXIT_FAILURE;
     }
     const QJsonObject config = QJsonDocument::fromJson(configFile.readAll()).object();
+    const QString supervisionReadyPath = config.value("supervisionReadyPath").toString();
+    if (!supervisionReadyPath.isEmpty()) {
+        QElapsedTimer supervisionWait;
+        supervisionWait.start();
+        while (!QFileInfo::exists(supervisionReadyPath) && supervisionWait.elapsed() < 15'000) {
+            const QString cancellationPath = config.value("cancelPath").toString();
+            if (!cancellationPath.isEmpty() && QFileInfo::exists(cancellationPath)) {
+                writeExportEvent({{"state", "cancelled"}, {"message", "Export cancelled before worker release."}});
+                return EXIT_SUCCESS;
+            }
+            QThread::msleep(25);
+        }
+        if (!QFileInfo::exists(supervisionReadyPath)) {
+            writeExportEvent({{"state", "failed"}, {"error", "Export worker supervision was not established."}});
+            return EXIT_FAILURE;
+        }
+    }
     QElapsedTimer elapsed;
     elapsed.start();
     FlappedEar::ExportStageTimer stageTimer;

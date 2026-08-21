@@ -122,6 +122,101 @@ QString formatArgumentList(const QStringList &arguments)
     return quoted.join(QLatin1Char(' '));
 }
 
+struct OverlaySampleResult {
+    qsizetype frames = 0;
+    qint64 encodedBytes = 0;
+    QString error;
+    bool cancelled = false;
+};
+
+OverlaySampleResult sampleTemporaryOverlay(
+    const ExportSettings &settings, TelemetryFrameRenderer &renderer, const QSize &outputSize,
+    const double sourceRangeStart, const qsizetype expectedFrames, const MediaRational &frameRate)
+{
+    OverlaySampleResult result;
+    const qsizetype sampleFrames = qMin<qsizetype>(24, expectedFrames);
+    if (sampleFrames == 0) return result;
+    const QString size = QStringLiteral("%1x%2").arg(outputSize.width()).arg(outputSize.height());
+    const QStringList arguments = {"-hide_banner", "-loglevel", "error", "-nostats", "-y",
+        "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", size,
+        "-framerate", rateString(frameRate), "-i", "pipe:0", "-an", "-c:v", "ffv1",
+        "-pix_fmt", "bgra", "-f", "matroska", "pipe:1"};
+    QProcess process;
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    ExportProcessSupervisor supervisor(process, false);
+    supervisor.start(FfmpegTools::ffmpegPath(), arguments);
+    if (!supervisor.waitForStarted(5'000)) {
+        result.error = QStringLiteral("Could not start FFmpeg representative sample: %1").arg(process.errorString());
+        return result;
+    }
+    QByteArray encoded;
+    QString stderr;
+    const auto drain = [&] {
+        encoded.append(process.readAllStandardOutput());
+        stderr += QString::fromUtf8(process.readAllStandardError());
+    };
+    for (qsizetype sampleIndex = 0; sampleIndex < sampleFrames; ++sampleIndex) {
+        if (isCancelled(settings)) {
+            result.cancelled = true;
+            static_cast<void>(supervisor.stopAndWait());
+            return result;
+        }
+        const qsizetype frameIndex = sampleFrames == 1 ? 0
+            : (sampleIndex * (expectedFrames - 1)) / (sampleFrames - 1);
+        const QImage image = renderer.renderFrame(
+            ExportEngine::sourceVideoTime(sourceRangeStart, frameIndex, frameRate));
+        if (image.size() != outputSize) {
+            result.error = renderer.errorString().isEmpty()
+                ? QStringLiteral("Telemetry renderer could not produce a representative sample frame.")
+                : renderer.errorString();
+            static_cast<void>(supervisor.stopAndWait());
+            return result;
+        }
+        const QByteArray bytes = rgbaBytes(image, outputSize);
+        if (process.write(bytes) != bytes.size()) {
+            result.error = QStringLiteral("Could not stream representative sample frame to FFmpeg: %1")
+                .arg(process.errorString());
+            static_cast<void>(supervisor.stopAndWait());
+            return result;
+        }
+        ++result.frames;
+        while (process.bytesToWrite() > 32LL * 1024LL * 1024LL) {
+            if (isCancelled(settings)) {
+                result.cancelled = true;
+                static_cast<void>(supervisor.stopAndWait());
+                return result;
+            }
+            process.waitForBytesWritten(100);
+            drain();
+        }
+        drain();
+    }
+    process.closeWriteChannel();
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (process.state() != QProcess::NotRunning && elapsed.elapsed() < 30'000) {
+        if (isCancelled(settings)) {
+            result.cancelled = true;
+            static_cast<void>(supervisor.stopAndWait());
+            return result;
+        }
+        process.waitForFinished(100);
+        drain();
+    }
+    drain();
+    if (process.state() != QProcess::NotRunning) {
+        result.error = QStringLiteral("FFmpeg representative sample timed out.");
+        static_cast<void>(supervisor.stopAndWait());
+        return result;
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || encoded.isEmpty()) {
+        result.error = QStringLiteral("FFmpeg representative sample failed: %1").arg(stderr.trimmed());
+        return result;
+    }
+    result.encodedBytes = encoded.size();
+    return result;
+}
+
 QString formatDiagnostics(
     const QProcess &process,
     const FfmpegProgress &progress,
@@ -317,8 +412,19 @@ ExportResult ExportEngine::exportVideo(
             ? QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv")
                   .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
             : settings.temporaryOverlayPath;
-        const ExportStorageEstimate storageEstimate = ExportStoragePolicy::estimate(
-            expectedFrames, outputSize, exportDuration, settings.quality);
+        observe(settings, QStringLiteral("status"), QStringLiteral("preparing"),
+                QStringLiteral("sampleTemporaryOverlay"),
+                QStringLiteral("Measuring representative telemetry overlay sample"));
+        const OverlaySampleResult overlaySample = sampleTemporaryOverlay(
+            settings, renderer, outputSize, sourceRangeStart, expectedFrames, exportFrameRate);
+        if (overlaySample.cancelled) {
+            result.cancelled = true;
+            return result;
+        }
+        const ExportStorageEstimate storageEstimate = overlaySample.error.isEmpty()
+            ? ExportStoragePolicy::estimateFromSample(overlaySample.encodedBytes, overlaySample.frames,
+                                                       expectedFrames, exportDuration, settings.quality)
+            : ExportStoragePolicy::estimate(expectedFrames, outputSize, exportDuration, settings.quality);
         const ExportStoragePreflight storagePreflight = ExportStoragePolicy::evaluate(
             temporaryOverlayPath, settings.outputPath, storageEstimate);
         observe(settings, QStringLiteral("log"), QStringLiteral("preparing"),
@@ -326,6 +432,12 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("storage"), {{"estimatedTemporaryOverlayBytes", storageEstimate.temporaryOverlayBytes},
                 {"estimatedFinalOutputBytes", storageEstimate.finalOutputBytes},
                 {"safetyReserveBytes", storageEstimate.safetyReserveBytes},
+                {"estimateBasis", ExportStoragePolicy::estimateBasisText(storageEstimate.basis)},
+                {"sampleFrames", static_cast<qint64>(storageEstimate.sampleFrames)},
+                {"sampleEncodedBytes", storageEstimate.sampleBytes},
+                {"sampleBytesPerFrame", storageEstimate.bytesPerFrame},
+                {"sampleSafetyMargin", storageEstimate.safetyMargin},
+                {"sampleError", overlaySample.error},
                 {"temporaryFilesystemRoot", storagePreflight.temporaryFilesystem.rootPath},
                 {"temporaryFilesystemAvailableBytes", storagePreflight.temporaryFilesystem.availableBytes},
                 {"destinationFilesystemRoot", storagePreflight.destinationFilesystem.rootPath},

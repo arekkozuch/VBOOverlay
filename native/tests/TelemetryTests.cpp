@@ -31,6 +31,7 @@
 #include <QtEndian>
 #include <QtTest>
 #include <cmath>
+#include <limits>
 
 using namespace FlappedEar;
 
@@ -70,6 +71,7 @@ private slots:
     void reportsMediaProbeLifecycleHeartbeat();
     void cancelsMediaProbeWithoutLeavingItRunning();
     void evaluatesIndependentExportStorageVolumes();
+    void estimatesTemporaryStorageFromRepresentativeSample();
     void cleansOnlyManifestOwnedArtifacts();
     void preservesLiveManifestForStartupRecovery();
     void supervisesUnixExportProcessTree();
@@ -1092,6 +1094,35 @@ void TelemetryTests::evaluatesIndependentExportStorageVolumes()
     QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, sharedFilesystem).sufficient);
 }
 
+void TelemetryTests::estimatesTemporaryStorageFromRepresentativeSample()
+{
+    constexpr qsizetype expectedFrames = 7'193;
+    // 513,343,525 bytes was the observed complete 4K FFV1 overlay size.
+    constexpr qint64 representativeBytesPerFrame = 71'368;
+    const ExportStorageEstimate measured = ExportStoragePolicy::estimateFromSample(
+        representativeBytesPerFrame * 24, 24, expectedFrames, 120.0, QStringLiteral("high"));
+    QCOMPARE(measured.basis, ExportStorageEstimate::Basis::MeasuredSample);
+    QCOMPARE(measured.sampleFrames, qsizetype(24));
+    QCOMPARE(measured.bytesPerFrame, representativeBytesPerFrame);
+    QCOMPARE(measured.safetyMargin, 1.5);
+    QVERIFY(measured.temporaryOverlayBytes > 700LL * 1024 * 1024);
+    QVERIFY2(measured.temporaryOverlayBytes < 2LL * 1024 * 1024 * 1024,
+             "Measured representative sample must not regress to a tens-of-GiB estimate.");
+
+    const ExportStorageEstimate fallback = ExportStoragePolicy::estimate(
+        expectedFrames, {3840, 2160}, 120.0, QStringLiteral("high"));
+    QCOMPARE(fallback.basis, ExportStorageEstimate::Basis::ConservativeFallback);
+    QCOMPARE(fallback.bytesPerFrame, 512LL * 1024LL);
+    QCOMPARE(fallback.safetyMargin, 1.75);
+    QVERIFY(fallback.temporaryOverlayBytes > measured.temporaryOverlayBytes);
+    QVERIFY(fallback.temporaryOverlayBytes < 10LL * 1024 * 1024 * 1024);
+
+    const ExportStorageEstimate overflow = ExportStoragePolicy::estimateFromSample(
+        std::numeric_limits<qint64>::max(), 1, std::numeric_limits<qsizetype>::max(),
+        1.0, QStringLiteral("high"));
+    QCOMPARE(overflow.temporaryOverlayBytes, std::numeric_limits<qint64>::max());
+}
+
 void TelemetryTests::cleansOnlyManifestOwnedArtifacts()
 {
     QTemporaryDir destination;
@@ -1147,6 +1178,7 @@ void TelemetryTests::supervisesUnixExportProcessTree()
     ExportProcessSupervisor supervisor(process);
     supervisor.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("sleep 30 & echo $!; wait")});
     QVERIFY2(supervisor.waitForStarted(), qPrintable(process.errorString()));
+    QVERIFY(supervisor.supervisionActive());
     QVERIFY(process.waitForReadyRead(2'000));
     bool ok = false;
     const qint64 grandchildPid = QString::fromUtf8(process.readAllStandardOutput()).trimmed().toLongLong(&ok);
