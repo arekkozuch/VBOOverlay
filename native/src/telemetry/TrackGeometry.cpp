@@ -66,12 +66,14 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session)
         maximumY = std::max(maximumY, point.y());
     }
     geometry.localBounds = QRectF(QPointF(minimumX, minimumY), QPointF(maximumX, maximumY));
-    const double width = geometry.localBounds.width() == 0.0 ? 1.0 : geometry.localBounds.width();
-    const double height = geometry.localBounds.height() == 0.0 ? 1.0 : geometry.localBounds.height();
+    geometry.localCenter = geometry.localBounds.center();
+    geometry.normalizationScale = std::max(
+        1.0, std::max(geometry.localBounds.width(), geometry.localBounds.height()));
     geometry.points.reserve(localPoints.size());
     for (const QPointF &point : localPoints) {
         geometry.points.append(
-            {(point.x() - minimumX) / width, (point.y() - minimumY) / height});
+            {(point.x() - geometry.localCenter.x()) / geometry.normalizationScale + 0.5,
+             (point.y() - geometry.localCenter.y()) / geometry.normalizationScale + 0.5});
     }
     return geometry;
 }
@@ -89,11 +91,9 @@ std::optional<QPointF> currentTrackPoint(
     }
     const QPointF local = toLocal(
         *latitude, *longitude, geometry.originLatitude, geometry.originLongitude);
-    const double width = geometry.localBounds.width() == 0.0 ? 1.0 : geometry.localBounds.width();
-    const double height = geometry.localBounds.height() == 0.0 ? 1.0 : geometry.localBounds.height();
     return QPointF(
-        (local.x() - geometry.localBounds.left()) / width,
-        (local.y() - geometry.localBounds.top()) / height);
+        (local.x() - geometry.localCenter.x()) / geometry.normalizationScale + 0.5,
+        (local.y() - geometry.localCenter.y()) / geometry.normalizationScale + 0.5);
 }
 
 } // namespace FlappedEar
