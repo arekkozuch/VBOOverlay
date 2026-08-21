@@ -6,6 +6,9 @@ Item {
     id: root
     property int selectedIndex: -1
     property var selectedIndices: []
+    // The editor supplies its playback-driven context. Export supplies an
+    // independent explicit-time context to the same scene implementation.
+    property var renderContext: appController.renderContext
     signal selectionRequested(int index, bool additive)
     signal fullScreenRequested
 
@@ -39,14 +42,14 @@ Item {
             visible: widgetVisible && (widgetCues.length === 0 || cueOpacity > 0)
 
             property var activeCue: {
-                appController.playbackTime;
+                root.renderContext.time;
                 let best = null;
                 let bestOpacity = 0;
                 for (let index = 0; index < widgetCues.length; ++index) {
                     const cue = widgetCues[index];
                     const start = Number(cue.start || 0);
                     const duration = Math.max(0.1, Number(cue.duration || 0.1));
-                    const elapsed = appController.playbackTime - start;
+                    const elapsed = root.renderContext.time - start;
                     if (elapsed < 0 || elapsed > duration)
                         continue;
                     const fadeIn = Math.min(duration, Math.max(0, Number(cue.fadeIn || 0)));
@@ -82,8 +85,8 @@ Item {
             property real labelScale: Number(widgetSettings.labelFontScale ?? 1)
 
             function raw(key, fallback) {
-                appController.playbackTime;
-                return appController.telemetryValue(widgetSettings[key] || fallback);
+                root.renderContext.time;
+                return root.renderContext.telemetryValue(widgetSettings[key] || fallback);
             }
             function adjusted(value) {
                 if (value === undefined || value === null)
@@ -1047,8 +1050,8 @@ Item {
                     anchors.fill: parent
                     visible: widgetItem.widgetType === "track"
                     property var currentPoint: {
-                        appController.playbackTime;
-                        return appController.currentTrackPoint;
+                        root.renderContext.time;
+                        return root.renderContext.currentTrackPoint;
                     }
                     property real trackPad: Number(widgetItem.widgetSettings.trackPadding ?? 10)
                     Canvas {
@@ -1057,7 +1060,7 @@ Item {
                         onPaint: {
                             const context = getContext("2d");
                             context.reset();
-                            const points = appController.trackPoints;
+                            const points = root.renderContext.trackPoints;
                             if (points.length < 2)
                                 return;
                             const pad = parent.trackPad;

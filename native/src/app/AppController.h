@@ -1,6 +1,7 @@
 #pragma once
 
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
@@ -32,6 +33,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariant speed READ speed NOTIFY liveValuesChanged)
     Q_PROPERTY(QVariant rpm READ rpm NOTIFY liveValuesChanged)
     Q_PROPERTY(QVariant heartRate READ heartRate NOTIFY liveValuesChanged)
+    Q_PROPERTY(TelemetryRenderContext *renderContext READ renderContext CONSTANT)
     Q_PROPERTY(WidgetModel *widgetModel READ widgetModel CONSTANT)
     Q_PROPERTY(QVariantList trackPoints READ trackPoints NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY liveValuesChanged)
@@ -66,6 +68,7 @@ public:
     [[nodiscard]] QVariant speed() const;
     [[nodiscard]] QVariant rpm() const;
     [[nodiscard]] QVariant heartRate() const;
+    [[nodiscard]] TelemetryRenderContext *renderContext();
     [[nodiscard]] WidgetModel *widgetModel();
     [[nodiscard]] QVariantList trackPoints() const;
     [[nodiscard]] QVariantMap currentTrackPoint() const;
@@ -142,6 +145,7 @@ private:
     std::unique_ptr<TelemetrySession> m_session;
     WidgetModel m_widgetModel;
     TrackGeometry m_trackGeometry;
+    TelemetryRenderContext m_previewRenderContext;
     QVariantList m_trackPoints;
     QJsonObject m_projectTemplate;
     double m_playbackTime = 0.0;

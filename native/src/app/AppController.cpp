@@ -19,9 +19,11 @@ namespace FlappedEar {
 AppController::AppController(QObject *parent)
     : QObject(parent)
     , m_settings()
+    , m_previewRenderContext(this)
 {
     m_sync.offset = m_settings.value("sync/offset", 0.0).toDouble();
     m_sync.timeScale = m_settings.value("sync/timeScale", 1.0).toDouble();
+    m_previewRenderContext.setSyncTransform(m_sync);
     m_analysisChannels = m_settings.value("analysis/channels").toStringList();
     m_analysisVisible = m_settings.value("analysis/visible", true).toBool();
     const QJsonDocument savedWidgets =
@@ -86,16 +88,12 @@ QVariantMap AppController::syncCandidate() const { return m_syncCandidate; }
 QVariant AppController::speed() const { return semanticValue("speed"); }
 QVariant AppController::rpm() const { return semanticValue("rpm"); }
 QVariant AppController::heartRate() const { return semanticValue("heartRate"); }
+TelemetryRenderContext *AppController::renderContext() { return &m_previewRenderContext; }
 WidgetModel *AppController::widgetModel() { return &m_widgetModel; }
 QVariantList AppController::trackPoints() const { return m_trackPoints; }
 QVariantMap AppController::currentTrackPoint() const
 {
-    if (!m_session) {
-        return {};
-    }
-    const auto point = FlappedEar::currentTrackPoint(
-        *m_session, videoToTelemetryTime(m_playbackTime, m_sync), m_trackGeometry);
-    return point ? QVariantMap{{"x", point->x()}, {"y", point->y()}} : QVariantMap();
+    return m_previewRenderContext.currentTrackPoint();
 }
 QStringList AppController::analysisChannels() const { return m_analysisChannels; }
 bool AppController::analysisVisible() const { return m_analysisVisible; }
@@ -135,6 +133,8 @@ void AppController::loadVbo(const QUrl &url)
         m_session = std::move(session);
         m_syncCandidate.clear();
         m_trackGeometry = buildTrackGeometry(*m_session);
+        m_previewRenderContext.setSession(m_session.get());
+        m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
         m_trackPoints.clear();
         m_trackPoints.reserve(m_trackGeometry.points.size());
         for (const QPointF &point : m_trackGeometry.points) {
@@ -160,6 +160,8 @@ void AppController::clearProject()
     m_telemetryPath.clear();
     m_session.reset();
     m_trackGeometry = {};
+    m_previewRenderContext.setSession(nullptr);
+    m_previewRenderContext.setTrackGeometry(nullptr);
     m_trackPoints.clear();
     setAnalysisChannels({});
     m_playbackTime = 0.0;
@@ -421,6 +423,7 @@ void AppController::setPlaybackTime(const double seconds)
         return;
     }
     m_playbackTime = seconds;
+    m_previewRenderContext.setTime(seconds);
     emit playbackTimeChanged();
     emit liveValuesChanged();
 }
@@ -431,6 +434,7 @@ void AppController::setSyncOffset(const double seconds)
         return;
     }
     m_sync.offset = seconds;
+    m_previewRenderContext.setSyncTransform(m_sync);
     saveSessionSettings();
     emit syncChanged();
     emit liveValuesChanged();
@@ -442,6 +446,7 @@ void AppController::setTimeScale(const double scale)
         return;
     }
     m_sync.timeScale = scale;
+    m_previewRenderContext.setSyncTransform(m_sync);
     saveSessionSettings();
     emit syncChanged();
     emit liveValuesChanged();
@@ -523,6 +528,8 @@ void AppController::restoreSources()
     try {
         m_session = std::make_unique<TelemetrySession>(VboParser::parseFile(vboPath));
         m_trackGeometry = buildTrackGeometry(*m_session);
+        m_previewRenderContext.setSession(m_session.get());
+        m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
         m_trackPoints.clear();
         m_trackPoints.reserve(m_trackGeometry.points.size());
         for (const QPointF &point : m_trackGeometry.points) {

@@ -11,12 +11,20 @@ function(flappedear_enable_warnings target)
 endfunction()
 
 qt_add_library(flappedear_core STATIC
+    src/export/EncoderDetector.cpp
+    src/export/EncoderDetector.h
+    src/export/FfmpegTools.cpp
+    src/export/FfmpegTools.h
+    src/export/MediaProbe.cpp
+    src/export/MediaProbe.h
     src/gopro/GoProTelemetrySource.cpp
     src/gopro/GoProTelemetrySource.h
     src/sync/TelemetrySyncEngine.cpp
     src/sync/TelemetrySyncEngine.h
     src/telemetry/TelemetrySession.cpp
     src/telemetry/TelemetrySession.h
+    src/telemetry/TelemetryRenderContext.cpp
+    src/telemetry/TelemetryRenderContext.h
     src/telemetry/TrackGeometry.cpp
     src/telemetry/TrackGeometry.h
     src/telemetry/VboParser.cpp

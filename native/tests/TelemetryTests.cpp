@@ -1,6 +1,9 @@
 #include "gopro/GoProTelemetrySource.h"
+#include "export/EncoderDetector.h"
+#include "export/MediaProbe.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/VboParser.h"
 #include "widgets/WidgetModel.h"
@@ -38,6 +41,9 @@ private slots:
     void synchronizesGpsSpeed();
     void reportsAmbiguousGpsSpeed();
     void gatesWeakSyncCandidates();
+    void rendersTelemetryAtExplicitTime();
+    void probesMediaInfoJson();
+    void detectsHevcEncoders();
     void syncsOptionalRealRecording();
 };
 
@@ -405,6 +411,42 @@ void TelemetryTests::gatesWeakSyncCandidates()
     QVERIFY(current.has_value());
     QVERIFY(qAbs(current->x() - geometry.points[1].x()) < 0.001);
     QVERIFY(qAbs(current->y() - geometry.points[1].y()) < 0.001);
+}
+
+void TelemetryTests::rendersTelemetryAtExplicitTime()
+{
+    const TelemetrySession session = VboParser::parse(
+        u"[column names]\ntime speed\n[data]\n0 0\n10 100");
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    context.setSyncTransform({2.0, 1.5});
+    context.setTime(4.0);
+    QCOMPARE(context.telemetryTime(), 8.0);
+    QCOMPARE(context.telemetryValue("speed").toDouble(), 80.0);
+    context.setTime(2.0);
+    QCOMPARE(context.telemetryValue("speed").toDouble(), 50.0);
+}
+
+void TelemetryTests::probesMediaInfoJson()
+{
+    const QByteArray json = R"({"format":{"duration":"3.000000","start_time":"0.500000"},"streams":[{"codec_type":"video","codec_name":"h264","width":320,"height":180,"r_frame_rate":"30000/1001","avg_frame_rate":"30000/1001","time_base":"1/90000","pix_fmt":"yuv420p"},{"codec_type":"audio","codec_name":"aac"}]})";
+    const MediaInfo info = MediaProbe::parseJson(json, "/fixture.mp4");
+    QCOMPARE(info.path, QString("/fixture.mp4"));
+    QCOMPARE(info.videoSize, QSize(320, 180));
+    QCOMPARE(info.videoCodec, QString("h264"));
+    QCOMPARE(info.audioCodecs, QStringList({"aac"}));
+    QVERIFY(qAbs(info.frameRate.value() - 29.97002997) < 0.00001);
+    QVERIFY(!info.likelyVariableFrameRate);
+}
+
+void TelemetryTests::detectsHevcEncoders()
+{
+    const QString output = " V....D hevc_videotoolbox Apple VideoToolbox\n V....D libx265 x265\n";
+    const QList<EncoderCapability> encoders = EncoderDetector::parseEncoders(output);
+    QCOMPARE(encoders.size(), 2);
+    QCOMPARE(encoders[0].id, QString("hevc_videotoolbox"));
+    QVERIFY(encoders[0].hardware);
+    QCOMPARE(EncoderDetector::preferredHevcEncoder(encoders), QString("hevc_videotoolbox"));
 }
 
 void TelemetryTests::decodesGps9Gpmf()
