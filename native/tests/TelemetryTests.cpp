@@ -185,6 +185,19 @@ void TelemetryTests::rejectsUnsafeExportPaths()
     ExportOutputTransaction missingDestination;
     QCOMPARE(missingDestination.prepare(directory.filePath("missing/out.mp4"), input, {vbo}, false).status,
              ExportOutputTransaction::PreparationStatus::Error);
+
+    const QString unwritablePath = directory.filePath("unwritable");
+    QVERIFY(QDir().mkdir(unwritablePath));
+    const QFile::Permissions originalPermissions = QFileInfo(unwritablePath).permissions();
+    QVERIFY(QFile::setPermissions(
+        unwritablePath, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    const auto restorePermissions = qScopeGuard([&] {
+        QFile::setPermissions(unwritablePath, originalPermissions);
+    });
+    ExportOutputTransaction unwritableDestination;
+    QCOMPARE(unwritableDestination.prepare(
+                 QDir(unwritablePath).filePath("out.mp4"), input, {vbo}, false).status,
+             ExportOutputTransaction::PreparationStatus::Error);
 }
 
 void TelemetryTests::preservesExistingExportTargetOnFailures_data()
