@@ -112,6 +112,8 @@ QVariantMap AppController::exportSourceInfo() const
     };
 }
 QVariantMap AppController::exportMetrics() const { return m_exportMetrics; }
+QVariantMap AppController::exportProgressInfo() const { return m_exportProgressInfo; }
+bool AppController::exportProgressVisible() const { return m_exportProgressVisible; }
 QVariantMap AppController::syncCandidate() const { return m_syncCandidate; }
 QVariant AppController::speed() const { return semanticValue("speed"); }
 QVariant AppController::rpm() const { return semanticValue("rpm"); }
@@ -188,6 +190,8 @@ void AppController::clearProject()
     m_videoSource = QUrl();
     m_exportSourceInfo = {};
     m_exportMetrics.clear();
+    m_exportProgressInfo.clear();
+    m_exportProgressVisible = false;
     m_telemetryPath.clear();
     m_session.reset();
     m_trackGeometry = {};
@@ -495,6 +499,10 @@ bool AppController::startExport(
     m_exportProgress = 0;
     m_exportError.clear();
     m_exportMetrics.clear();
+    m_exportProgressInfo = {{"outputPath", outputPath}, {"outputName", QFileInfo(outputPath).fileName()},
+                            {"syncOffset", m_sync.offset}, {"timeScale", m_sync.timeScale},
+                            {"audioLabel", audioEnabled ? QStringLiteral("AAC audio") : QStringLiteral("No audio")}};
+    m_exportProgressVisible = true;
     m_exportState = QStringLiteral("starting");
     m_exportProcess = std::make_unique<QProcess>(this);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -536,6 +544,15 @@ void AppController::cancelExport()
     }
     cancellationFile.close();
     m_exportState = QStringLiteral("cancelling");
+    m_exportProgressInfo.insert("stage", QStringLiteral("cancelling"));
+    emit exportChanged();
+}
+
+void AppController::dismissExportProgress()
+{
+    if (exporting() || m_exportState == "cancelling") return;
+    m_exportProgressVisible = false;
+    if (m_exportState == "complete" || m_exportState == "cancelled") m_exportState = QStringLiteral("idle");
     emit exportChanged();
 }
 
@@ -554,7 +571,21 @@ void AppController::handleExportOutput()
         if (!state.isEmpty()) {
             m_exportState = state;
         }
-        if (state == "rendering" && event.contains("current") && event.value("total").toInt() > 0) {
+        for (const QString &key : {QStringLiteral("renderedFrames"), QStringLiteral("totalFrames"),
+                                   QStringLiteral("sourceTime"), QStringLiteral("endTime"),
+                                   QStringLiteral("telemetryTime"), QStringLiteral("elapsedMilliseconds"),
+                                   QStringLiteral("throughputFps"), QStringLiteral("realtimeFactor"),
+                                   QStringLiteral("etaSeconds"), QStringLiteral("outputBytes"),
+                                   QStringLiteral("encoderId"), QStringLiteral("encoderName"),
+                                   QStringLiteral("width"), QStringLiteral("height"), QStringLiteral("frameRate"),
+                                   QStringLiteral("audioEnabled")}) {
+            if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
+        }
+        if (!state.isEmpty()) m_exportProgressInfo.insert("stage", state);
+        if (event.contains("visibleProgress")) {
+            m_exportProgress = qRound(event.value("visibleProgress").toDouble());
+            m_exportProgressInfo.insert("progressPercent", event.value("visibleProgress").toDouble());
+        } else if (state == "rendering" && event.contains("current") && event.value("total").toInt() > 0) {
             // Rendering is the dominant step, but validation still has to pass
             // before the UI is allowed to show completion.
             m_exportProgress = qBound(
@@ -566,6 +597,8 @@ void AppController::handleExportOutput()
         } else if (state == "validating") {
             m_exportProgress = qMax(m_exportProgress, 96);
         }
+        if (state == "finalizing") m_exportProgress = qMax(m_exportProgress, 97);
+        if (state == "validating") m_exportProgress = qMax(m_exportProgress, 99);
         if (event.contains("error")) {
             m_exportError = event.value("error").toString();
         }
@@ -594,7 +627,7 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         setStatus("Export cancelled.");
     } else if (exitStatus == QProcess::NormalExit && exitCode == 0) {
         m_exportProgress = 100;
-        m_exportState = QStringLiteral("finished");
+        m_exportState = QStringLiteral("complete");
         m_exportError.clear();
         setStatus("HEVC export finished and passed validation.");
     } else {
@@ -604,6 +637,8 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         }
         setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
     }
+    m_exportProgressInfo.insert("stage", m_exportState);
+    m_exportProgressInfo.insert("progressPercent", m_exportProgress);
     QFile::remove(m_exportCancelPath);
     m_exportProcess.reset();
     m_exportConfig.reset();

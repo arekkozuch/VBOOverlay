@@ -22,7 +22,8 @@ struct ExportSettings {
     bool audioEnabled = true;
     QString cancellationFilePath;
     std::function<void(const QString &state)> stateCallback;
-    std::function<bool(qsizetype currentFrame, qsizetype totalFrames)> progressCallback;
+    std::function<bool(qsizetype currentFrame, qsizetype totalFrames, double sourceTime)> progressCallback;
+    std::function<void(const QString &id, const QString &displayName)> encoderCallback;
 };
 
 struct ExportResult {

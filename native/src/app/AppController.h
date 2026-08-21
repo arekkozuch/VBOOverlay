@@ -38,6 +38,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QString exportError READ exportError NOTIFY exportChanged)
     Q_PROPERTY(QVariantMap exportSourceInfo READ exportSourceInfo NOTIFY exportChanged)
     Q_PROPERTY(QVariantMap exportMetrics READ exportMetrics NOTIFY exportChanged)
+    Q_PROPERTY(QVariantMap exportProgressInfo READ exportProgressInfo NOTIFY exportChanged)
+    Q_PROPERTY(bool exportProgressVisible READ exportProgressVisible NOTIFY exportChanged)
     Q_PROPERTY(QVariantMap syncCandidate READ syncCandidate NOTIFY syncCandidateChanged)
     Q_PROPERTY(QVariant speed READ speed NOTIFY liveValuesChanged)
     Q_PROPERTY(QVariant rpm READ rpm NOTIFY liveValuesChanged)
@@ -79,6 +81,8 @@ public:
     [[nodiscard]] QString exportError() const;
     [[nodiscard]] QVariantMap exportSourceInfo() const;
     [[nodiscard]] QVariantMap exportMetrics() const;
+    [[nodiscard]] QVariantMap exportProgressInfo() const;
+    [[nodiscard]] bool exportProgressVisible() const;
     [[nodiscard]] QVariantMap syncCandidate() const;
     [[nodiscard]] QVariant speed() const;
     [[nodiscard]] QVariant rpm() const;
@@ -121,6 +125,7 @@ public:
         double rangeStart,
         double rangeEnd);
     Q_INVOKABLE void cancelExport();
+    Q_INVOKABLE void dismissExportProgress();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
         int x, int y, int width, int height, int sidebarWidth, int videoHeight);
@@ -187,6 +192,8 @@ private:
     QString m_exportError;
     MediaInfo m_exportSourceInfo;
     QVariantMap m_exportMetrics;
+    QVariantMap m_exportProgressInfo;
+    bool m_exportProgressVisible = false;
     QVariantMap m_syncCandidate;
     QStringList m_analysisChannels;
     bool m_analysisVisible = true;

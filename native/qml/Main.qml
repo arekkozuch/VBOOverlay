@@ -533,13 +533,13 @@ ApplicationWindow {
 
     Popup {
         id: exportProgressPopup
-        visible: appController.exporting || appController.exportState === "cancelling"
+        visible: appController.exportProgressVisible
         modal: true
         focus: true
         closePolicy: Popup.NoAutoClose
         anchors.centerIn: parent
-        width: 360
-        height: 172
+        width: 500
+        height: exportDetails.checked ? 520 : 390
         background: Rectangle {
             radius: 14
             color: "#0d141d"
@@ -548,42 +548,93 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             anchors.fill: parent
             anchors.margins: 18
-            spacing: 10
+            spacing: 9
             Label {
                 text: {
-                    if (appController.exportState === "cancelling")
-                        return qsTr("Cancelling export…");
-                    if (appController.exportState === "starting")
-                        return qsTr("Preparing export…");
-                    if (appController.exportState === "rendering")
-                        return qsTr("Rendering telemetry…");
-                    if (appController.exportState === "encoding")
-                        return qsTr("Finalizing HEVC…");
-                    if (appController.exportState === "validating")
-                        return qsTr("Validating output…");
-                    return qsTr("Exporting HEVC…");
+                    const stage = appController.exportProgressInfo.stage || appController.exportState;
+                    if (stage === "complete") return qsTr("Export complete");
+                    if (stage === "failed") return qsTr("Export failed");
+                    if (stage === "cancelled") return qsTr("Export cancelled");
+                    return qsTr("Exporting video");
                 }
                 color: "#f2f6fb"
                 font.pixelSize: 17
                 font.weight: Font.DemiBold
             }
+            Label {
+                Layout.fillWidth: true
+                text: appController.exportProgressInfo.outputName || ""
+                color: "#aeb9c7"
+                elide: Text.ElideMiddle
+                font.pixelSize: 12
+            }
+            Label {
+                text: {
+                    const names = { "preparing": qsTr("Preparing"), "rendering": qsTr("Rendering & encoding"),
+                        "finalizing": qsTr("Finalizing"), "validating": qsTr("Validating"),
+                        "cancelling": qsTr("Cancelling"), "complete": qsTr("Complete"), "failed": qsTr("Failed") };
+                    return names[appController.exportProgressInfo.stage] || qsTr("Preparing");
+                }
+                color: "#55e6a5"
+                font.pixelSize: 14
+            }
             ProgressBar {
                 Layout.fillWidth: true
                 from: 0
                 to: 100
-                value: appController.exportProgress
+                value: Number(appController.exportProgressInfo.progressPercent || appController.exportProgress)
             }
             Label {
-                text: qsTr("%1%").arg(appController.exportProgress)
+                text: qsTr("%1%").arg(Number(appController.exportProgressInfo.progressPercent || appController.exportProgress).toFixed(1))
                 color: "#8b98a8"
                 font.pixelSize: 12
             }
+            Label {
+                Layout.fillWidth: true
+                text: window.formatTime(Number(appController.exportProgressInfo.sourceTime || 0) * 1000)
+                    + " / " + window.formatTime(Number(appController.exportProgressInfo.endTime || 0) * 1000)
+                    + "    ·    " + qsTr("Frame %1 / %2").arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
+                color: "#d8e0e9"
+                font.pixelSize: 12
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 3
+                Label { text: qsTr("Elapsed\n%1").arg(window.formatTime(Number(appController.exportProgressInfo.elapsedMilliseconds || 0))); color: "#aeb9c7" }
+                Label { text: qsTr("Remaining\n%1").arg(appController.exportProgressInfo.etaSeconds === undefined ? qsTr("Calculating…") : "~" + window.formatTime(Number(appController.exportProgressInfo.etaSeconds) * 1000)); color: "#aeb9c7" }
+                Label { text: qsTr("Speed\n%1 fps\n%2x realtime").arg(Number(appController.exportProgressInfo.throughputFps || 0).toFixed(1)).arg(Number(appController.exportProgressInfo.realtimeFactor || 0).toFixed(2)); color: "#aeb9c7" }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "HEVC · " + (appController.exportProgressInfo.encoderName || qsTr("Detecting encoder…"))
+                    + " · " + (appController.exportProgressInfo.width || "") + "×" + (appController.exportProgressInfo.height || "")
+                    + " · " + Number(appController.exportProgressInfo.frameRate || 0).toFixed(3) + " fps\n" + (appController.exportProgressInfo.audioLabel || "")
+                color: "#8b98a8"; font.pixelSize: 11
+            }
+            FeCheckBox {
+                id: exportDetails
+                text: qsTr("Details")
+                checked: false
+            }
+            Label {
+                visible: exportDetails.checked
+                Layout.fillWidth: true
+                text: qsTr("Source time: %1\nTelemetry time: %2\nSync offset: %3 s\nRendered: %4 / %5\nEncoder ID: %6\nOutput: %7")
+                    .arg(window.formatTime(Number(appController.exportProgressInfo.sourceTime || 0) * 1000))
+                    .arg(window.formatTime(Number(appController.exportProgressInfo.telemetryTime || 0) * 1000))
+                    .arg(Number(appController.exportProgressInfo.syncOffset || 0).toFixed(3))
+                    .arg(appController.exportProgressInfo.renderedFrames || 0).arg(appController.exportProgressInfo.totalFrames || 0)
+                    .arg(appController.exportProgressInfo.encoderId || "—").arg(appController.exportProgressInfo.outputPath || "")
+                color: "#9eabba"; font.pixelSize: 11; wrapMode: Text.WrapAnywhere
+            }
+            Label { visible: appController.exportState === "cancelling"; text: qsTr("Finishing current operation and cleaning up."); color: "#ffc66d"; font.pixelSize: 11 }
+            Label { visible: appController.exportState === "failed"; text: appController.exportError; color: "#ff8a92"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Item { Layout.fillHeight: true }
             FeButton {
                 Layout.alignment: Qt.AlignRight
-                text: appController.exportState === "cancelling" ? qsTr("Cancelling…") : qsTr("Cancel")
+                text: appController.exporting ? (appController.exportState === "cancelling" ? qsTr("Cancelling…") : qsTr("Cancel")) : qsTr("Done")
                 enabled: appController.exportState !== "cancelling"
-                onClicked: appController.cancelExport()
+                onClicked: { if (appController.exporting) appController.cancelExport(); else appController.dismissExportProgress(); }
             }
         }
     }

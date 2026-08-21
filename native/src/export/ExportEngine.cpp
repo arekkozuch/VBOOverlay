@@ -108,6 +108,12 @@ ExportResult ExportEngine::exportVideo(
             result.error = QStringLiteral("No requested HEVC encoder is available in this FFmpeg build.");
             return result;
         }
+        const auto selected = std::find_if(encoders.cbegin(), encoders.cend(), [&encoder](const auto &item) {
+            return item.id == encoder;
+        });
+        if (settings.encoderCallback && selected != encoders.cend()) {
+            settings.encoderCallback(selected->id, selected->displayName);
+        }
         QProcess ffmpeg;
         const QString duration = QString::number(end - start, 'f', 9);
         const QString size = QStringLiteral("%1x%2").arg(outputSize.width()).arg(outputSize.height());
@@ -171,7 +177,8 @@ ExportResult ExportEngine::exportVideo(
                 return result;
             }
             ++result.renderedFrames;
-            if (settings.progressCallback && !settings.progressCallback(result.renderedFrames, frames)) {
+            if (settings.progressCallback
+                && !settings.progressCallback(result.renderedFrames, frames, presentationTime)) {
                 result.cancelled = true;
                 ffmpeg.closeWriteChannel();
                 ffmpeg.terminate();

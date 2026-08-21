@@ -1,6 +1,7 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "export/EncoderDetector.h"
 #include "export/ExportEngine.h"
+#include "export/ExportProgress.h"
 #include "export/MediaProbe.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
@@ -48,6 +49,7 @@ private slots:
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
     void preservesAbsoluteExportTimestamps();
+    void estimatesExportProgress();
     void syncsOptionalRealRecording();
 };
 
@@ -488,6 +490,24 @@ void TelemetryTests::preservesAbsoluteExportTimestamps()
     context.setTime(125.0);
     QVERIFY(qAbs(context.telemetryTime() - 215.203) < 0.000001);
     QVERIFY(qAbs(context.telemetryValue("rpm").toDouble() - 5270.0) < 0.001);
+}
+
+void TelemetryTests::estimatesExportProgress()
+{
+    ExportProgressEstimator estimator;
+    const MediaRational rate{60, 1};
+    const auto early = estimator.update(1, 600, 100, rate);
+    QVERIFY(!early.etaAvailable);
+    const auto steady = estimator.update(100, 600, 1'100, rate);
+    QVERIFY(steady.etaAvailable);
+    QVERIFY(qAbs(steady.throughputFps - 99.0) < 0.1);
+    QVERIFY(qAbs(steady.realtimeFactor - 1.65) < 0.01);
+    QVERIFY(steady.etaSeconds > 5.0 && steady.etaSeconds < 6.0);
+    QCOMPARE(ExportProgressEstimator::stageProgress("rendering", 1.0), 95.0);
+    QCOMPARE(ExportProgressEstimator::stageProgress("finalizing", 0.0), 97.0);
+    QCOMPARE(ExportProgressEstimator::stageProgress("validating", 1.0), 99.0);
+    QCOMPARE(ExportProgressEstimator::stageProgress("complete", 0.0), 100.0);
+    QCOMPARE(ExportProgressEstimator::stageProgress("cancelled", 1.0), 0.0);
 }
 
 void TelemetryTests::decodesGps9Gpmf()

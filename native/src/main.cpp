@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 #include "export/TelemetryFrameRenderer.h"
 #include "export/ExportEngine.h"
+#include "export/ExportProgress.h"
 #include "telemetry/VboParser.h"
 #include "telemetry/TrackGeometry.h"
 #include "widgets/WidgetModel.h"
@@ -8,6 +9,8 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QFile>
+#include <QElapsedTimer>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlApplicationEngine>
@@ -112,29 +115,54 @@ int exportWorker(const QString &configPath)
         settings.quality = config.value("quality").toString("high");
         settings.audioEnabled = config.value("audioEnabled").toBool(true);
         settings.cancellationFilePath = config.value("cancelPath").toString();
-        writeExportEvent({{"state", "rendering"}, {"current", 0},
-                          {"total", static_cast<qint64>(FlappedEar::ExportEngine::frameCount(
-                                        settings.startTime, settings.endTime, settings.frameRate))}});
-        settings.progressCallback = [](const qsizetype current, const qsizetype total) {
-            writeExportEvent(
-                {{"state", "rendering"}, {"current", static_cast<qint64>(current)},
-                 {"total", static_cast<qint64>(total)}});
+        const qsizetype totalFrames = FlappedEar::ExportEngine::frameCount(
+            settings.startTime, settings.endTime, settings.frameRate);
+        FlappedEar::ExportProgressEstimator progress;
+        QElapsedTimer elapsed;
+        elapsed.start();
+        qint64 lastUpdate = -125;
+        writeExportEvent({{"state", "preparing"}, {"sourceTime", settings.startTime},
+                          {"endTime", settings.endTime}, {"totalFrames", static_cast<qint64>(totalFrames)},
+                          {"width", input.videoSize.width()}, {"height", input.videoSize.height()},
+                          {"frameRate", settings.frameRate.value()}, {"audioEnabled", settings.audioEnabled}});
+        settings.progressCallback = [&](const qsizetype current, const qsizetype total, const double sourceTime) {
+            const qint64 elapsedMilliseconds = elapsed.elapsed();
+            if (current != total && elapsedMilliseconds - lastUpdate < 125) return true;
+            lastUpdate = elapsedMilliseconds;
+            const auto snapshot = progress.update(current, total, elapsedMilliseconds, settings.frameRate);
+            QJsonObject event{{"state", "rendering"}, {"renderedFrames", static_cast<qint64>(current)},
+                              {"totalFrames", static_cast<qint64>(total)}, {"sourceTime", sourceTime},
+                              {"endTime", settings.endTime}, {"telemetryTime", FlappedEar::videoToTelemetryTime(sourceTime, sync)},
+                              {"elapsedMilliseconds", elapsedMilliseconds}, {"visibleProgress", snapshot.visiblePercent},
+                              {"outputBytes", QFileInfo(settings.outputPath).size()}};
+            if (snapshot.etaAvailable) {
+                event.insert("throughputFps", snapshot.throughputFps);
+                event.insert("realtimeFactor", snapshot.realtimeFactor);
+                event.insert("etaSeconds", snapshot.etaSeconds);
+            }
+            writeExportEvent(event);
             return true;
         };
         settings.stateCallback = [](const QString &state) {
-            writeExportEvent({{"state", state}});
+            const QString progressState = state == "encoding" ? QStringLiteral("finalizing")
+                : state == "validating" ? QStringLiteral("validating")
+                                      : QStringLiteral("preparing");
+            writeExportEvent({{"state", progressState}});
+        };
+        settings.encoderCallback = [](const QString &id, const QString &name) {
+            writeExportEvent({{"state", "preparing"}, {"encoderId", id}, {"encoderName", name}});
         };
         const FlappedEar::ExportResult result = FlappedEar::ExportEngine::exportVideo(settings, renderer);
         if (result.cancelled) {
-            writeExportEvent({{"state", "cancelled"}});
+            writeExportEvent({{"state", "cancelled"}, {"elapsedMilliseconds", elapsed.elapsed()}});
             return EXIT_SUCCESS;
         }
         if (!result.success) {
             writeExportEvent({{"state", "failed"}, {"error", result.error}});
             return EXIT_FAILURE;
         }
-        writeExportEvent({{"state", "finished"}, {"current", static_cast<qint64>(result.renderedFrames)},
-                          {"total", static_cast<qint64>(result.renderedFrames)},
+        writeExportEvent({{"state", "complete"}, {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
+                          {"totalFrames", static_cast<qint64>(result.renderedFrames)},
                           {"elapsedMilliseconds", result.elapsedMilliseconds},
                           {"renderMilliseconds", result.renderMilliseconds},
                           {"renderNanoseconds", result.renderNanoseconds},
