@@ -69,35 +69,66 @@ QStringList uniqueNames(const QStringList &input)
     return output;
 }
 
-std::optional<double> parseClockTime(const QString &value)
+enum class TimestampFormat { RelativeSeconds, Clock };
+
+struct ParsedTimestamp {
+    double seconds = 0.0;
+    TimestampFormat format = TimestampFormat::RelativeSeconds;
+};
+
+// Clock syntax is deliberately recognized from the original field text. In
+// particular, 003059.500 is 00:30:59.500, not 3,059.5 relative seconds.
+std::optional<ParsedTimestamp> parseTimestamp(const QString &value)
 {
+    const QString text = value.trimmed();
+    if (text.contains(':')) {
+        static const QRegularExpression colonClock(
+            "^(\\d{1,2}):(\\d{2}):(\\d{2}(?:\\.\\d+)?)$");
+        const QRegularExpressionMatch match = colonClock.match(text);
+        if (!match.hasMatch()) {
+            return std::nullopt;
+        }
+        bool secondsValid = false;
+        const int hours = match.captured(1).toInt();
+        const int minutes = match.captured(2).toInt();
+        const double seconds = match.captured(3).toDouble(&secondsValid);
+        if (!secondsValid || !std::isfinite(seconds) || hours < 0 || hours >= 24
+            || minutes < 0 || minutes >= 60 || seconds < 0.0 || seconds >= 60.0) {
+            return std::nullopt;
+        }
+        return ParsedTimestamp{hours * 3600.0 + minutes * 60.0 + seconds,
+                               TimestampFormat::Clock};
+    }
+
+    // A six-digit integer component is always compact HHMMSS syntax. Keep
+    // this check textual so leading-zero timestamps before 01:00 are handled.
+    static const QRegularExpression compactClockCandidate("^\\d{6}(?:\\..*)?$");
+    if (compactClockCandidate.match(text).hasMatch()) {
+        static const QRegularExpression compactClock(
+            "^(\\d{2})(\\d{2})(\\d{2})(?:\\.(\\d+))?$");
+        const QRegularExpressionMatch match = compactClock.match(text);
+        if (!match.hasMatch()) {
+            return std::nullopt;
+        }
+        const int hours = match.captured(1).toInt();
+        const int minutes = match.captured(2).toInt();
+        const int wholeSeconds = match.captured(3).toInt();
+        const QString fraction = match.captured(4);
+        const double seconds = wholeSeconds + (fraction.isEmpty()
+            ? 0.0 : QStringLiteral("0.%1").arg(fraction).toDouble());
+        if (!std::isfinite(seconds) || hours >= 24 || minutes >= 60 || seconds >= 60.0) {
+            return std::nullopt;
+        }
+        return ParsedTimestamp{hours * 3600.0 + minutes * 60.0 + seconds,
+                               TimestampFormat::Clock};
+    }
+
     bool valid = false;
-    const double numeric = value.toDouble(&valid);
+    const double numeric = text.toDouble(&valid);
     if (!valid || !std::isfinite(numeric)) {
         return std::nullopt;
     }
-    if (!value.contains(':') && numeric >= 10000.0 && numeric < 240000.0) {
-        const int hours = static_cast<int>(numeric / 10000.0);
-        const int minutes = static_cast<int>((numeric - hours * 10000.0) / 100.0);
-        return hours * 3600.0 + minutes * 60.0 + std::fmod(numeric, 100.0);
-    }
-    if (value.contains(':')) {
-        const QStringList pieces = value.split(':');
-        if (pieces.size() != 3) {
-            return std::nullopt;
-        }
-        bool hoursValid = false;
-        bool minutesValid = false;
-        bool secondsValid = false;
-        const double hours = pieces[0].toDouble(&hoursValid);
-        const double minutes = pieces[1].toDouble(&minutesValid);
-        const double seconds = pieces[2].toDouble(&secondsValid);
-        if (hoursValid && minutesValid && secondsValid) {
-            return hours * 3600.0 + minutes * 60.0 + seconds;
-        }
-        return std::nullopt;
-    }
-    return numeric;
+    return ParsedTimestamp{numeric, TimestampFormat::RelativeSeconds};
 }
 
 double normalizeCoordinate(const QString &name, const double value)
@@ -228,32 +259,76 @@ TelemetrySession VboParser::parse(QStringView text)
     QVector<QVector<float>> rawValues(names.size());
     QVector<double> rawTimes;
     std::optional<double> origin;
+    std::optional<double> previousAbsoluteTime;
+    std::optional<double> previousClockTime;
+    double clockDayOffset = 0.0;
+    constexpr double lateDayThreshold = 23.0 * 3600.0;
+    constexpr double earlyDayThreshold = 1.0 * 3600.0;
+    constexpr qsizetype warningLimit = 200;
+    qsizetype omittedWarnings = 0;
+    const auto appendWarning = [&session, &omittedWarnings](QString warning) {
+        if (session.warnings.size() < warningLimit) {
+            session.warnings.append(std::move(warning));
+        } else {
+            ++omittedWarnings;
+        }
+    };
     for (qsizetype rowIndex = 0; rowIndex < dataSection.size(); ++rowIndex) {
         const QStringList cells = splitRow(dataSection[rowIndex]);
         if (cells.size() < names.size()) {
-            session.warnings.append(QStringLiteral("Row %1: missing %2 value(s).")
-                                        .arg(rowIndex + 1)
-                                        .arg(names.size() - cells.size()));
+            appendWarning(QStringLiteral("Row %1: missing %2 value(s).")
+                              .arg(rowIndex + 1)
+                              .arg(names.size() - cells.size()));
         }
         if (cells.size() > names.size()) {
-            session.warnings.append(QStringLiteral("Row %1: ignored %2 extra value(s).")
-                                        .arg(rowIndex + 1)
-                                        .arg(cells.size() - names.size()));
+            appendWarning(QStringLiteral("Row %1: ignored %2 extra value(s).")
+                              .arg(rowIndex + 1)
+                              .arg(cells.size() - names.size()));
         }
-        const auto parsedTime = timeIndex >= 0 && timeIndex < cells.size()
-            ? parseClockTime(cells[timeIndex])
-            : std::optional<double>(rowIndex);
+        const auto parsedTime = timeIndex >= 0
+            ? (timeIndex < cells.size() ? parseTimestamp(cells[timeIndex])
+                                        : std::optional<ParsedTimestamp>{})
+            : std::optional<ParsedTimestamp>(
+                  ParsedTimestamp{static_cast<double>(rowIndex), TimestampFormat::RelativeSeconds});
         if (!parsedTime) {
-            session.warnings.append(QStringLiteral("Row %1: invalid timestamp; row skipped.").arg(rowIndex + 1));
+            const QString text = timeIndex >= 0 && timeIndex < cells.size() ? cells[timeIndex] : QString();
+            appendWarning(QStringLiteral("Row %1: invalid timestamp \"%2\"; row skipped.")
+                              .arg(rowIndex + 1)
+                              .arg(text));
             continue;
         }
+        double absoluteTime = parsedTime->seconds;
+        if (parsedTime->format == TimestampFormat::Clock) {
+            if (previousClockTime && previousAbsoluteTime
+                && parsedTime->seconds < *previousClockTime
+                && *previousClockTime >= lateDayThreshold
+                && parsedTime->seconds <= earlyDayThreshold) {
+                clockDayOffset += 24.0 * 3600.0;
+                appendWarning(QStringLiteral("Row %1: midnight rollover detected.").arg(rowIndex + 1));
+            }
+            absoluteTime += clockDayOffset;
+        }
         if (!origin) {
-            origin = *parsedTime;
+            origin = absoluteTime;
         }
-        double timestamp = *parsedTime - *origin;
-        if (timestamp < 0.0) {
-            timestamp += 24.0 * 3600.0;
+        if (previousAbsoluteTime) {
+            if (absoluteTime == *previousAbsoluteTime) {
+                // Keep the first row and skip later duplicates so every
+                // emitted channel remains aligned on strictly increasing time.
+                appendWarning(QStringLiteral("Row %1: duplicate timestamp %2; later row skipped.")
+                                  .arg(rowIndex + 1)
+                                  .arg(absoluteTime - *origin, 0, 'f', 3));
+                continue;
+            }
+            if (absoluteTime < *previousAbsoluteTime) {
+                appendWarning(QStringLiteral("Row %1: timestamp moved backward from %2 to %3; row skipped.")
+                                  .arg(rowIndex + 1)
+                                  .arg(*previousAbsoluteTime - *origin, 0, 'f', 3)
+                                  .arg(absoluteTime - *origin, 0, 'f', 3));
+                continue;
+            }
         }
+        const double timestamp = absoluteTime - *origin;
         rawTimes.append(timestamp);
         for (qsizetype column = 0; column < names.size(); ++column) {
             bool valid = false;
@@ -262,9 +337,21 @@ TelemetrySession VboParser::parse(QStringView text)
                                          ? static_cast<float>(normalizeCoordinate(names[column], parsed))
                                          : std::numeric_limits<float>::quiet_NaN());
         }
+        previousAbsoluteTime = absoluteTime;
+        previousClockTime = parsedTime->format == TimestampFormat::Clock
+            ? std::optional<double>(parsedTime->seconds) : std::nullopt;
+    }
+    if (omittedWarnings > 0) {
+        session.warnings.append(
+            QStringLiteral("… %1 additional parser warnings omitted.").arg(omittedWarnings));
     }
     if (rawTimes.isEmpty()) {
         throw VboParseError("VBO contains no valid timestamped data rows.");
+    }
+    for (qsizetype index = 1; index < rawTimes.size(); ++index) {
+        if (!(rawTimes[index] > rawTimes[index - 1])) {
+            throw VboParseError("VBO parser produced non-monotonic timestamps.");
+        }
     }
 
     for (qsizetype column = 0; column < names.size(); ++column) {

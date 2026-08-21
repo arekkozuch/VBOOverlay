@@ -38,6 +38,8 @@ private slots:
     void rejectsMissingSections();
     void interpolatesByTime();
     void samplesTelemetryRanges();
+    void parsesTextFirstVboTimeFormats();
+    void keepsVboTimestampsStrictlyMonotonic();
     void convertsArcMinuteCoordinates();
     void parsesOptionalRealVbo();
     void persistsWidgetScenes();
@@ -469,6 +471,62 @@ void TelemetryTests::samplesTelemetryRanges()
     QVERIFY(session.sampledRange("speed", 0.0, 1.0, 1).isEmpty());
 }
 
+void TelemetryTests::parsesTextFirstVboTimeFormats()
+{
+    const auto timestampsFor = [](QStringView rows) {
+        return VboParser::parse(QStringLiteral("[column names]\ntime speed\n[data]\n")
+                                    + rows.toString())
+            .channels.value(QStringLiteral("speed")).timestamps;
+    };
+    const auto verifyTimes = [](const QVector<double> &actual, const QVector<double> &expected) {
+        QCOMPARE(actual.size(), expected.size());
+        for (qsizetype index = 0; index < expected.size(); ++index) {
+            QVERIFY2(qAbs(actual[index] - expected[index]) < 0.000001,
+                     qPrintable(QStringLiteral("timestamp %1: %2 != %3")
+                                    .arg(index).arg(actual[index], 0, 'f', 6)
+                                    .arg(expected[index], 0, 'f', 6)));
+        }
+    };
+
+    verifyTimes(timestampsFor(u"00:00:00.000 1\n00:00:00.100 2\n00:00:00.200 3"),
+                {0.0, 0.1, 0.2});
+    verifyTimes(timestampsFor(u"003059.500 1\n003100.500 2\n003101.500 3"),
+                {0.0, 1.0, 2.0});
+    verifyTimes(timestampsFor(u"091428.380 1\n091428.480 2\n091428.580 3"),
+                {0.0, 0.1, 0.2});
+    verifyTimes(timestampsFor(u"0 1\n0.1 2\n0.2 3\n10.5 4"), {0.0, 0.1, 0.2, 10.5});
+}
+
+void TelemetryTests::keepsVboTimestampsStrictlyMonotonic()
+{
+    const TelemetrySession midnight = VboParser::parse(
+        u"[column names]\ntime speed rpm\n[data]\n"
+        "235959.800 1 10\n235959.900 2 20\n000000.000 3 30\n000000.100 4 40");
+    const TelemetryChannel midnightSpeed = midnight.channels.value(QStringLiteral("speed"));
+    QCOMPARE(midnightSpeed.timestamps.size(), 4);
+    QVERIFY(qAbs(midnightSpeed.timestamps[0]) < 0.000001);
+    QVERIFY(qAbs(midnightSpeed.timestamps[1] - 0.1) < 0.000001);
+    QVERIFY(qAbs(midnightSpeed.timestamps[2] - 0.2) < 0.000001);
+    QVERIFY(qAbs(midnightSpeed.timestamps[3] - 0.3) < 0.000001);
+    QCOMPARE(midnight.channels.value(QStringLiteral("rpm")).timestamps.size(), 4);
+    QVERIFY(std::any_of(midnight.warnings.cbegin(), midnight.warnings.cend(), [](const QString &warning) {
+        return warning.contains(QStringLiteral("midnight rollover"));
+    }));
+
+    const TelemetrySession guarded = VboParser::parse(
+        u"[column names]\ntime speed rpm\n[data]\n"
+        "120000.000 1 10\n120000.100 2 20\n120000.100 3 30\n115959.900 4 40\n"
+        "126199 5 50\n246000 6 60\n12:61:00 7 70\n12:00:60 8 80\n120000.200 9 90");
+    const TelemetryChannel speed = guarded.channels.value(QStringLiteral("speed"));
+    QCOMPARE(speed.timestamps.size(), 3);
+    QCOMPARE(speed.values, QVector<float>({1.0F, 2.0F, 9.0F}));
+    QCOMPARE(guarded.channels.value(QStringLiteral("rpm")).values.size(), speed.timestamps.size());
+    for (qsizetype index = 1; index < speed.timestamps.size(); ++index) {
+        QVERIFY(speed.timestamps[index] > speed.timestamps[index - 1]);
+    }
+    QVERIFY(guarded.warnings.size() >= 6);
+}
+
 void TelemetryTests::convertsArcMinuteCoordinates()
 {
     const auto session = VboParser::parse(
@@ -484,11 +542,13 @@ void TelemetryTests::parsesOptionalRealVbo()
         QSKIP("FLAPPEDEAR_REAL_VBO is not set");
     }
     const auto session = VboParser::parseFile(path);
-    QVERIFY(session.sampleCount > 0);
-    QVERIFY(session.duration > 0.0);
-    QVERIFY(!session.channels.isEmpty());
-    QVERIFY(session.aliases.contains("speed"));
+    QCOMPARE(session.sampleCount, 32'718);
+    QCOMPARE(session.channels.size(), 49);
+    QVERIFY(qAbs(session.duration - 3'271.7) < 0.001);
+    QVERIFY(session.warnings.isEmpty());
+    QCOMPARE(session.aliases.value("speed"), QStringLiteral("velocity"));
     QVERIFY(session.aliases.contains("rpm"));
+    QVERIFY(qAbs(session.valueAt("speed", 0.0).value() - 0.11) < 0.001);
 }
 
 void TelemetryTests::persistsWidgetScenes()
