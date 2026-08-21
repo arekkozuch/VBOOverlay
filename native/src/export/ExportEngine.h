@@ -49,6 +49,7 @@ struct ExportSettings {
 struct ExportResult {
     bool success = false;
     QString error;
+    QString validationWarning;
     MediaInfo mediaInfo;
     qsizetype generatedFrames = 0;
     qsizetype renderedFrames = 0;

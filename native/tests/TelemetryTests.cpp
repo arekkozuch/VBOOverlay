@@ -48,6 +48,9 @@ private slots:
     void gatesWeakSyncCandidates();
     void rendersTelemetryAtExplicitTime();
     void probesMediaInfoJson();
+    void parsesMediaSummaryJson();
+    void rejectsInvalidMediaProbeJson();
+    void classifiesMediaProbeProcessFailures();
     void detectsHevcEncoders();
     void calculatesTimestampDrivenExportFrames();
     void preservesAbsoluteExportTimestamps();
@@ -460,6 +463,93 @@ void TelemetryTests::probesMediaInfoJson()
     QVERIFY(!info.likelyVariableFrameRate);
 }
 
+void TelemetryTests::parsesMediaSummaryJson()
+{
+    const QByteArray json = R"({"format":{"duration":"120.003000"},"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","width":3840,"height":2160,"r_frame_rate":"60000/1001","avg_frame_rate":"60000/1001"},{"index":1,"codec_type":"audio","codec_name":"aac"}]})";
+    const MediaInfo info = MediaProbe::parseJson(json, "/summary.mp4");
+    QCOMPARE(info.videoCodec, QStringLiteral("hevc"));
+    QCOMPARE(info.videoSize, QSize(3840, 2160));
+    QVERIFY(qAbs(info.duration - 120.003) < 0.0001);
+    QVERIFY(qAbs(info.averageFrameRate.value() - 59.94005994) < 0.00001);
+    QCOMPARE(info.audioCodecs, QStringList({QStringLiteral("aac")}));
+
+    const QByteArray silentJson = R"({"format":{"duration":"12.000000"},"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","width":1920,"height":1080,"r_frame_rate":"30/1","avg_frame_rate":"30/1"}]})";
+    const MediaInfo silentInfo = MediaProbe::parseJson(silentJson, "/silent.mp4");
+    QVERIFY(silentInfo.audioCodecs.isEmpty());
+}
+
+void TelemetryTests::rejectsInvalidMediaProbeJson()
+{
+    try {
+        static_cast<void>(MediaProbe::parseJson("not-json", "/invalid.mp4"));
+        QFAIL("Invalid ffprobe JSON should throw.");
+    } catch (const std::runtime_error &error) {
+        QCOMPARE(QString::fromUtf8(error.what()), QStringLiteral("ffprobe returned invalid JSON."));
+    }
+}
+
+void TelemetryTests::classifiesMediaProbeProcessFailures()
+{
+    const auto errorFrom = [](const std::function<void()> &operation) {
+        try {
+            operation();
+        } catch (const std::runtime_error &error) {
+            return QString::fromUtf8(error.what());
+        }
+        return QString();
+    };
+
+    const QString startError = errorFrom([] {
+        static_cast<void>(MediaProbe::probe(
+            "/fixture.mp4", "/definitely/missing/flappedear-ffprobe", false, 100));
+    });
+    QVERIFY2(startError.startsWith("Could not start ffprobe while probing: /fixture.mp4"),
+             qPrintable(startError));
+
+#ifdef Q_OS_UNIX
+    const QString exitError = errorFrom([] {
+        static_cast<void>(MediaProbe::probe("/fixture.mp4", "/usr/bin/false", false, 1'000));
+    });
+    QVERIFY2(exitError.contains("ffprobe exited with code 1 while probing: /fixture.mp4"),
+             qPrintable(exitError));
+    QVERIFY2(exitError.contains("stderr: <no stderr output>"), qPrintable(exitError));
+
+    const QString jsonError = errorFrom([] {
+        static_cast<void>(MediaProbe::probe("/fixture.mp4", "/usr/bin/true", false, 1'000));
+    });
+    QCOMPARE(jsonError, QStringLiteral("ffprobe returned invalid JSON."));
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString slowProbePath = directory.filePath("slow-ffprobe");
+    QFile slowProbe(slowProbePath);
+    QVERIFY(slowProbe.open(QIODevice::WriteOnly));
+    QVERIFY(slowProbe.write("#!/bin/sh\nwhile :; do :; done\n") > 0);
+    slowProbe.close();
+    QVERIFY(slowProbe.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                     | QFileDevice::ExeOwner));
+    const QString timeoutError = errorFrom([&slowProbePath] {
+        static_cast<void>(MediaProbe::probe("/fixture.mp4", slowProbePath, false, 10));
+    });
+    QVERIFY2(timeoutError.startsWith("ffprobe timed out after 0.010 seconds while probing: /fixture.mp4"),
+             qPrintable(timeoutError));
+    QVERIFY2(timeoutError.contains("stderr: <no stderr output>"), qPrintable(timeoutError));
+
+    const QString crashingProbePath = directory.filePath("crashing-ffprobe");
+    QFile crashingProbe(crashingProbePath);
+    QVERIFY(crashingProbe.open(QIODevice::WriteOnly));
+    QVERIFY(crashingProbe.write("#!/bin/sh\nkill -SEGV $$\n") > 0);
+    crashingProbe.close();
+    QVERIFY(crashingProbe.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                         | QFileDevice::ExeOwner));
+    const QString crashError = errorFrom([&crashingProbePath] {
+        static_cast<void>(MediaProbe::probe("/fixture.mp4", crashingProbePath, false, 1'000));
+    });
+    QVERIFY2(crashError.startsWith("ffprobe crashed while probing: /fixture.mp4"),
+             qPrintable(crashError));
+#endif
+}
+
 void TelemetryTests::detectsHevcEncoders()
 {
     const QString output = " V....D hevc_videotoolbox Apple VideoToolbox\n V....D libx265 x265\n";
@@ -566,6 +656,11 @@ void TelemetryTests::composesNonZeroExportRangeWithZeroBasedOutput()
     QCOMPARE(outputInfo.videoFrameCount, qsizetype(exportFrames));
     QVERIFY(qAbs(outputInfo.duration - 5.0) < 0.05);
     QVERIFY(!outputInfo.audioCodecs.isEmpty());
+    const MediaInfo summaryInfo = MediaProbe::probeSummary(composed);
+    QCOMPARE(summaryInfo.videoCodec, QStringLiteral("ffv1"));
+    QCOMPARE(summaryInfo.videoSize, QSize(width, height));
+    QVERIFY(qAbs(summaryInfo.duration - 5.0) < 0.05);
+    QVERIFY(!summaryInfo.audioCodecs.isEmpty());
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", composed, "-f", "rawvideo",
                "-pixel_format", "rgba", decoded});
     QFile decodedFile(decoded);

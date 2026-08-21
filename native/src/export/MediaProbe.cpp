@@ -2,6 +2,7 @@
 
 #include "export/FfmpegTools.h"
 
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,6 +10,78 @@
 #include <stdexcept>
 
 namespace FlappedEar {
+
+namespace {
+
+constexpr int metadataProbeTimeoutMilliseconds = 30'000;
+constexpr int frameCountProbeTimeoutMilliseconds = 300'000;
+constexpr int processShutdownTimeoutMilliseconds = 1'000;
+
+QString stderrDiagnostic(const QByteArray &stderrOutput)
+{
+    const QString text = QString::fromUtf8(stderrOutput).trimmed();
+    return text.isEmpty() ? QStringLiteral("<no stderr output>") : text;
+}
+
+QString secondsText(const qint64 milliseconds)
+{
+    return QString::number(milliseconds / 1'000.0, 'f', milliseconds >= 1'000 ? 1 : 3);
+}
+
+MediaInfo runProbe(
+    const QString &path,
+    const QString &requestedFfprobePath,
+    const QStringList &arguments,
+    const int timeoutMilliseconds)
+{
+    const QString executable = requestedFfprobePath.isEmpty()
+        ? FfmpegTools::ffprobePath()
+        : requestedFfprobePath;
+    if (executable.isEmpty()) {
+        throw std::runtime_error(FfmpegTools::missingToolsMessage(false).toStdString());
+    }
+
+    QProcess process;
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    QElapsedTimer elapsed;
+    elapsed.start();
+    process.start(executable, arguments);
+    if (!process.waitForStarted()) {
+        throw std::runtime_error(
+            QStringLiteral("Could not start ffprobe while probing: %1 (%2)")
+                .arg(path, process.errorString()).toStdString());
+    }
+    if (!process.waitForFinished(timeoutMilliseconds)) {
+        process.terminate();
+        if (!process.waitForFinished(processShutdownTimeoutMilliseconds)) {
+            process.kill();
+            process.waitForFinished();
+        }
+        const QByteArray stdoutOutput = process.readAllStandardOutput();
+        const QByteArray stderrOutput = process.readAllStandardError();
+        throw std::runtime_error(
+            QStringLiteral("ffprobe timed out after %1 seconds while probing: %2 "
+                           "(elapsed %3 seconds, stdout %4 bytes). stderr: %5")
+                .arg(secondsText(timeoutMilliseconds), path, secondsText(elapsed.elapsed()),
+                     QString::number(stdoutOutput.size()), stderrDiagnostic(stderrOutput)).toStdString());
+    }
+
+    const QByteArray stdoutOutput = process.readAllStandardOutput();
+    const QByteArray stderrOutput = process.readAllStandardError();
+    if (process.exitStatus() != QProcess::NormalExit) {
+        throw std::runtime_error(
+            QStringLiteral("ffprobe crashed while probing: %1. stderr: %2")
+                .arg(path, stderrDiagnostic(stderrOutput)).toStdString());
+    }
+    if (process.exitCode() != 0) {
+        throw std::runtime_error(
+            QStringLiteral("ffprobe exited with code %1 while probing: %2. stderr: %3")
+                .arg(process.exitCode()).arg(path, stderrDiagnostic(stderrOutput)).toStdString());
+    }
+    return MediaProbe::parseJson(stdoutOutput, path);
+}
+
+} // namespace
 
 double MediaRational::value() const
 {
@@ -18,30 +91,33 @@ double MediaRational::value() const
 bool MediaRational::isValid() const { return numerator > 0 && denominator > 0; }
 
 MediaInfo MediaProbe::probe(
-    const QString &path, const QString &requestedFfprobePath, const bool countVideoFrames)
+    const QString &path,
+    const QString &requestedFfprobePath,
+    const bool countVideoFrames,
+    const int timeoutMilliseconds)
 {
-    const QString executable = requestedFfprobePath.isEmpty()
-        ? FfmpegTools::ffprobePath()
-        : requestedFfprobePath;
-    if (executable.isEmpty()) {
-        throw std::runtime_error(FfmpegTools::missingToolsMessage(false).toStdString());
-    }
-    QProcess process;
     QStringList arguments{"-v", "error", "-print_format", "json"};
     if (countVideoFrames) {
         arguments.append("-count_frames");
     }
     arguments.append({"-show_format", "-show_streams", path});
-    process.start(executable, arguments);
-    if (!process.waitForStarted()) {
-        throw std::runtime_error("Could not start ffprobe.");
-    }
-    if (!process.waitForFinished(30'000) || process.exitStatus() != QProcess::NormalExit
-        || process.exitCode() != 0) {
-        throw std::runtime_error(
-            QStringLiteral("ffprobe failed: %1").arg(QString::fromUtf8(process.readAllStandardError())).toStdString());
-    }
-    return parseJson(process.readAllStandardOutput(), path);
+    const int effectiveTimeout = timeoutMilliseconds >= 0
+        ? timeoutMilliseconds
+        : (countVideoFrames ? frameCountProbeTimeoutMilliseconds : metadataProbeTimeoutMilliseconds);
+    return runProbe(path, requestedFfprobePath, arguments, effectiveTimeout);
+}
+
+MediaInfo MediaProbe::probeSummary(
+    const QString &path, const QString &requestedFfprobePath, const int timeoutMilliseconds)
+{
+    const QStringList arguments{
+        "-v", "error",
+        "-show_entries",
+        "format=duration:stream=index,codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate",
+        "-of", "json",
+        path,
+    };
+    return runProbe(path, requestedFfprobePath, arguments, timeoutMilliseconds);
 }
 
 MediaInfo MediaProbe::parseJson(const QByteArray &json, const QString &path)

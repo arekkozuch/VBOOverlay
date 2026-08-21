@@ -31,7 +31,12 @@ struct MediaInfo {
 class MediaProbe final {
 public:
     [[nodiscard]] static MediaInfo probe(
-        const QString &path, const QString &ffprobePath = {}, bool countVideoFrames = false);
+        const QString &path,
+        const QString &ffprobePath = {},
+        bool countVideoFrames = false,
+        int timeoutMilliseconds = -1);
+    [[nodiscard]] static MediaInfo probeSummary(
+        const QString &path, const QString &ffprobePath = {}, int timeoutMilliseconds = 30'000);
     [[nodiscard]] static MediaInfo parseJson(const QByteArray &json, const QString &path = {});
     [[nodiscard]] static MediaRational parseRational(const QString &value);
 };

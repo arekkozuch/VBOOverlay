@@ -69,6 +69,11 @@ int exportTest(const QString &inputPath, const QString &outputPath)
         if (!result.diagnostics.isEmpty()) qCritical().noquote() << result.diagnostics;
         return EXIT_FAILURE;
     }
+    if (!result.validationWarning.isEmpty()) {
+        qWarning().noquote() << QStringLiteral("Video export completed, but automatic validation failed.");
+        qWarning().noquote() << result.validationWarning;
+        if (!result.diagnostics.isEmpty()) qWarning().noquote() << result.diagnostics;
+    }
     qInfo().noquote() << QStringLiteral(
         "HEVC export completed: %1 submitted / %10 encoded frames in %2 ms (%3 fps); render=%4 ms, polish=%5 ms, "
         "syncRender=%6 ms, readback=%7 ms, cpuCopy=%8 ms, ffmpegWrite=%9 ms, maxQueued=%11 MiB, temporaryOverlay=%12 MiB.")
@@ -237,7 +242,12 @@ int exportWorker(const QString &configPath)
             writeExportEvent({{"state", "failed"}, {"error", result.error}, {"diagnostics", result.diagnostics}});
             return EXIT_FAILURE;
         }
-        writeExportEvent({{"state", "complete"}, {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
+        const QString completionState = result.validationWarning.isEmpty()
+            ? QStringLiteral("complete") : QStringLiteral("validationWarning");
+        writeExportEvent({{"state", completionState},
+                          {"warning", result.validationWarning},
+                          {"diagnostics", result.diagnostics},
+                          {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
                           {"generatedFrames", static_cast<qint64>(result.generatedFrames)},
                           {"expectedFrames", static_cast<qint64>(result.renderedFrames)},
                           {"elapsedMilliseconds", result.elapsedMilliseconds},

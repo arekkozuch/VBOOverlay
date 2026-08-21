@@ -593,7 +593,10 @@ void AppController::dismissExportProgress()
 {
     if (exporting() || m_exportState == "cancelling") return;
     m_exportProgressVisible = false;
-    if (m_exportState == "complete" || m_exportState == "cancelled") m_exportState = QStringLiteral("idle");
+    if (m_exportState == "complete" || m_exportState == "validationWarning"
+        || m_exportState == "cancelled") {
+        m_exportState = QStringLiteral("idle");
+    }
     emit exportChanged();
 }
 
@@ -626,7 +629,7 @@ void AppController::handleExportOutput()
                                    QStringLiteral("encoderFps"), QStringLiteral("encoderRealtimeFactor"),
                                    QStringLiteral("rendererFps"), QStringLiteral("queuedBytes"),
                                    QStringLiteral("maximumQueuedBytes"), QStringLiteral("temporaryOverlayBytes"),
-                                   QStringLiteral("diagnostics")}) {
+                                   QStringLiteral("diagnostics"), QStringLiteral("warning")}) {
             if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
         }
         if (!state.isEmpty()) m_exportProgressInfo.insert("stage", state);
@@ -670,9 +673,14 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         setStatus("Export cancelled.");
     } else if (exitStatus == QProcess::NormalExit && exitCode == 0) {
         m_exportProgress = 100;
-        m_exportState = QStringLiteral("complete");
-        m_exportError.clear();
-        setStatus("HEVC export finished and passed validation.");
+        if (m_exportState == QStringLiteral("validationWarning")) {
+            m_exportError = m_exportProgressInfo.value("warning").toString();
+            setStatus("Video export completed, but automatic validation failed.");
+        } else {
+            m_exportState = QStringLiteral("complete");
+            m_exportError.clear();
+            setStatus("HEVC export finished and passed validation.");
+        }
     } else {
         m_exportState = QStringLiteral("failed");
         if (m_exportError.isEmpty()) {

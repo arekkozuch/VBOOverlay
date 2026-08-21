@@ -562,7 +562,8 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         anchors.centerIn: parent
         width: Math.min(window.width - 40, 680)
-        height: Math.min(window.height - 40, exportDetails.checked || appController.exportState === "failed" ? 610 : 430)
+        height: Math.min(window.height - 40, exportDetails.checked || appController.exportState === "failed"
+            || appController.exportState === "validationWarning" ? 610 : 430)
         background: Rectangle {
             radius: 14
             color: "#0d141d"
@@ -576,6 +577,7 @@ ApplicationWindow {
                 text: {
                     const stage = appController.exportProgressInfo.stage || appController.exportState;
                     if (stage === "complete") return qsTr("Export complete");
+                    if (stage === "validationWarning") return qsTr("Export completed with warning");
                     if (stage === "failed") return qsTr("Export failed");
                     if (stage === "cancelled") return qsTr("Export cancelled");
                     return qsTr("Exporting video");
@@ -596,7 +598,8 @@ ApplicationWindow {
                     const names = { "preparing": qsTr("Preparing"), "renderingOverlay": qsTr("Rendering overlay"),
                         "encodingVideo": qsTr("Encoding video"), "rendering": qsTr("Rendering & encoding"),
                         "finalizing": qsTr("Finalizing"), "validating": qsTr("Validating"),
-                        "cancelling": qsTr("Cancelling"), "complete": qsTr("Complete"), "failed": qsTr("Failed") };
+                        "cancelling": qsTr("Cancelling"), "complete": qsTr("Complete"),
+                        "validationWarning": qsTr("Completed with warning"), "failed": qsTr("Failed") };
                     return names[appController.exportProgressInfo.stage] || qsTr("Preparing");
                 }
                 color: "#55e6a5"
@@ -642,6 +645,7 @@ ApplicationWindow {
             }
             ScrollView {
                 visible: exportDetails.checked || appController.exportState === "failed"
+                    || appController.exportState === "validationWarning"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumHeight: 110
@@ -671,6 +675,7 @@ ApplicationWindow {
             }
             Label { visible: appController.exportState === "cancelling"; text: qsTr("Finishing current operation and cleaning up."); color: "#ffc66d"; font.pixelSize: 11 }
             Label { visible: appController.exportState === "failed"; text: appController.exportError; color: "#ff8a92"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { visible: appController.exportState === "validationWarning"; text: appController.exportError; color: "#ffc66d"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Item { Layout.fillHeight: true }
             FeButton {
                 Layout.alignment: Qt.AlignRight
