@@ -1,6 +1,8 @@
 build-native/
 native-dist/
 .DS_Store
+._*
+__MACOSX/
 *.log
 *.mp4
 *.mov
