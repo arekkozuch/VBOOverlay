@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScopedValueRollback>
 #include <QTimer>
 #include <QtConcurrent>
 #include <QtGlobal>
@@ -38,7 +39,10 @@ AppController::AppController(QObject *parent)
         || !m_widgetModel.fromJson(savedWidgets.object().value("widgets").toArray())) {
         m_widgetModel.resetDefaults();
     }
-    connect(&m_widgetModel, &WidgetModel::revisionChanged, this, &AppController::saveWidgetSettings);
+    connect(&m_widgetModel, &WidgetModel::revisionChanged, this, [this] {
+        saveWidgetSettings();
+        markPersistentChange();
+    });
     connect(&m_syncWatcher, &QFutureWatcher<AutoSyncResult>::finished, this, [this] {
         const AutoSyncResult result = m_syncWatcher.result();
         emit syncingChanged();
@@ -77,6 +81,8 @@ AppController::AppController(QObject *parent)
                       .arg(result.gpsSampleCount));
     });
     restoreSources();
+    const QString restoredProjectPath = m_settings.value("project/path").toString();
+    m_documentState.reset(QFileInfo::exists(restoredProjectPath) ? restoredProjectPath : QString());
 }
 
 AppController::~AppController()
@@ -164,6 +170,17 @@ int AppController::windowX() const { return m_settings.value("window/x", -1).toI
 int AppController::windowY() const { return m_settings.value("window/y", -1).toInt(); }
 int AppController::windowWidth() const { return m_settings.value("window/width", 1440).toInt(); }
 int AppController::windowHeight() const { return m_settings.value("window/height", 900).toInt(); }
+QUrl AppController::projectPath() const
+{
+    return m_documentState.projectPath().isEmpty()
+        ? QUrl() : QUrl::fromLocalFile(m_documentState.projectPath());
+}
+bool AppController::dirty() const { return m_documentState.dirty(); }
+quint64 AppController::lastSavedRevision() const { return m_documentState.lastSavedRevision(); }
+QString AppController::pendingDestructiveAction() const
+{
+    return ProjectDocumentState::actionName(m_documentState.pendingAction());
+}
 
 void AppController::loadVideo(const QUrl &url)
 {
@@ -174,18 +191,29 @@ void AppController::loadVideo(const QUrl &url)
         setStatus("Choose an existing MP4 or MOV video.");
         return;
     }
-    m_videoSource = QUrl::fromLocalFile(info.absoluteFilePath());
+    const QUrl newSource = QUrl::fromLocalFile(info.absoluteFilePath());
+    if (newSource == m_videoSource) {
+        return;
+    }
+    m_videoSource = newSource;
     probeExportSource();
     m_syncCandidate.clear();
     m_settings.setValue("sources/video", info.absoluteFilePath());
     emit videoSourceChanged();
     emit syncCandidateChanged();
+    markPersistentChange();
     setStatus(QStringLiteral("Video opened: %1").arg(info.fileName()));
 }
 
 void AppController::loadVbo(const QUrl &url)
 {
     const QString path = url.toLocalFile();
+    const QString absolutePath = QFileInfo(path).absoluteFilePath();
+    if (!m_telemetryPath.isEmpty()
+        && ExportOutputTransaction::normalizedComparisonPath(absolutePath)
+            == ExportOutputTransaction::normalizedComparisonPath(m_telemetryPath)) {
+        return;
+    }
     try {
         auto session = std::make_unique<TelemetrySession>(VboParser::parseFile(path));
         m_session = std::move(session);
@@ -198,12 +226,13 @@ void AppController::loadVbo(const QUrl &url)
         for (const QPointF &point : m_trackGeometry.points) {
             m_trackPoints.append(point);
         }
-        m_telemetryPath = QFileInfo(path).absoluteFilePath();
+        m_telemetryPath = absolutePath;
         m_settings.setValue("sources/vbo", m_telemetryPath);
         reconcileAnalysisChannels();
         emit telemetryChanged();
         emit syncCandidateChanged();
         emit liveValuesChanged();
+        markPersistentChange();
         setStatus(QStringLiteral("VBO opened: %1 samples, %2 numeric channels.")
                       .arg(m_session->sampleCount)
                       .arg(m_session->channels.size()));
@@ -212,8 +241,9 @@ void AppController::loadVbo(const QUrl &url)
     }
 }
 
-void AppController::clearProject()
+void AppController::performClearProject()
 {
+    const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
     m_videoSource = QUrl();
     m_exportSourceInfo = {};
     m_exportMetrics.clear();
@@ -240,6 +270,11 @@ void AppController::clearProject()
     emit syncChanged();
     emit syncCandidateChanged();
     emit liveValuesChanged();
+    m_documentState.reset();
+    m_pendingOpenProject = QUrl();
+    m_settings.remove("project/path");
+    emit documentStateChanged();
+    emit destructiveActionChanged();
     setStatus("New native project created.");
 }
 
@@ -317,20 +352,87 @@ void AppController::toggleAnalysisChannel(const QString &channelName)
     setAnalysisChannels(channels);
 }
 
-void AppController::openProject(const QUrl &url)
+void AppController::requestNewProject()
+{
+    beginDestructiveAction(ProjectDocumentState::DestructiveAction::NewProject);
+}
+
+void AppController::requestOpenProject(const QUrl &url)
+{
+    beginDestructiveAction(ProjectDocumentState::DestructiveAction::OpenProject, url);
+}
+
+void AppController::requestQuit()
+{
+    if (exporting()) {
+        return;
+    }
+    beginDestructiveAction(ProjectDocumentState::DestructiveAction::Quit);
+}
+
+void AppController::resolveDestructiveAction(const QString &decision)
+{
+    if (m_documentState.pendingAction() == ProjectDocumentState::DestructiveAction::None) {
+        return;
+    }
+    if (decision == QStringLiteral("cancel")) {
+        cancelPendingDestructiveAction();
+        return;
+    }
+    if (decision == QStringLiteral("discard")) {
+        performPendingDestructiveAction();
+        return;
+    }
+    if (decision != QStringLiteral("save")) {
+        return;
+    }
+    if (m_documentState.projectPath().isEmpty()) {
+        emit saveAsRequested();
+        return;
+    }
+    saveCurrentProject();
+}
+
+void AppController::cancelPendingDestructiveAction()
+{
+    if (m_documentState.pendingAction() == ProjectDocumentState::DestructiveAction::None) {
+        return;
+    }
+    m_documentState.cancelPendingAction();
+    m_pendingOpenProject = QUrl();
+    emit destructiveActionChanged();
+}
+
+bool AppController::saveCurrentProject()
+{
+    if (m_documentState.projectPath().isEmpty()) {
+        emit saveAsRequested();
+        return false;
+    }
+    return saveProject(QUrl::fromLocalFile(m_documentState.projectPath()));
+}
+
+bool AppController::performOpenProject(const QUrl &url)
 {
     QFile file(url.toLocalFile());
     if (!file.open(QIODevice::ReadOnly)) {
         setStatus(QStringLiteral("Project error: %1").arg(file.errorString()));
-        return;
+        return false;
     }
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     const QJsonObject project = document.object();
     const QJsonObject scene = project.value("scene").toObject();
+    WidgetModel candidateWidgets;
     if (project.value("version").toInt() != 2 || !scene.value("widgets").isArray()
-        || !m_widgetModel.fromJson(scene.value("widgets").toArray())) {
+        || !candidateWidgets.fromJson(scene.value("widgets").toArray())) {
         setStatus("Project error: unsupported or invalid .fetproject file.");
-        return;
+        return false;
+    }
+    const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
+    performClearProject();
+    if (!m_widgetModel.fromJson(scene.value("widgets").toArray())) {
+        setStatus("Project error: widget scene could not be applied.");
+        return false;
     }
     m_projectTemplate = project;
     const QJsonObject sync = project.value("sync").toObject();
@@ -356,7 +458,10 @@ void AppController::openProject(const QUrl &url)
         setAnalysisVisible(analysis.value("visible").toBool(true));
     }
     m_settings.setValue("project/path", file.fileName());
+    m_documentState.reset(file.fileName());
+    emit documentStateChanged();
     setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(file).fileName()));
+    return true;
 }
 
 bool AppController::saveProject(const QUrl &url)
@@ -386,11 +491,19 @@ bool AppController::saveProject(const QUrl &url)
     const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
     if (!writeResult.success) {
         setStatus(QStringLiteral("Project save error: %1").arg(writeResult.error));
+        if (m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) {
+            emit destructiveActionChanged();
+        }
         return false;
     }
     m_projectTemplate = project;
     m_settings.setValue("project/path", path);
+    m_documentState.markSaved(path);
+    emit documentStateChanged();
     setStatus(QStringLiteral("Project saved: %1").arg(QFileInfo(path).fileName()));
+    if (m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) {
+        performPendingDestructiveAction();
+    }
     return true;
 }
 
@@ -604,7 +717,7 @@ void AppController::cancelExport()
 void AppController::cancelExportAndQuit()
 {
     if (!exporting()) {
-        QCoreApplication::quit();
+        requestQuit();
         return;
     }
     m_quitAfterExport = true;
@@ -802,7 +915,8 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
     m_exportOutputTransaction.reset();
     emit exportChanged();
     if (m_quitAfterExport) {
-        QCoreApplication::quit();
+        m_quitAfterExport = false;
+        requestQuit();
     }
 }
 
@@ -853,6 +967,7 @@ void AppController::setSyncOffset(const double seconds)
     saveSessionSettings();
     emit syncChanged();
     emit liveValuesChanged();
+    markPersistentChange();
 }
 
 void AppController::setTimeScale(const double scale)
@@ -865,6 +980,7 @@ void AppController::setTimeScale(const double scale)
     saveSessionSettings();
     emit syncChanged();
     emit liveValuesChanged();
+    markPersistentChange();
 }
 
 void AppController::setAnalysisChannels(const QStringList &channels)
@@ -885,6 +1001,7 @@ void AppController::setAnalysisChannels(const QStringList &channels)
     m_analysisChannels = normalized;
     m_settings.setValue("analysis/channels", m_analysisChannels);
     emit analysisChanged();
+    markPersistentChange();
 }
 
 void AppController::setAnalysisVisible(const bool visible)
@@ -895,6 +1012,7 @@ void AppController::setAnalysisVisible(const bool visible)
     m_analysisVisible = visible;
     m_settings.setValue("analysis/visible", visible);
     emit analysisChanged();
+    markPersistentChange();
 }
 
 QVariant AppController::semanticValue(const QString &alias) const
@@ -928,6 +1046,53 @@ void AppController::saveWidgetSettings()
         QJsonObject{{"schemaVersion", 2}, {"widgets", m_widgetModel.toJson()}});
     m_settings.setValue("editor/widgets", document.toJson(QJsonDocument::Compact));
     m_settings.sync();
+}
+
+void AppController::markPersistentChange()
+{
+    if (m_suppressDirtyTracking) {
+        return;
+    }
+    m_documentState.markChanged();
+    emit documentStateChanged();
+}
+
+void AppController::beginDestructiveAction(
+    const ProjectDocumentState::DestructiveAction action, const QUrl &openUrl)
+{
+    if (action == ProjectDocumentState::DestructiveAction::OpenProject) {
+        if (!openUrl.isLocalFile() || openUrl.toLocalFile().isEmpty()) {
+            setStatus("Project error: choose a local .fetproject file.");
+            return;
+        }
+        m_pendingOpenProject = openUrl;
+    }
+    const auto result = m_documentState.request(action);
+    emit destructiveActionChanged();
+    if (result == ProjectDocumentState::RequestResult::ContinueImmediately) {
+        performPendingDestructiveAction();
+    }
+}
+
+void AppController::performPendingDestructiveAction()
+{
+    const ProjectDocumentState::DestructiveAction action = m_documentState.takePendingAction();
+    const QUrl openUrl = m_pendingOpenProject;
+    m_pendingOpenProject = QUrl();
+    emit destructiveActionChanged();
+    switch (action) {
+    case ProjectDocumentState::DestructiveAction::NewProject:
+        performClearProject();
+        break;
+    case ProjectDocumentState::DestructiveAction::OpenProject:
+        performOpenProject(openUrl);
+        break;
+    case ProjectDocumentState::DestructiveAction::Quit:
+        emit quitApproved();
+        break;
+    case ProjectDocumentState::DestructiveAction::None:
+        break;
+    }
 }
 
 void AppController::restoreSources()

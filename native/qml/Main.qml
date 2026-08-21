@@ -23,6 +23,7 @@ ApplicationWindow {
     palette.highlightedText: "#07140f"
 
     property bool fullScreenPreview: false
+    property bool closeApproved: false
     property int editorVisibility: Window.Windowed
     property bool welcomeVisible: !appController.videoName
     property int selectedWidgetIndex: -1
@@ -111,12 +112,12 @@ ApplicationWindow {
     ]
 
     onClosing: close => {
-        if (appController.exporting) {
-            close.accepted = false
-            exportQuitDialog.open()
+        if (window.closeApproved) {
+            appController.saveWindowState(x, y, width, height)
             return
         }
-        appController.saveWindowState(x, y, width, height)
+        close.accepted = false
+        window.beginQuit()
     }
     onVisibilityChanged: {
         const systemFullScreen = window.visibility === Window.FullScreen;
@@ -129,6 +130,7 @@ ApplicationWindow {
         parent: Overlay.overlay
         anchors.centerIn: parent
         modal: true
+        width: 390
         title: qsTr("Export is still running")
         standardButtons: Dialog.Yes | Dialog.No
         contentItem: Label {
@@ -141,10 +143,67 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: dirtyProjectDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 450
+        property bool resolvingDecision: false
+        title: {
+            if (appController.pendingDestructiveAction === "new") return qsTr("Save before creating a new project?")
+            if (appController.pendingDestructiveAction === "open") return qsTr("Save before opening another project?")
+            return qsTr("Save before quitting?")
+        }
+        contentItem: Label {
+            width: 390
+            text: qsTr("This project has unsaved changes. Save them before continuing?")
+            wrapMode: Text.WordWrap
+            color: "#e8edf4"
+        }
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Save | DialogButtonBox.Discard | DialogButtonBox.Cancel
+            onClicked: button => {
+                const role = buttonRole(button)
+                dirtyProjectDialog.resolvingDecision = true
+                dirtyProjectDialog.close()
+                if (role === DialogButtonBox.AcceptRole)
+                    appController.resolveDestructiveAction("save")
+                else if (role === DialogButtonBox.DestructiveRole)
+                    appController.resolveDestructiveAction("discard")
+                else
+                    appController.resolveDestructiveAction("cancel")
+                dirtyProjectDialog.resolvingDecision = false
+            }
+        }
+        onRejected: {
+            if (!resolvingDecision)
+                appController.cancelPendingDestructiveAction()
+        }
+    }
+
+    Connections {
+        target: appController
+        function onDestructiveActionChanged() {
+            if (appController.pendingDestructiveAction.length > 0 && appController.dirty)
+                dirtyProjectDialog.open()
+            else
+                dirtyProjectDialog.close()
+        }
+        function onSaveAsRequested() {
+            projectSaveDialog.open()
+        }
+        function onQuitApproved() {
+            window.closeApproved = true
+            window.close()
+        }
+    }
+
+    Dialog {
         id: exportOverwriteDialog
         parent: Overlay.overlay
         anchors.centerIn: parent
         modal: true
+        width: 440
         title: qsTr("Replace existing file?")
         standardButtons: Dialog.Yes | Dialog.No
         contentItem: Label {
@@ -164,8 +223,7 @@ ApplicationWindow {
                 shortcut: StandardKey.New
                 onTriggered: {
                     window.clearWidgetSelection();
-                    appController.clearProject();
-                    window.welcomeVisible = true;
+                    appController.requestNewProject();
                 }
             }
             Action {
@@ -176,6 +234,11 @@ ApplicationWindow {
                 text: qsTr("Open Project…")
                 shortcut: StandardKey.Open
                 onTriggered: projectOpenDialog.open()
+            }
+            Action {
+                text: qsTr("Save Project")
+                shortcut: StandardKey.Save
+                onTriggered: appController.saveCurrentProject()
             }
             Action {
                 text: qsTr("Save Project As…")
@@ -202,7 +265,7 @@ ApplicationWindow {
             Action {
                 text: qsTr("Quit")
                 shortcut: StandardKey.Quit
-                onTriggered: Qt.quit()
+                onTriggered: window.beginQuit()
             }
         }
         Menu {
@@ -227,6 +290,12 @@ ApplicationWindow {
             exitFullScreen();
         else
             enterFullScreen();
+    }
+    function beginQuit() {
+        if (appController.exporting)
+            exportQuitDialog.open()
+        else
+            appController.requestQuit()
     }
     function enterFullScreen() {
         if (visibility !== Window.FullScreen)
@@ -373,8 +442,7 @@ ApplicationWindow {
         nameFilters: [qsTr("FlappedEar projects (*.fetproject)")]
         onAccepted: {
             window.clearWidgetSelection();
-            appController.openProject(selectedFile);
-            window.welcomeVisible = false;
+            appController.requestOpenProject(selectedFile);
         }
     }
     FileDialog {
@@ -384,6 +452,10 @@ ApplicationWindow {
         defaultSuffix: "fetproject"
         nameFilters: [qsTr("FlappedEar projects (*.fetproject)")]
         onAccepted: appController.saveProject(selectedFile)
+        onRejected: {
+            if (appController.pendingDestructiveAction.length > 0)
+                appController.cancelPendingDestructiveAction()
+        }
     }
     FileDialog {
         id: exportOutputDialog

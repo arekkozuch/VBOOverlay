@@ -9,6 +9,7 @@
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
+#include "project/ProjectDocumentState.h"
 
 #include <QFutureWatcher>
 #include <QProcess>
@@ -65,6 +66,10 @@ class AppController final : public QObject {
     Q_PROPERTY(int windowY READ windowY CONSTANT)
     Q_PROPERTY(int windowWidth READ windowWidth CONSTANT)
     Q_PROPERTY(int windowHeight READ windowHeight CONSTANT)
+    Q_PROPERTY(QUrl projectPath READ projectPath NOTIFY documentStateChanged)
+    Q_PROPERTY(bool dirty READ dirty NOTIFY documentStateChanged)
+    Q_PROPERTY(quint64 lastSavedRevision READ lastSavedRevision NOTIFY documentStateChanged)
+    Q_PROPERTY(QString pendingDestructiveAction READ pendingDestructiveAction NOTIFY destructiveActionChanged)
 
 public:
     explicit AppController(QObject *parent = nullptr);
@@ -111,16 +116,24 @@ public:
     [[nodiscard]] int windowY() const;
     [[nodiscard]] int windowWidth() const;
     [[nodiscard]] int windowHeight() const;
+    [[nodiscard]] QUrl projectPath() const;
+    [[nodiscard]] bool dirty() const;
+    [[nodiscard]] quint64 lastSavedRevision() const;
+    [[nodiscard]] QString pendingDestructiveAction() const;
 
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
-    Q_INVOKABLE void clearProject();
     Q_INVOKABLE QString valueText(const QString &channelName, int decimals = 2) const;
     Q_INVOKABLE QVariant telemetryValue(const QString &channelName) const;
     Q_INVOKABLE QVariantMap telemetrySeries(
         const QString &channelName, double videoStart, double videoEnd, int maximumPoints) const;
     Q_INVOKABLE void toggleAnalysisChannel(const QString &channelName);
-    Q_INVOKABLE void openProject(const QUrl &url);
+    Q_INVOKABLE void requestNewProject();
+    Q_INVOKABLE void requestOpenProject(const QUrl &url);
+    Q_INVOKABLE void requestQuit();
+    Q_INVOKABLE void resolveDestructiveAction(const QString &decision);
+    Q_INVOKABLE void cancelPendingDestructiveAction();
+    Q_INVOKABLE bool saveCurrentProject();
     Q_INVOKABLE bool saveProject(const QUrl &url);
     Q_INVOKABLE void autoSync();
     Q_INVOKABLE void applySyncCandidate();
@@ -159,6 +172,10 @@ signals:
     void syncCandidateChanged();
     void liveValuesChanged();
     void analysisChanged();
+    void documentStateChanged();
+    void destructiveActionChanged();
+    void saveAsRequested();
+    void quitApproved();
 
 private:
     struct AutoSyncResult {
@@ -174,6 +191,11 @@ private:
     void setStatus(QString status);
     void saveSessionSettings();
     void saveWidgetSettings();
+    void markPersistentChange();
+    void performClearProject();
+    bool performOpenProject(const QUrl &url);
+    void beginDestructiveAction(ProjectDocumentState::DestructiveAction action, const QUrl &openUrl = {});
+    void performPendingDestructiveAction();
     void restoreSources();
     void reconcileAnalysisChannels();
     void probeExportSource();
@@ -192,6 +214,9 @@ private:
     QVariantList m_trackPoints;
     QJsonObject m_projectTemplate;
     ProjectWriter m_projectWriter;
+    ProjectDocumentState m_documentState;
+    QUrl m_pendingOpenProject;
+    bool m_suppressDirtyTracking = false;
     double m_playbackTime = 0.0;
     SyncTransform m_sync;
     QFutureWatcher<AutoSyncResult> m_syncWatcher;

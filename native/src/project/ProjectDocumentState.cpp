@@ -1,0 +1,67 @@
+#include "project/ProjectDocumentState.h"
+
+namespace FlappedEar {
+
+void ProjectDocumentState::markChanged()
+{
+    ++m_revision;
+}
+
+void ProjectDocumentState::markSaved(const QString &projectPath)
+{
+    m_projectPath = projectPath;
+    m_lastSavedRevision = m_revision;
+}
+
+void ProjectDocumentState::reset(const QString &projectPath)
+{
+    m_projectPath = projectPath;
+    m_revision = 0;
+    m_lastSavedRevision = 0;
+    m_pendingAction = DestructiveAction::None;
+}
+
+QString ProjectDocumentState::projectPath() const { return m_projectPath; }
+bool ProjectDocumentState::dirty() const { return m_revision != m_lastSavedRevision; }
+quint64 ProjectDocumentState::revision() const { return m_revision; }
+quint64 ProjectDocumentState::lastSavedRevision() const { return m_lastSavedRevision; }
+
+ProjectDocumentState::RequestResult ProjectDocumentState::request(const DestructiveAction action)
+{
+    m_pendingAction = action;
+    return dirty() ? RequestResult::DecisionRequired : RequestResult::ContinueImmediately;
+}
+
+ProjectDocumentState::DestructiveAction ProjectDocumentState::pendingAction() const
+{
+    return m_pendingAction;
+}
+
+ProjectDocumentState::DestructiveAction ProjectDocumentState::takePendingAction()
+{
+    const DestructiveAction action = m_pendingAction;
+    m_pendingAction = DestructiveAction::None;
+    return action;
+}
+
+void ProjectDocumentState::cancelPendingAction()
+{
+    m_pendingAction = DestructiveAction::None;
+}
+
+QString ProjectDocumentState::actionName(const DestructiveAction action)
+{
+    switch (action) {
+    case DestructiveAction::NewProject:
+        return QStringLiteral("new");
+    case DestructiveAction::OpenProject:
+        return QStringLiteral("open");
+    case DestructiveAction::Quit:
+        return QStringLiteral("quit");
+    case DestructiveAction::None:
+        break;
+    }
+    return {};
+}
+
+} // namespace FlappedEar

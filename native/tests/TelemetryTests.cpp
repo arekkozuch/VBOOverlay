@@ -13,6 +13,7 @@
 #include "telemetry/VboParser.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
+#include "project/ProjectDocumentState.h"
 
 #include <QFile>
 #include <QProcess>
@@ -73,6 +74,9 @@ private slots:
     void commitsNewAndReplacementExports();
     void savesProjectsAtomically();
     void detectsPartialAndCommitWriteFailures();
+    void gatesDirtyDestructiveActions_data();
+    void gatesDirtyDestructiveActions();
+    void resolvesDirtyDecisionsSafely();
     void syncsOptionalRealRecording();
 };
 
@@ -321,6 +325,66 @@ void TelemetryTests::detectsPartialAndCommitWriteFailures()
     const ProjectWriter::Result commit = commitWriter.write("project.fetproject", payload);
     QVERIFY(!commit.success);
     QVERIFY(commit.error.contains(QStringLiteral("commit")));
+}
+
+void TelemetryTests::gatesDirtyDestructiveActions_data()
+{
+    QTest::addColumn<int>("actionValue");
+    QTest::newRow("New dirty")
+        << static_cast<int>(ProjectDocumentState::DestructiveAction::NewProject);
+    QTest::newRow("Open dirty")
+        << static_cast<int>(ProjectDocumentState::DestructiveAction::OpenProject);
+    QTest::newRow("Quit dirty")
+        << static_cast<int>(ProjectDocumentState::DestructiveAction::Quit);
+}
+
+void TelemetryTests::gatesDirtyDestructiveActions()
+{
+    QFETCH(int, actionValue);
+    const auto action = static_cast<ProjectDocumentState::DestructiveAction>(actionValue);
+    ProjectDocumentState document;
+    document.reset("current.fetproject");
+    QCOMPARE(document.request(action), ProjectDocumentState::RequestResult::ContinueImmediately);
+    QCOMPARE(document.takePendingAction(), action);
+
+    document.markChanged();
+    QVERIFY(document.dirty());
+    QCOMPARE(document.request(action), ProjectDocumentState::RequestResult::DecisionRequired);
+    QCOMPARE(document.pendingAction(), action);
+}
+
+void TelemetryTests::resolvesDirtyDecisionsSafely()
+{
+    ProjectDocumentState document;
+    document.reset("current.fetproject");
+    document.markChanged();
+    const quint64 changedRevision = document.revision();
+    QCOMPARE(document.request(ProjectDocumentState::DestructiveAction::OpenProject),
+             ProjectDocumentState::RequestResult::DecisionRequired);
+
+    // A failed save leaves both dirty state and the pending destructive action intact.
+    QVERIFY(document.dirty());
+    QCOMPARE(document.lastSavedRevision(), quint64(0));
+    QCOMPARE(document.pendingAction(), ProjectDocumentState::DestructiveAction::OpenProject);
+
+    // A successful save clears dirty, after which the requested action can continue.
+    document.markSaved("current.fetproject");
+    QVERIFY(!document.dirty());
+    QCOMPARE(document.lastSavedRevision(), changedRevision);
+    QCOMPARE(document.takePendingAction(), ProjectDocumentState::DestructiveAction::OpenProject);
+
+    // Don't Save continues; Cancel retains the current dirty document.
+    document.markChanged();
+    QCOMPARE(document.request(ProjectDocumentState::DestructiveAction::NewProject),
+             ProjectDocumentState::RequestResult::DecisionRequired);
+    QCOMPARE(document.takePendingAction(), ProjectDocumentState::DestructiveAction::NewProject);
+    QVERIFY(document.dirty());
+    QCOMPARE(document.request(ProjectDocumentState::DestructiveAction::Quit),
+             ProjectDocumentState::RequestResult::DecisionRequired);
+    document.cancelPendingAction();
+    QCOMPARE(document.pendingAction(), ProjectDocumentState::DestructiveAction::None);
+    QVERIFY(document.dirty());
+    QCOMPARE(document.projectPath(), QString("current.fetproject"));
 }
 
 void TelemetryTests::parsesRealisticFixture()

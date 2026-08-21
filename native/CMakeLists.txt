@@ -31,6 +31,8 @@ qt_add_library(flappedear_core STATIC
     src/gopro/GoProTelemetrySource.h
     src/project/ProjectWriter.cpp
     src/project/ProjectWriter.h
+    src/project/ProjectDocumentState.cpp
+    src/project/ProjectDocumentState.h
     src/sync/TelemetrySyncEngine.cpp
     src/sync/TelemetrySyncEngine.h
     src/telemetry/TelemetrySession.cpp
