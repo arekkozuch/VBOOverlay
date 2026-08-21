@@ -1647,15 +1647,15 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: resultColumn.implicitHeight + 22
                         radius: 9
-                        color: "#0f201a"
-                        border.color: "#24543f"
+                        color: appController.syncCandidate.automaticallyApplied ? "#0f201a" : "#261c0e"
+                        border.color: appController.syncCandidate.automaticallyApplied ? "#24543f" : "#76551d"
                         ColumnLayout {
                             id: resultColumn
                             anchors.fill: parent
                             anchors.margins: 11
                             Label {
-                                text: qsTr("SYNC APPLIED")
-                                color: "#55e6a5"
+                                text: appController.syncCandidate.automaticallyApplied ? qsTr("SYNC APPLIED") : qsTr("POSSIBLE SYNCHRONIZATION FOUND")
+                                color: appController.syncCandidate.automaticallyApplied ? "#55e6a5" : "#f4c86a"
                                 font.pixelSize: 10
                                 font.weight: Font.DemiBold
                             }
@@ -1669,6 +1669,31 @@ Rectangle {
                                 text: qsTr("Correlation %1  ·  Confidence %2%").arg(Number(appController.syncCandidate.correlation || 0).toFixed(3)).arg((Number(appController.syncCandidate.confidence || 0) * 100).toFixed(0))
                                 color: "#8da99c"
                                 font.pixelSize: 10
+                            }
+                            Label {
+                                visible: !appController.syncCandidate.automaticallyApplied
+                                Layout.fillWidth: true
+                                text: appController.syncCandidate.level === "low"
+                                      ? qsTr("Low confidence: current timing was not changed.")
+                                      : qsTr("Review this candidate before changing timing.")
+                                color: "#d3b978"
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: 10
+                            }
+                            RowLayout {
+                                visible: !appController.syncCandidate.automaticallyApplied
+                                Layout.fillWidth: true
+                                FeButton {
+                                    Layout.fillWidth: true
+                                    accent: true
+                                    text: qsTr("Apply")
+                                    onClicked: appController.applySyncCandidate()
+                                }
+                                FeButton {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Ignore")
+                                    onClicked: appController.ignoreSyncCandidate()
+                                }
                             }
                         }
                     }

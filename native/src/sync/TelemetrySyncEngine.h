@@ -22,6 +22,18 @@ struct SyncCandidate {
     SyncDiagnostics diagnostics;
 };
 
+// Confidence is the engine's bounded composite of correlation strength, peak
+// uniqueness, and usable overlap. A 0.75 automatic threshold intentionally
+// requires all three signals to be strong: a high correlation alone cannot
+// overcome an ambiguous peak or short overlap. This keeps the well-supported
+// real-recording result automatic while making weaker matches reviewable.
+inline constexpr double kAutomaticSyncConfidenceThreshold = 0.75;
+
+enum class SyncConfidenceLevel { High, Medium, Low };
+
+[[nodiscard]] SyncConfidenceLevel syncConfidenceLevel(double confidence);
+[[nodiscard]] bool shouldAutoApplySyncCandidate(const SyncCandidate &candidate);
+
 class TelemetrySyncEngine {
 public:
     [[nodiscard]] static SyncCandidate synchronize(

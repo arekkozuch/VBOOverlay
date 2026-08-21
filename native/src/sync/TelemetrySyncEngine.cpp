@@ -7,6 +7,22 @@
 #include <stdexcept>
 
 namespace FlappedEar {
+
+SyncConfidenceLevel syncConfidenceLevel(const double confidence)
+{
+    if (confidence >= kAutomaticSyncConfidenceThreshold) {
+        return SyncConfidenceLevel::High;
+    }
+    // The medium band is useful feedback for a human reviewer, but neither
+    // medium nor low candidates change the current transform automatically.
+    return confidence >= 0.45 ? SyncConfidenceLevel::Medium : SyncConfidenceLevel::Low;
+}
+
+bool shouldAutoApplySyncCandidate(const SyncCandidate &candidate)
+{
+    return syncConfidenceLevel(candidate.confidence) == SyncConfidenceLevel::High;
+}
+
 namespace {
 
 struct Result {

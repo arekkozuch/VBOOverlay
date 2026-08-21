@@ -93,6 +93,8 @@ public:
     Q_INVOKABLE void openProject(const QUrl &url);
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void autoSync();
+    Q_INVOKABLE void applySyncCandidate();
+    Q_INVOKABLE void ignoreSyncCandidate();
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
         int x, int y, int width, int height, int sidebarWidth, int videoHeight);
@@ -131,6 +133,7 @@ private:
     void saveWidgetSettings();
     void restoreSources();
     void reconcileAnalysisChannels();
+    [[nodiscard]] static QString syncCandidateLevelName(double confidence);
 
     QSettings m_settings;
     QUrl m_videoSource;

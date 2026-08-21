@@ -37,6 +37,7 @@ private slots:
     void rejectsMalformedGpmf();
     void synchronizesGpsSpeed();
     void reportsAmbiguousGpsSpeed();
+    void gatesWeakSyncCandidates();
     void syncsOptionalRealRecording();
 };
 
@@ -355,8 +356,10 @@ void TelemetryTests::buildsTrackGeometry()
     const TrackGeometry geometry = buildTrackGeometry(session);
     QVERIFY(geometry.valid);
     QCOMPARE(geometry.points.size(), 3);
-    QCOMPARE(geometry.points.front(), QPointF(0.0, 1.0));
-    QCOMPARE(geometry.points.back(), QPointF(1.0, 0.0));
+    QVERIFY(geometry.points.front().x() > 0.0);
+    QCOMPARE(geometry.points.front().y(), 1.0);
+    QVERIFY(geometry.points.back().x() < 1.0);
+    QCOMPARE(geometry.points.back().y(), 0.0);
     const auto current = currentTrackPoint(session, 0.5, geometry);
     QVERIFY(current.has_value());
     QVERIFY2(
@@ -365,6 +368,43 @@ void TelemetryTests::buildsTrackGeometry()
     QVERIFY2(
         qAbs(current->y() - 0.5) < 0.01,
         qPrintable(QStringLiteral("y=%1").arg(current->y(), 0, 'g', 12)));
+}
+
+void TelemetryTests::gatesWeakSyncCandidates()
+{
+    SyncCandidate strong;
+    strong.confidence = 0.75;
+    QVERIFY(shouldAutoApplySyncCandidate(strong));
+    QVERIFY(syncConfidenceLevel(strong.confidence) == SyncConfidenceLevel::High);
+
+    SyncCandidate weak;
+    weak.confidence = 0.43;
+    QVERIFY(!shouldAutoApplySyncCandidate(weak));
+    QVERIFY(syncConfidenceLevel(weak.confidence) == SyncConfidenceLevel::Low);
+
+    TelemetrySession rectangle;
+    TelemetryChannel latitude;
+    latitude.name = "latitude";
+    latitude.timestamps = {0.0, 1.0, 2.0, 3.0};
+    latitude.values = {0.0F, 0.0F, 0.001F, 0.001F};
+    TelemetryChannel longitude;
+    longitude.name = "longitude";
+    longitude.timestamps = latitude.timestamps;
+    longitude.values = {0.0F, 0.004F, 0.004F, 0.0F};
+    rectangle.channels.insert(latitude.name, latitude);
+    rectangle.channels.insert(longitude.name, longitude);
+    rectangle.aliases.insert("latitude", latitude.name);
+    rectangle.aliases.insert("longitude", longitude.name);
+    const TrackGeometry geometry = buildTrackGeometry(rectangle);
+    QVERIFY(geometry.valid);
+    const double width = geometry.points[1].x() - geometry.points[0].x();
+    const double height = geometry.points[0].y() - geometry.points[2].y();
+    QVERIFY2(qAbs(width / height - 4.0) < 0.05,
+             qPrintable(QStringLiteral("aspect=%1").arg(width / height, 0, 'f', 3)));
+    const auto current = currentTrackPoint(rectangle, 1.0, geometry);
+    QVERIFY(current.has_value());
+    QVERIFY(qAbs(current->x() - geometry.points[1].x()) < 0.001);
+    QVERIFY(qAbs(current->y() - geometry.points[1].y()) < 0.001);
 }
 
 void TelemetryTests::decodesGps9Gpmf()

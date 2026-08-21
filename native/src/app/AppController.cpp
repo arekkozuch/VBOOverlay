@@ -40,8 +40,11 @@ AppController::AppController(QObject *parent)
             setStatus(QStringLiteral("Auto sync failed: %1").arg(result.error));
             return;
         }
-        setSyncOffset(result.candidate.offset);
-        setTimeScale(result.candidate.timeScale);
+        const bool automaticallyApplied = shouldAutoApplySyncCandidate(result.candidate);
+        if (automaticallyApplied) {
+            setSyncOffset(result.candidate.offset);
+            setTimeScale(result.candidate.timeScale);
+        }
         m_syncCandidate = {
             {"offset", result.candidate.offset},
             {"confidence", result.candidate.confidence},
@@ -52,9 +55,14 @@ AppController::AppController(QObject *parent)
             {"packetCount", result.packetCount},
             {"gpsSampleCount", result.gpsSampleCount},
             {"gpsStream", result.gpsStream},
+            {"level", syncCandidateLevelName(result.candidate.confidence)},
+            {"automaticallyApplied", automaticallyApplied},
+            {"canApply", true},
         };
         emit syncCandidateChanged();
-        setStatus(QStringLiteral("Auto sync applied: %1 s · correlation %2 · confidence %3% · %4 GPS samples")
+        setStatus(QStringLiteral("Auto sync %1: %2 s · correlation %3 · confidence %4% · %5 GPS samples")
+                      .arg(automaticallyApplied ? QStringLiteral("applied")
+                                                : QStringLiteral("candidate requires review"))
                       .arg(result.candidate.offset, 0, 'f', 3)
                       .arg(result.candidate.diagnostics.correlation, 0, 'f', 3)
                       .arg(result.candidate.confidence * 100.0, 0, 'f', 0)
@@ -352,6 +360,35 @@ void AppController::autoSync()
     emit syncingChanged();
 }
 
+void AppController::applySyncCandidate()
+{
+    if (m_syncCandidate.isEmpty()) {
+        return;
+    }
+    const double offset = m_syncCandidate.value("offset").toDouble();
+    const double scale = m_syncCandidate.value("timeScale", 1.0).toDouble();
+    if (!std::isfinite(offset) || !std::isfinite(scale) || scale <= 0.0) {
+        setStatus("Synchronization candidate is invalid and cannot be applied.");
+        return;
+    }
+    setSyncOffset(offset);
+    setTimeScale(scale);
+    m_syncCandidate.insert("automaticallyApplied", true);
+    m_syncCandidate.insert("appliedManually", true);
+    emit syncCandidateChanged();
+    setStatus(QStringLiteral("Synchronization candidate applied: %1 s.").arg(offset, 0, 'f', 3));
+}
+
+void AppController::ignoreSyncCandidate()
+{
+    if (m_syncCandidate.isEmpty()) {
+        return;
+    }
+    m_syncCandidate.clear();
+    emit syncCandidateChanged();
+    setStatus("Synchronization candidate ignored; existing timing was retained.");
+}
+
 void AppController::saveWindowState(const int x, const int y, const int width, const int height)
 {
     m_settings.setValue("window/x", x);
@@ -529,6 +566,19 @@ void AppController::reconcileAnalysisChannels()
         }
     }
     setAnalysisChannels(channels);
+}
+
+QString AppController::syncCandidateLevelName(const double confidence)
+{
+    switch (syncConfidenceLevel(confidence)) {
+    case SyncConfidenceLevel::High:
+        return QStringLiteral("high");
+    case SyncConfidenceLevel::Medium:
+        return QStringLiteral("medium");
+    case SyncConfidenceLevel::Low:
+        return QStringLiteral("low");
+    }
+    return QStringLiteral("low");
 }
 
 } // namespace FlappedEar
