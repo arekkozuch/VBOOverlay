@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/AppLog.h"
 #include "export/TelemetryFrameRenderer.h"
 #include "export/ExportEngine.h"
 #include "export/ExportDiagnostics.h"
@@ -444,17 +445,26 @@ int main(int argc, char *argv[])
     if (qEnvironmentVariableIntValue("FLAPPEDEAR_EXPORT_SOFTWARE") == 1) {
         qputenv("QT_QUICK_BACKEND", "software");
     }
+    FlappedEar::AppLog::installQtMessageHandler();
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
+    QCoreApplication::setOrganizationName("FlappedEar");
+    QCoreApplication::setOrganizationDomain("flappedear.com");
+    QCoreApplication::setApplicationName("FlappedEar Telemetry");
+    const bool applicationMode = !renderStillMode && !exportTestMode && !exportWorkerMode
+        && !benchmarkRenderMode;
+    if (applicationMode) {
+        static_cast<void>(FlappedEar::AppLog::initialize());
+        FlappedEar::AppLog::info(QStringLiteral("Application startup"));
+        FlappedEar::AppLog::info(
+            QStringLiteral("Log file: %1").arg(FlappedEar::AppLog::filePath()));
+    }
     if (!exportWorkerMode) {
         QStringList janitorDiagnostics;
         const QStringList recovered = FlappedEar::ExportArtifactManifest::recoverStale(&janitorDiagnostics);
         for (const QString &path : recovered) qInfo().noquote() << QStringLiteral("Recovered owned stale export artifacts: %1").arg(path);
         for (const QString &message : janitorDiagnostics) qWarning().noquote() << message;
     }
-    QCoreApplication::setOrganizationName("FlappedEar");
-    QCoreApplication::setOrganizationDomain("flappedear.com");
-    QCoreApplication::setApplicationName("FlappedEar Telemetry");
     app.setWindowIcon(QIcon(QStringLiteral(":/flappedear/resources/branding/app-logo.png")));
     if (renderStillMode) {
         return renderStill(QString::fromLocal8Bit(argv[2]));
@@ -478,15 +488,30 @@ int main(int argc, char *argv[])
         }
         return benchmarkRender(QSize(width, height), frames);
     }
-    FlappedEar::AppController controller;
-    QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("appController", &controller);
-    QObject::connect(
-        &engine,
-        &QQmlApplicationEngine::objectCreationFailed,
-        &app,
-        [] { QCoreApplication::exit(EXIT_FAILURE); },
-        Qt::QueuedConnection);
-    engine.loadFromModule("FlappedEar", "Main");
-    return app.exec();
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, [] {
+        FlappedEar::AppLog::info(QStringLiteral("Application shutdown"));
+    });
+    int result = EXIT_FAILURE;
+    {
+        FlappedEar::AppController controller;
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("appController", &controller);
+        QObject::connect(
+            &engine,
+            &QQmlApplicationEngine::objectCreationFailed,
+            &app,
+            [] {
+                FlappedEar::AppLog::error(QStringLiteral("Main QML failed to load"));
+                QCoreApplication::exit(EXIT_FAILURE);
+            },
+            Qt::QueuedConnection);
+        engine.loadFromModule("FlappedEar", "Main");
+        if (!engine.rootObjects().isEmpty()) {
+            FlappedEar::AppLog::info(QStringLiteral("Main QML loaded"));
+        }
+        result = app.exec();
+    }
+    FlappedEar::AppLog::restoreQtMessageHandler();
+    FlappedEar::AppLog::shutdown();
+    return result;
 }

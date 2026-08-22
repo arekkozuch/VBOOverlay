@@ -11,6 +11,8 @@ function(flappedear_enable_warnings target)
 endfunction()
 
 qt_add_library(flappedear_core STATIC
+    src/app/AppLog.cpp
+    src/app/AppLog.h
     src/export/EncoderDetector.cpp
     src/export/EncoderDetector.h
     src/export/ExportDiagnostics.cpp

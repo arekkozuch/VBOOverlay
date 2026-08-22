@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/AppLog.h"
 
 #include "gopro/GoProTelemetrySource.h"
 #include "export/ExportArtifactManifest.h"
@@ -52,9 +53,11 @@ AppController::AppController(QObject *parent)
         if (result.generation != m_sourceGeneration
             || result.videoPath != normalizedSourcePath(m_videoSource.toLocalFile())
             || result.vboPath != normalizedSourcePath(m_telemetryPath)) {
+            AppLog::warn(QStringLiteral("Stale auto-sync result rejected"));
             return;
         }
         if (!result.success) {
+            AppLog::error(QStringLiteral("Auto-sync failed: %1").arg(result.error));
             m_syncCandidate.clear();
             emit syncCandidateChanged();
             setStatus(QStringLiteral("Auto sync failed: %1").arg(result.error));
@@ -80,6 +83,11 @@ AppController::AppController(QObject *parent)
             {"canApply", true},
         };
         emit syncCandidateChanged();
+        AppLog::info(QStringLiteral("Auto-sync result: offset=%1 s, confidence=%2%, %3")
+                         .arg(result.candidate.offset, 0, 'f', 3)
+                         .arg(result.candidate.confidence * 100.0, 0, 'f', 0)
+                         .arg(automaticallyApplied ? QStringLiteral("applied")
+                                                   : QStringLiteral("review required")));
         setStatus(QStringLiteral("Auto sync %1: %2 s · correlation %3 · confidence %4% · %5 GPS samples")
                       .arg(automaticallyApplied ? QStringLiteral("applied")
                                                 : QStringLiteral("candidate requires review"))
@@ -91,9 +99,11 @@ AppController::AppController(QObject *parent)
     connect(&m_videoProbeWatcher, &QFutureWatcher<VideoProbeResult>::finished, this, [this] {
         const VideoProbeResult result = m_videoProbeWatcher.result();
         if (result.generation != m_sourceGeneration) {
+            AppLog::warn(QStringLiteral("Stale video probe result rejected: %1").arg(result.path));
             return;
         }
         if (!result.success) {
+            AppLog::error(QStringLiteral("Video load failed: %1: %2").arg(result.path, result.error));
             m_videoLoadState = QStringLiteral("error");
             emit sourceLoadStateChanged();
             setStatus(QStringLiteral("Could not open video: %1\n%2").arg(result.path, result.error));
@@ -104,9 +114,11 @@ AppController::AppController(QObject *parent)
     connect(&m_vboLoadWatcher, &QFutureWatcher<VboLoadResult>::finished, this, [this] {
         const VboLoadResult result = m_vboLoadWatcher.result();
         if (result.generation != m_sourceGeneration) {
+            AppLog::warn(QStringLiteral("Stale VBO load result rejected: %1").arg(result.path));
             return;
         }
         if (!result.success) {
+            AppLog::error(QStringLiteral("VBO load failed: %1: %2").arg(result.path, result.error));
             m_vboLoadState = QStringLiteral("error");
             emit sourceLoadStateChanged();
             setStatus(QStringLiteral("Could not parse VBO: %1\n%2").arg(result.path, result.error));
@@ -117,9 +129,13 @@ AppController::AppController(QObject *parent)
     connect(&m_projectLoadWatcher, &QFutureWatcher<ProjectLoadResult>::finished, this, [this] {
         const ProjectLoadResult result = m_projectLoadWatcher.result();
         if (result.generation != m_sourceGeneration) {
+            AppLog::warn(QStringLiteral("Stale project load result rejected: %1")
+                             .arg(result.projectPath));
             return;
         }
         if (!result.success) {
+            AppLog::error(QStringLiteral("Project load failed: %1: %2")
+                              .arg(result.projectPath, result.error));
             setProjectLoadState(false, {}, result.error);
             setStatus(QStringLiteral("Project could not be opened: %1").arg(result.error));
             return;
@@ -143,7 +159,7 @@ AppController::~AppController()
     m_exportOutputTransaction.reset();
     // On abnormal destruction the manifest intentionally remains for startup
     // recovery. A normal finished callback performs the authorized cleanup.
-    if (!exporting()) QFile::remove(m_exportCancelPath);
+    if (!exporting() && !m_exportCancelPath.isEmpty()) QFile::remove(m_exportCancelPath);
 }
 
 QUrl AppController::videoSource() const { return m_videoSource; }
@@ -280,6 +296,7 @@ void AppController::cancelSourceJobs()
 void AppController::startVideoProbe(
     const QString &path, const quint64 generation, const bool markDocumentDirty)
 {
+    AppLog::info(QStringLiteral("Video load/probe started: %1").arg(path));
     m_videoProbeCancellation = std::make_shared<std::atomic_bool>(false);
     const std::shared_ptr<std::atomic_bool> cancellation = m_videoProbeCancellation;
     m_videoLoadMarksDocumentDirty = markDocumentDirty;
@@ -306,6 +323,7 @@ void AppController::startVideoProbe(
 void AppController::startVboLoad(
     const QString &path, const quint64 generation, const bool markDocumentDirty)
 {
+    AppLog::info(QStringLiteral("VBO load started: %1").arg(path));
     m_vboLoadCancellation = std::make_shared<std::atomic_bool>(false);
     const std::shared_ptr<std::atomic_bool> cancellation = m_vboLoadCancellation;
     m_vboLoadMarksDocumentDirty = markDocumentDirty;
@@ -335,6 +353,7 @@ void AppController::startVboLoad(
 
 void AppController::commitVideoProbe(const VideoProbeResult &result, const bool markDocumentDirty)
 {
+    AppLog::info(QStringLiteral("Video load succeeded: %1").arg(result.path));
     m_videoSource = QUrl::fromLocalFile(result.path);
     m_exportSourceInfo = result.mediaInfo;
     m_videoLoadState = QStringLiteral("ready");
@@ -353,6 +372,7 @@ void AppController::commitVideoProbe(const VideoProbeResult &result, const bool 
 
 void AppController::commitVboLoad(const VboLoadResult &result, const bool markDocumentDirty)
 {
+    AppLog::info(QStringLiteral("VBO load succeeded: %1").arg(result.path));
     m_session = std::make_unique<TelemetrySession>(result.session);
     m_trackGeometry = result.geometry;
     m_trackPoints = trackPointsFor(m_trackGeometry);
@@ -545,17 +565,21 @@ void AppController::toggleAnalysisChannel(const QString &channelName)
 
 void AppController::requestNewProject()
 {
+    AppLog::info(QStringLiteral("New project requested"));
     beginDestructiveAction(ProjectDocumentState::DestructiveAction::NewProject);
 }
 
 void AppController::requestOpenProject(const QUrl &url)
 {
+    AppLog::info(QStringLiteral("Open project requested: %1").arg(url.toLocalFile()));
     beginDestructiveAction(ProjectDocumentState::DestructiveAction::OpenProject, url);
 }
 
 void AppController::requestQuit()
 {
+    AppLog::info(QStringLiteral("Quit requested"));
     if (exporting()) {
+        AppLog::warn(QStringLiteral("Quit request deferred while export is running"));
         return;
     }
     beginDestructiveAction(ProjectDocumentState::DestructiveAction::Quit);
@@ -570,6 +594,7 @@ void AppController::resolveDestructiveAction(const QString &decision)
         cancelPendingDestructiveAction();
         return;
     }
+    AppLog::info(QStringLiteral("Dirty project decision: %1").arg(decision));
     if (decision == QStringLiteral("discard")) {
         performPendingDestructiveAction();
         return;
@@ -589,6 +614,7 @@ void AppController::cancelPendingDestructiveAction()
     if (m_documentState.pendingAction() == ProjectDocumentState::DestructiveAction::None) {
         return;
     }
+    AppLog::info(QStringLiteral("Dirty project decision: cancel"));
     m_documentState.cancelPendingAction();
     m_pendingOpenProject = QUrl();
     emit destructiveActionChanged();
@@ -597,6 +623,7 @@ void AppController::cancelPendingDestructiveAction()
 bool AppController::saveCurrentProject()
 {
     if (m_documentState.projectPath().isEmpty()) {
+        AppLog::info(QStringLiteral("Project save requested: save as"));
         emit saveAsRequested();
         return false;
     }
@@ -605,8 +632,11 @@ bool AppController::saveCurrentProject()
 
 bool AppController::performOpenProject(const QUrl &url)
 {
+    AppLog::info(QStringLiteral("Project load started: %1").arg(url.toLocalFile()));
     QFile file(url.toLocalFile());
     if (!file.open(QIODevice::ReadOnly)) {
+        AppLog::error(QStringLiteral("Project load failed: %1: %2")
+                          .arg(url.toLocalFile(), file.errorString()));
         setStatus(QStringLiteral("Project error: %1").arg(file.errorString()));
         return false;
     }
@@ -616,6 +646,8 @@ bool AppController::performOpenProject(const QUrl &url)
     WidgetModel candidateWidgets;
     if (project.value("version").toInt() != 2 || !scene.value("widgets").isArray()
         || !candidateWidgets.fromJson(scene.value("widgets").toArray())) {
+        AppLog::error(QStringLiteral("Project load failed: unsupported or invalid file: %1")
+                          .arg(url.toLocalFile()));
         setStatus("Project error: unsupported or invalid .fetproject file.");
         return false;
     }
@@ -623,6 +655,8 @@ bool AppController::performOpenProject(const QUrl &url)
     const double offset = sync.value("offset").toDouble();
     const double timeScale = sync.value("timeScale").toDouble(1.0);
     if (!std::isfinite(offset) || !std::isfinite(timeScale) || timeScale <= 0.0) {
+        AppLog::error(QStringLiteral("Project load failed: invalid synchronization state: %1")
+                          .arg(url.toLocalFile()));
         setStatus("Project error: synchronization state is invalid.");
         return false;
     }
@@ -720,6 +754,8 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
     setProjectLoadState(true, QStringLiteral("Applying project"));
     if (!m_widgetModel.fromJson(result.widgets)) {
+        AppLog::error(QStringLiteral("Project load failed while applying widget scene: %1")
+                          .arg(result.projectPath));
         setProjectLoadState(false, {}, QStringLiteral("widget scene could not be applied."));
         setStatus("Project could not be opened: widget scene could not be applied.");
         return;
@@ -759,6 +795,7 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     emit sourceLoadStateChanged();
     emit documentStateChanged();
     setProjectLoadState(false);
+    AppLog::info(QStringLiteral("Project load succeeded: %1").arg(result.projectPath));
     setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(result.projectPath).fileName()));
 }
 
@@ -768,6 +805,7 @@ bool AppController::saveProject(const QUrl &url)
     if (!path.endsWith(".fetproject", Qt::CaseInsensitive)) {
         path.append(".fetproject");
     }
+    AppLog::info(QStringLiteral("Project save requested: %1").arg(path));
     QJsonObject project = m_projectTemplate;
     project.insert("version", 2);
     project.insert("videoPath", m_videoSource.toLocalFile());
@@ -788,6 +826,7 @@ bool AppController::saveProject(const QUrl &url)
     const QByteArray payload = QJsonDocument(project).toJson(QJsonDocument::Indented);
     const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
     if (!writeResult.success) {
+        AppLog::error(QStringLiteral("Project save failed: %1: %2").arg(path, writeResult.error));
         setStatus(QStringLiteral("Project save error: %1").arg(writeResult.error));
         if (m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) {
             emit destructiveActionChanged();
@@ -798,6 +837,7 @@ bool AppController::saveProject(const QUrl &url)
     m_settings.setValue("project/path", path);
     m_documentState.markSaved(path);
     emit documentStateChanged();
+    AppLog::info(QStringLiteral("Project save succeeded: %1").arg(path));
     setStatus(QStringLiteral("Project saved: %1").arg(QFileInfo(path).fileName()));
     if (m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) {
         performPendingDestructiveAction();
@@ -807,6 +847,7 @@ bool AppController::saveProject(const QUrl &url)
 
 void AppController::autoSync()
 {
+    AppLog::info(QStringLiteral("Auto-sync requested"));
     if (m_syncWatcher.isRunning()) {
         return;
     }
@@ -867,6 +908,8 @@ void AppController::applySyncCandidate()
     }
     setSyncOffset(offset);
     setTimeScale(scale);
+    AppLog::info(QStringLiteral("Auto-sync candidate applied: offset=%1 s, scale=%2")
+                     .arg(offset, 0, 'f', 3).arg(scale, 0, 'g', 12));
     m_syncCandidate.insert("automaticallyApplied", true);
     m_syncCandidate.insert("appliedManually", true);
     emit syncCandidateChanged();
@@ -878,6 +921,7 @@ void AppController::ignoreSyncCandidate()
     if (m_syncCandidate.isEmpty()) {
         return;
     }
+    AppLog::info(QStringLiteral("Auto-sync candidate rejected"));
     m_syncCandidate.clear();
     emit syncCandidateChanged();
     setStatus("Synchronization candidate ignored; existing timing was retained.");
@@ -892,7 +936,9 @@ bool AppController::startExport(
     const double rangeEnd,
     const bool overwriteAllowed)
 {
+    AppLog::info(QStringLiteral("Export requested: %1").arg(output.toLocalFile()));
     if (exporting()) {
+        AppLog::warn(QStringLiteral("Export request ignored because an export is already running"));
         return false;
     }
     const QString inputPath = m_videoSource.toLocalFile();
@@ -900,12 +946,14 @@ bool AppController::startExport(
     if (!m_session || inputPath.isEmpty() || m_telemetryPath.isEmpty() || outputPath.isEmpty()) {
         m_exportError = QStringLiteral("Open a video and VBO telemetry, then choose an output file.");
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
     if (!m_exportSourceInfo.videoSize.isValid()) {
         m_exportError = QStringLiteral("Video metadata is still loading or unavailable.");
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
@@ -919,6 +967,7 @@ bool AppController::startExport(
             "Export range must satisfy 0 ≤ start < end ≤ source duration (%1 s).")
                             .arg(sourceDuration, 0, 'f', 3);
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
@@ -938,6 +987,7 @@ bool AppController::startExport(
     if (preparation.status == ExportOutputTransaction::PreparationStatus::Error) {
         m_exportError = preparation.error;
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         m_exportOutputTransaction.reset();
         emit exportChanged();
         return false;
@@ -952,6 +1002,7 @@ bool AppController::startExport(
     if (!ExportArtifactManifest::create(manifest, &manifestError)) {
         m_exportError = QStringLiteral("Could not create export ownership manifest: %1").arg(manifestError);
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         m_exportOutputTransaction.reset();
         emit exportChanged();
         return false;
@@ -962,6 +1013,7 @@ bool AppController::startExport(
     if (!m_exportConfig->open()) {
         m_exportError = QStringLiteral("Could not create temporary export configuration.");
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
         m_exportManifestPath.clear();
         m_exportOutputTransaction.reset();
@@ -990,6 +1042,7 @@ bool AppController::startExport(
     if (m_exportConfig->write(QJsonDocument(config).toJson(QJsonDocument::Compact)) < 0) {
         m_exportError = QStringLiteral("Could not write temporary export configuration.");
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
         m_exportManifestPath.clear();
         m_exportOutputTransaction.reset();
@@ -1015,6 +1068,7 @@ bool AppController::startExport(
                             {"audioLabel", audioEnabled ? QStringLiteral("AAC audio") : QStringLiteral("No audio")}};
     m_exportProgressVisible = true;
     m_exportState = QStringLiteral("starting");
+    AppLog::info(QStringLiteral("Export Stage A preparing"));
     m_exportProcess = std::make_unique<QProcess>(this);
     m_exportSupervisor = std::make_unique<ExportProcessSupervisor>(*m_exportProcess);
     m_exportProcess->setProcessChannelMode(QProcess::SeparateChannels);
@@ -1032,6 +1086,7 @@ bool AppController::startExport(
             ? QStringLiteral("Could not start export worker: %1").arg(m_exportProcess->errorString())
             : QStringLiteral("Could not establish export process supervision: %1").arg(supervisionError);
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
         m_exportManifestPath.clear();
         m_exportSupervisor.reset();
@@ -1045,6 +1100,7 @@ bool AppController::startExport(
         m_exportError = QStringLiteral("Export process supervision was not established.");
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
@@ -1053,6 +1109,7 @@ bool AppController::startExport(
         m_exportError = QStringLiteral("Could not read active export ownership manifest: %1").arg(manifestError);
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
@@ -1061,6 +1118,7 @@ bool AppController::startExport(
         m_exportError = QStringLiteral("Could not update active export ownership manifest: %1").arg(manifestError);
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
@@ -1070,6 +1128,7 @@ bool AppController::startExport(
                             .arg(supervisionReady.errorString());
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
     }
@@ -1087,10 +1146,12 @@ void AppController::cancelExport()
     if (!cancellationFile.open(QIODevice::WriteOnly)) {
         m_exportError = QStringLiteral("Could not request export cancellation.");
         m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export cancellation failed: %1").arg(m_exportError));
         emit exportChanged();
         return;
     }
     cancellationFile.close();
+    AppLog::warn(QStringLiteral("Export cancellation requested"));
     m_exportState = QStringLiteral("cancelling");
     m_exportProgressInfo.insert("stage", QStringLiteral("cancelling"));
     emit exportChanged();
@@ -1197,6 +1258,26 @@ void AppController::handleExportOutput()
         }
         const QString state = event.value("state").toString();
         if (!state.isEmpty()) {
+            if (state != m_exportState) {
+                if (state == QStringLiteral("renderingOverlay")) {
+                    AppLog::info(QStringLiteral("Export Stage A started"));
+                } else if (state == QStringLiteral("validatingOverlay")) {
+                    AppLog::info(QStringLiteral("Export Stage A ended"));
+                    AppLog::info(QStringLiteral("Export overlay validation started"));
+                } else if (state == QStringLiteral("encodingVideo")) {
+                    AppLog::info(QStringLiteral("Export overlay validation passed"));
+                    AppLog::info(QStringLiteral("Export Stage B started"));
+                } else if (state == QStringLiteral("validatingOutput")) {
+                    AppLog::info(QStringLiteral("Export Stage B ended"));
+                    AppLog::info(QStringLiteral("Export final validation started"));
+                } else if (state == QStringLiteral("complete")) {
+                    AppLog::info(QStringLiteral("Export final validation passed"));
+                } else if (state == QStringLiteral("validationWarning")) {
+                    AppLog::warn(QStringLiteral("Export validation completed with a warning"));
+                } else if (state == QStringLiteral("cancelled")) {
+                    AppLog::warn(QStringLiteral("Export cancelled"));
+                }
+            }
             m_exportState = state;
         }
         for (const QString &key : {QStringLiteral("generatedFrames"), QStringLiteral("renderedFrames"), QStringLiteral("expectedFrames"),
@@ -1253,6 +1334,7 @@ void AppController::handleExportOutput()
         }
         if (event.contains("error")) {
             m_exportError = event.value("error").toString();
+            AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         }
         if (event.contains("renderMilliseconds")) {
             m_exportMetrics = {
@@ -1294,11 +1376,14 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
             m_exportProgress = 100;
             m_exportState = QStringLiteral("complete");
             m_exportError.clear();
+            AppLog::info(QStringLiteral("Export succeeded: %1")
+                             .arg(m_exportOutputTransaction->userTargetPath()));
             setStatus("HEVC export finished and passed validation.");
         } else {
             m_exportState = QStringLiteral("failed");
             m_exportError = commitError.isEmpty()
                 ? QStringLiteral("Validated export could not be committed to its target.") : commitError;
+            AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
             setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
         }
     } else {
@@ -1306,6 +1391,7 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         if (m_exportError.isEmpty()) {
             m_exportError = workerError.isEmpty() ? QStringLiteral("Export worker failed.") : workerError;
         }
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
     }
     m_exportProgressInfo.insert("stage", m_exportState);
@@ -1438,6 +1524,7 @@ void AppController::setStatus(QString status)
     if (m_statusText == status) {
         return;
     }
+    AppLog::info(QStringLiteral("Status: %1").arg(status));
     m_statusText = std::move(status);
     emit statusTextChanged();
 }
@@ -1480,6 +1567,9 @@ void AppController::beginDestructiveAction(
     emit destructiveActionChanged();
     if (result == ProjectDocumentState::RequestResult::ContinueImmediately) {
         performPendingDestructiveAction();
+    } else {
+        AppLog::info(QStringLiteral("Dirty project decision requested for: %1")
+                         .arg(ProjectDocumentState::actionName(action)));
     }
 }
 
@@ -1497,6 +1587,7 @@ void AppController::performPendingDestructiveAction()
         performOpenProject(openUrl);
         break;
     case ProjectDocumentState::DestructiveAction::Quit:
+        AppLog::info(QStringLiteral("Quit approved"));
         emit quitApproved();
         break;
     case ProjectDocumentState::DestructiveAction::None:
