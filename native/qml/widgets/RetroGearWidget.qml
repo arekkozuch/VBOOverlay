@@ -26,7 +26,6 @@ Item {
         color: frame.widgetSettings.valueColor || "#111111"
         font.family: frame.family
         font.weight: Font.Bold
-        font.pixelSize: Math.max(9, Math.min(parent.height * 0.52, parent.width * 0.12))
+        font.pixelSize: Math.max(9 * frame.sceneScale, Math.min(parent.height * 0.52, parent.width * 0.12))
     }
 }
-

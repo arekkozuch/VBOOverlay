@@ -44,7 +44,7 @@ Item {
         color: frame.widgetSettings.topColor || "#111111"
         font.family: frame.family
         font.weight: Font.Bold
-        font.pixelSize: Math.max(9, parent.height * 0.25)
+        font.pixelSize: Math.max(9 * frame.sceneScale, parent.height * 0.25)
     }
     Label {
         anchors.right: parent.right
@@ -56,7 +56,6 @@ Item {
         color: frame.widgetSettings.bottomColor || "#f4f4f4"
         font.family: frame.family
         font.weight: Font.Bold
-        font.pixelSize: Math.max(9, parent.height * 0.26)
+        font.pixelSize: Math.max(9 * frame.sceneScale, parent.height * 0.26)
     }
 }
-

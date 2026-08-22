@@ -51,6 +51,8 @@ Each source operation begins a new source generation and uses normalized source 
 
 `WidgetModel` owns persistent widgets, groups, appearance cues, and templates. `TelemetryScene.qml` is the render-only telemetry layer: it has a render context and widget model but no editor-selection or media-player dependency. Its shared frame owns normalized geometry, appearance cues, background, border, title, and formatting helpers; one `Loader` then instantiates only the renderer matching each widget type from `qml/widgets/`. Editor interaction remains in the surrounding QML components, while preview and export use the same scene definition.
 
+The scene uses 1920×1080 as its canonical visual canvas. Normalized widget geometry is resolved directly against the target canvas, while pixel-like typography, padding, borders, lines, and markers use one scene scale. Canvases use widget-relative geometry; the retro Grand Prix renderer is the exception and retains its explicit 440×420 design-space transform, so it must not receive a second scene transform.
+
 ## Export
 
 `MediaProbe` reads source and output metadata; `EncoderDetector` tests usable HEVC encoders; `TelemetryFrameRenderer` mounts `TelemetryScene.qml` offscreen through `QQuickRenderControl` and QRhi; and `ExportEngine` runs the two-stage FFmpeg pipeline. `ExportOutputTransaction` creates and owns a same-directory staging output, validates it through the worker, and commits it to the selected target only after success.

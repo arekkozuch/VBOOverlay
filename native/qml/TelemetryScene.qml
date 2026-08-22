@@ -8,6 +8,7 @@ Item {
     // playback dependencies and can be mounted by preview and export alike.
     required property var renderContext
     required property var widgetModel
+    readonly property real sceneScale: Math.min(width / 1920, height / 1080)
 
     Repeater {
         model: root.widgetModel
@@ -30,6 +31,7 @@ Item {
             required property string widgetGroupId
             property var renderContext: root.renderContext
             property var widgetModel: root.widgetModel
+            property real sceneScale: root.sceneScale
 
             x: widgetX * root.width
             y: widgetY * root.height + cueYOffset
@@ -74,7 +76,7 @@ Item {
             property real cueScale: activeCue && activeCue.cue.effect === "pop" ? 0.86 + 0.14 * (activeCue.fadeIn > 0 ? Math.min(1, activeCue.elapsed / activeCue.fadeIn) : 1) : 1
             property real cueYOffset: activeCue && activeCue.cue.effect === "slideUp" ? height * 0.14 * (1 - (activeCue.fadeIn > 0 ? Math.min(1, activeCue.elapsed / activeCue.fadeIn) : 1)) : 0
 
-            property real pad: Number(widgetSettings.padding ?? 12)
+            property real pad: Number(widgetSettings.padding ?? 12) * sceneScale
             property string family: widgetSettings.fontFamily || "Helvetica Neue"
             property int weight: Number(widgetSettings.fontWeight ?? 600)
             property color primary: widgetSettings.textColor || "#f4f7fb"
@@ -110,16 +112,16 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 visible: widgetItem.widgetSettings.showBackground ?? true
-                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14)
+                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14) * widgetItem.sceneScale
                 color: widgetItem.widgetSettings.backgroundColor || "#0b1018"
                 opacity: Number(widgetItem.widgetSettings.backgroundOpacity ?? 0.82)
             }
             Rectangle {
                 anchors.fill: parent
                 visible: widgetItem.widgetSettings.showBorder ?? true
-                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14)
+                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14) * widgetItem.sceneScale
                 color: "transparent"
-                border.width: Number(widgetItem.widgetSettings.borderWidth ?? 1)
+                border.width: Number(widgetItem.widgetSettings.borderWidth ?? 1) * widgetItem.sceneScale
                 border.color: widgetItem.widgetSettings.borderColor || "#314052"
                 opacity: Number(widgetItem.widgetSettings.borderOpacity ?? 0.75)
             }
@@ -136,8 +138,8 @@ Item {
                 color: widgetItem.secondary
                 font.family: widgetItem.family
                 font.weight: widgetItem.weight
-                font.pixelSize: Math.max(8, 10 * widgetItem.labelScale)
-                font.letterSpacing: 1
+                font.pixelSize: Math.max(8, 10 * widgetItem.labelScale) * widgetItem.sceneScale
+                font.letterSpacing: widgetItem.sceneScale
                 horizontalAlignment: Text.AlignHCenter
                 elide: Text.ElideRight
             }

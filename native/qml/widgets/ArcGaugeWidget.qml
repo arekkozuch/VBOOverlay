@@ -16,7 +16,7 @@ Item {
         property real progress: parent.progress
         property real startAngle: Number(frame.widgetSettings.startAngle ?? 155)
         property real endAngle: Number(frame.widgetSettings.endAngle ?? 385)
-        property real arcWidth: Number(frame.widgetSettings.arcWidth ?? 12)
+        property real arcWidth: Number(frame.widgetSettings.arcWidth ?? 12) * frame.sceneScale
         onProgressChanged: requestPaint()
         onStartAngleChanged: requestPaint()
         onEndAngleChanged: requestPaint()
@@ -26,7 +26,7 @@ Item {
             context.reset();
             const start = startAngle * Math.PI / 180;
             const end = endAngle * Math.PI / 180;
-            const radius = Math.max(4, Math.min(width, height) * 0.38);
+            const radius = Math.max(4 * frame.sceneScale, Math.min(width, height) * 0.38);
             const centerX = width / 2;
             const centerY = height * 0.52;
             context.lineCap = "round";
@@ -51,15 +51,15 @@ Item {
             color: frame.primary
             font.family: frame.family
             font.weight: frame.weight
-            font.pixelSize: Math.min(34, frame.height * 0.24) * frame.valueScale
+            font.pixelSize: Math.min(34 * frame.sceneScale, frame.height * 0.24) * frame.valueScale
         }
         Label {
             anchors.horizontalCenter: parent.horizontalCenter
             text: (frame.widgetSettings.label || "GAUGE") + ((frame.widgetSettings.showUnit ?? true) ? "  " + (frame.widgetSettings.unit || "") : "")
             color: frame.secondary
             font.family: frame.family
-            font.pixelSize: 9 * frame.labelScale
-            font.letterSpacing: 1
+            font.pixelSize: 9 * frame.labelScale * frame.sceneScale
+            font.letterSpacing: frame.sceneScale
         }
     }
     RowLayout {
@@ -70,7 +70,7 @@ Item {
         Label {
             text: parent.parent.minimum.toFixed(0)
             color: frame.secondary
-            font.pixelSize: 8
+            font.pixelSize: 8 * frame.sceneScale
         }
         Item {
             Layout.fillWidth: true
@@ -78,7 +78,7 @@ Item {
         Label {
             text: parent.parent.maximum.toFixed(0)
             color: frame.secondary
-            font.pixelSize: 8
+            font.pixelSize: 8 * frame.sceneScale
         }
     }
     Connections {

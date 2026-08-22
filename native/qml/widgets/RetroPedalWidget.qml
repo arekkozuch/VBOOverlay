@@ -30,7 +30,6 @@ Item {
         color: frame.primary
         font.family: frame.family
         font.weight: Font.Bold
-        font.pixelSize: Math.max(9, Math.min(parent.height * 0.50, parent.width * 0.12))
+        font.pixelSize: Math.max(9 * frame.sceneScale, Math.min(parent.height * 0.50, parent.width * 0.12))
     }
 }
-

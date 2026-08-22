@@ -5,14 +5,14 @@ import QtQuick.Layouts
 Column {
     property var frame: parent.frame
     anchors.centerIn: parent
-    spacing: 2
+    spacing: 2 * frame.sceneScale
     Label {
         anchors.horizontalCenter: parent.horizontalCenter
         text: frame.widgetSettings.label || frame.widgetSettings.source || "VALUE"
         color: frame.secondary
         font.family: frame.family
-        font.pixelSize: 9 * frame.labelScale
-        font.letterSpacing: 1.2
+        font.pixelSize: 9 * frame.labelScale * frame.sceneScale
+        font.letterSpacing: 1.2 * frame.sceneScale
     }
     Label {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -20,7 +20,7 @@ Column {
         color: frame.primary
         font.family: frame.family
         font.weight: frame.weight
-        font.pixelSize: Math.min(38, frame.height * 0.36) * frame.valueScale
+        font.pixelSize: Math.min(38 * frame.sceneScale, frame.height * 0.36) * frame.valueScale
     }
     Label {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -28,7 +28,6 @@ Column {
         text: frame.widgetSettings.unit || ""
         color: frame.accent
         font.family: frame.family
-        font.pixelSize: 10 * frame.labelScale
+        font.pixelSize: 10 * frame.labelScale * frame.sceneScale
     }
 }
-

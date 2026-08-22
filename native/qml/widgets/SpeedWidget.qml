@@ -13,8 +13,8 @@ Item {
             color: frame.secondary
             font.family: frame.family
             font.weight: Font.DemiBold
-            font.pixelSize: Math.max(8, 10 * frame.labelScale)
-            font.letterSpacing: 1.5
+            font.pixelSize: Math.max(8, 10 * frame.labelScale) * frame.sceneScale
+            font.letterSpacing: 1.5 * frame.sceneScale
         }
         Label {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -32,21 +32,21 @@ Item {
             color: frame.accent
             font.family: frame.family
             font.weight: Font.DemiBold
-            font.pixelSize: Math.max(8, 11 * frame.labelScale)
+            font.pixelSize: Math.max(8, 11 * frame.labelScale) * frame.sceneScale
         }
     }
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 3
-        radius: 2
+        height: 3 * frame.sceneScale
+        radius: 2 * frame.sceneScale
         color: "#24303d"
         Rectangle {
             property real value: Number(frame.adjusted(frame.raw("source", "speed")) || 0)
             width: parent.width * Math.max(0, Math.min(1, (value - Number(frame.widgetSettings.minValue ?? 0)) / Math.max(1, Number(frame.widgetSettings.maxValue ?? 300) - Number(frame.widgetSettings.minValue ?? 0))))
             height: parent.height
-            radius: 2
+            radius: 2 * frame.sceneScale
             color: frame.accent
         }
     }

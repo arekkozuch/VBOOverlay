@@ -31,7 +31,7 @@ Item {
             context.reset();
             const cx = width / 2;
             const cy = height * 0.5;
-            const radius = Math.max(6, Math.min(width, height) * 0.38);
+            const radius = Math.max(6 * frame.sceneScale, Math.min(width, height) * 0.38);
             const start = startAngle * Math.PI / 180;
             const end = endAngle * Math.PI / 180;
             const totalTicks = (majorTicks - 1) * (minorTicks + 1);
@@ -42,8 +42,8 @@ Item {
                     const angle = start + (end - start) * tick / totalTicks;
                     const major = tick % (minorTicks + 1) === 0;
                     const outer = radius;
-                    const inner = radius - (major ? 11 : 6);
-                    context.lineWidth = major ? 2 : 1;
+                    const inner = radius - (major ? 11 : 6) * frame.sceneScale;
+                    context.lineWidth = (major ? 2 : 1) * frame.sceneScale;
                     context.beginPath();
                     context.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
                     context.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
@@ -53,14 +53,14 @@ Item {
             const progress = Math.max(0, Math.min(1, (gaugeValue - minimum) / (maximum - minimum)));
             const needleAngle = start + (end - start) * progress;
             context.strokeStyle = frame.widgetSettings.needleColor || "#ff5b63";
-            context.lineWidth = 3;
+            context.lineWidth = 3 * frame.sceneScale;
             context.beginPath();
             context.moveTo(cx - Math.cos(needleAngle) * radius * 0.12, cy - Math.sin(needleAngle) * radius * 0.12);
             context.lineTo(cx + Math.cos(needleAngle) * radius * 0.72, cy + Math.sin(needleAngle) * radius * 0.72);
             context.stroke();
             context.fillStyle = frame.widgetSettings.needleColor || "#ff5b63";
             context.beginPath();
-            context.arc(cx, cy, 5, 0, Math.PI * 2, false);
+            context.arc(cx, cy, 5 * frame.sceneScale, 0, Math.PI * 2, false);
             context.fill();
         }
     }
@@ -74,15 +74,15 @@ Item {
             color: frame.primary
             font.family: frame.family
             font.weight: frame.weight
-            font.pixelSize: Math.min(26, frame.height * 0.18) * frame.valueScale
+            font.pixelSize: Math.min(26 * frame.sceneScale, frame.height * 0.18) * frame.valueScale
         }
         Label {
             anchors.horizontalCenter: parent.horizontalCenter
             text: (frame.widgetSettings.label || "GAUGE") + ((frame.widgetSettings.showUnit ?? true) ? "  " + (frame.widgetSettings.unit || "") : "")
             color: frame.secondary
             font.family: frame.family
-            font.pixelSize: 8 * frame.labelScale
-            font.letterSpacing: 0.8
+            font.pixelSize: 8 * frame.labelScale * frame.sceneScale
+            font.letterSpacing: 0.8 * frame.sceneScale
         }
     }
     Connections {

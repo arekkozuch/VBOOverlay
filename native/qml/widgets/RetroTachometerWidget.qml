@@ -32,16 +32,16 @@ Item {
             ctx.fillStyle = settings.dialColor || "#f4f4f4";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.font = "700 " + Math.max(9, radius * 0.18) + "px " + frame.family;
+            ctx.font = "700 " + Math.max(9 * frame.sceneScale, radius * 0.18) + "px " + frame.family;
             for (const ring of [0.92, 1.0]) {
-                ctx.lineWidth = Math.max(2, radius * 0.035);
+                ctx.lineWidth = Math.max(2 * frame.sceneScale, radius * 0.035);
                 ctx.beginPath();
                 ctx.arc(cx, cy, radius * ring, Math.PI * 0.5, Math.PI * 2);
                 ctx.stroke();
             }
             for (let step = 0; step <= steps; ++step) {
                 const angle = Math.PI * 0.5 + Math.PI * 1.5 * step / steps;
-                ctx.lineWidth = Math.max(1, radius * 0.025);
+                ctx.lineWidth = Math.max(frame.sceneScale, radius * 0.025);
                 ctx.beginPath();
                 ctx.moveTo(cx + Math.cos(angle) * radius * 1.03, cy + Math.sin(angle) * radius * 1.03);
                 ctx.lineTo(cx + Math.cos(angle) * radius * 1.14, cy + Math.sin(angle) * radius * 1.14);
@@ -50,14 +50,14 @@ Item {
             }
             const angle = Math.PI * 0.5 + Math.PI * 1.5 * progress;
             ctx.strokeStyle = settings.needleColor || "#e32636";
-            ctx.lineWidth = Math.max(3, radius * 0.05);
+            ctx.lineWidth = Math.max(3 * frame.sceneScale, radius * 0.05);
             ctx.beginPath();
             ctx.moveTo(cx - Math.cos(angle) * radius * 0.13, cy - Math.sin(angle) * radius * 0.13);
             ctx.lineTo(cx + Math.cos(angle) * radius * 0.86, cy + Math.sin(angle) * radius * 0.86);
             ctx.stroke();
             ctx.fillStyle = settings.dialColor || "#f4f4f4";
             ctx.beginPath();
-            ctx.arc(cx, cy, Math.max(5, radius * 0.12), 0, Math.PI * 2);
+            ctx.arc(cx, cy, Math.max(5 * frame.sceneScale, radius * 0.12), 0, Math.PI * 2);
             ctx.fill();
         }
     }

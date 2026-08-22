@@ -10,7 +10,7 @@ Item {
     property real range: Math.max(0.1, Number(frame.widgetSettings.gRange ?? 2))
     Rectangle {
         anchors.centerIn: parent
-        width: Math.min(parent.width, parent.height - 20) * 0.76
+        width: Math.min(parent.width, parent.height - 20 * frame.sceneScale) * 0.76
         height: width
         radius: width / 2
         color: "transparent"
@@ -18,18 +18,18 @@ Item {
     }
     Rectangle {
         anchors.centerIn: parent
-        width: 1
+        width: frame.sceneScale
         height: parent.height * 0.68
         color: frame.widgetSettings.gridColor || "#566477"
     }
     Rectangle {
         anchors.centerIn: parent
         width: parent.width * 0.68
-        height: 1
+        height: frame.sceneScale
         color: frame.widgetSettings.gridColor || "#566477"
     }
     Rectangle {
-        property real dot: Number(frame.widgetSettings.dotSize ?? 12)
+        property real dot: Number(frame.widgetSettings.dotSize ?? 12) * frame.sceneScale
         width: dot
         height: dot
         radius: dot / 2
@@ -45,7 +45,6 @@ Item {
         color: frame.primary
         font.family: frame.family
         font.weight: Font.DemiBold
-        font.pixelSize: 10 * frame.labelScale
+        font.pixelSize: 10 * frame.labelScale * frame.sceneScale
     }
 }
-

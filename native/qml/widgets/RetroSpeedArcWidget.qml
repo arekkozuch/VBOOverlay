@@ -28,7 +28,7 @@ Item {
                 return;
             const start = Math.PI * 0.92;
             const end = Math.PI * 1.82;
-            ctx.lineWidth = Math.max(5, radius * 0.12);
+            ctx.lineWidth = Math.max(5 * frame.sceneScale, radius * 0.12);
             for (let segment = 0; segment < segments; ++segment) {
                 const fraction = segment / (segments - 1);
                 const a0 = start + (end - start) * segment / segments;
@@ -54,7 +54,7 @@ Item {
         color: frame.primary
         font.family: frame.family
         font.weight: Font.Bold
-        font.pixelSize: Math.max(9, Math.min(parent.height * 0.12, parent.width * 0.08))
+        font.pixelSize: Math.max(9 * frame.sceneScale, Math.min(parent.height * 0.12, parent.width * 0.08))
     }
     Connections {
         target: frame.widgetModel

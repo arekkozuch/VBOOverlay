@@ -19,7 +19,7 @@ GridLayout {
             Rectangle {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                width: 1
+                width: frame.sceneScale
                 height: parent.height * 0.62
                 visible: (frame.widgetSettings.showSeparators ?? true) && parent.index < 3
                 color: frame.widgetSettings.separatorColor || "#314052"
@@ -31,8 +31,8 @@ GridLayout {
                     text: frame.widgetSettings["label" + parent.parent.slot] || "VALUE"
                     color: frame.secondary
                     font.family: frame.family
-                    font.pixelSize: 8 * frame.labelScale
-                    font.letterSpacing: 0.8
+                    font.pixelSize: 8 * frame.labelScale * frame.sceneScale
+                    font.letterSpacing: 0.8 * frame.sceneScale
                 }
                 Label {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -40,17 +40,16 @@ GridLayout {
                     color: frame.primary
                     font.family: frame.family
                     font.weight: frame.weight
-                    font.pixelSize: Math.min(22, frame.height * 0.25) * frame.valueScale
+                    font.pixelSize: Math.min(22 * frame.sceneScale, frame.height * 0.25) * frame.valueScale
                 }
                 Label {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: frame.widgetSettings["unit" + parent.parent.slot] || ""
                     color: frame.accent
                     font.family: frame.family
-                    font.pixelSize: 8 * frame.labelScale
+                    font.pixelSize: 8 * frame.labelScale * frame.sceneScale
                 }
             }
         }
     }
 }
-

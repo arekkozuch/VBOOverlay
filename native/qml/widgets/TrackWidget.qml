@@ -9,7 +9,7 @@ Item {
         frame.renderContext.time;
         return frame.renderContext.currentTrackPoint;
     }
-    property real trackPad: Number(frame.widgetSettings.trackPadding ?? 10)
+    property real trackPad: Number(frame.widgetSettings.trackPadding ?? 10) * frame.sceneScale
     Canvas {
         id: trackCanvas
         anchors.fill: parent
@@ -23,7 +23,7 @@ Item {
             const drawX = value => pad + (frame.widgetSettings.mirrorX ? 1 - value : value) * Math.max(1, width - 2 * pad);
             const drawY = value => pad + (frame.widgetSettings.mirrorY ? 1 - value : value) * Math.max(1, height - 2 * pad);
             context.strokeStyle = frame.widgetSettings.lineColor || frame.accent;
-            context.lineWidth = Number(frame.widgetSettings.lineWidth ?? 3);
+            context.lineWidth = Number(frame.widgetSettings.lineWidth ?? 3) * frame.sceneScale;
             context.lineCap = "round";
             context.lineJoin = "round";
             context.beginPath();
@@ -44,7 +44,7 @@ Item {
     }
     Rectangle {
         visible: parent.currentPoint.x !== undefined
-        width: Number(frame.widgetSettings.markerSize ?? 10)
+        width: Number(frame.widgetSettings.markerSize ?? 10) * frame.sceneScale
         height: width
         radius: width / 2
         color: frame.widgetSettings.markerColor || "#ffffff"

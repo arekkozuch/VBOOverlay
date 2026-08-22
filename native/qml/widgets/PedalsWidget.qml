@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     property var frame: parent.frame
     anchors.fill: parent
-    spacing: 7
+    spacing: 7 * frame.sceneScale
     Repeater {
         model: [
             {
@@ -29,7 +29,7 @@ ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 3
+            spacing: 3 * frame.sceneScale
             property var pedalRaw: frame.raw(modelData.sourceKey, modelData.fallback)
             property real pedalValue: Number(pedalRaw || 0)
             RowLayout {
@@ -39,8 +39,8 @@ ColumnLayout {
                     text: frame.widgetSettings[modelData.labelKey] || modelData.fallback.toUpperCase()
                     color: frame.secondary
                     font.family: frame.family
-                    font.pixelSize: 9 * frame.labelScale
-                    font.letterSpacing: 0.8
+                    font.pixelSize: 9 * frame.labelScale * frame.sceneScale
+                    font.letterSpacing: 0.8 * frame.sceneScale
                 }
                 Label {
                     visible: frame.widgetSettings.showValues ?? true
@@ -48,13 +48,13 @@ ColumnLayout {
                     color: frame.primary
                     font.family: frame.family
                     font.weight: Font.DemiBold
-                    font.pixelSize: 10 * frame.labelScale
+                    font.pixelSize: 10 * frame.labelScale * frame.sceneScale
                 }
             }
             Rectangle {
                 Layout.fillWidth: true
-                height: 8
-                radius: Number(frame.widgetSettings.barRadius ?? 5)
+                height: 8 * frame.sceneScale
+                radius: Number(frame.widgetSettings.barRadius ?? 5) * frame.sceneScale
                 color: "#24303d"
                 Rectangle {
                     property real low: Number(frame.widgetSettings[modelData.minKey] ?? 0)
@@ -68,4 +68,3 @@ ColumnLayout {
         }
     }
 }
-
