@@ -911,9 +911,13 @@ ApplicationWindow {
                             .arg((Number(p.outputBytes || 0) / 1048576).toFixed(1))
                             .arg((Number(p.estimatedTemporaryOverlayBytes || 0) / 1073741824).toFixed(2))
                             .arg(p.estimateBasis || qsTr("Calculating"))
-                            .arg((Number(p.temporaryFilesystemAvailableBytes || 0) / 1073741824).toFixed(2))
+                            .arg(Number(p.temporaryFilesystemAvailableBytes) >= 0
+                                 ? (Number(p.temporaryFilesystemAvailableBytes) / 1073741824).toFixed(2)
+                                 : qsTr("Unavailable"))
                             .arg((Number(p.estimatedFinalOutputBytes || 0) / 1073741824).toFixed(2))
-                            .arg((Number(p.destinationFilesystemAvailableBytes || 0) / 1073741824).toFixed(2))
+                            .arg(Number(p.destinationFilesystemAvailableBytes) >= 0
+                                 ? (Number(p.destinationFilesystemAvailableBytes) / 1073741824).toFixed(2)
+                                 : qsTr("Unavailable"))
                             .arg(Number(p.rendererFps || 0).toFixed(1))
                             .arg(Number(p.encoderFps || 0).toFixed(1))
                             .arg(Number(p.encoderRealtimeFactor || 0).toFixed(2))
@@ -1079,7 +1083,9 @@ ApplicationWindow {
         source: appController.videoSource
         audioOutput: AudioOutput {}
         videoOutput: videoOutput
-        onPositionChanged: appController.playbackTime = position / 1000.0
+        onPositionChanged: function(position) {
+            appController.playbackTime = position / 1000.0;
+        }
     }
 
     Loader {

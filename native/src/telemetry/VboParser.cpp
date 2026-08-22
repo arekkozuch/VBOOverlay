@@ -291,10 +291,11 @@ TelemetrySession VboParser::parse(QStringView text)
             : std::optional<ParsedTimestamp>(
                   ParsedTimestamp{static_cast<double>(rowIndex), TimestampFormat::RelativeSeconds});
         if (!parsedTime) {
-            const QString text = timeIndex >= 0 && timeIndex < cells.size() ? cells[timeIndex] : QString();
+            const QString timestampText = timeIndex >= 0 && timeIndex < cells.size()
+                ? cells[timeIndex] : QString();
             appendWarning(QStringLiteral("Row %1: invalid timestamp \"%2\"; row skipped.")
                               .arg(rowIndex + 1)
-                              .arg(text));
+                              .arg(timestampText));
             continue;
         }
         double absoluteTime = parsedTime->seconds;

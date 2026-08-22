@@ -5,6 +5,7 @@
 #include "export/ExportFormat.h"
 #include "export/ExportDiagnostics.h"
 #include "export/PersistentExportLog.h"
+#include "export/RawFrameTransport.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
 #include "export/ExportArtifactManifest.h"
@@ -33,7 +34,9 @@
 #include <QtEndian>
 #include <QtTest>
 #include <cmath>
+#include <atomic>
 #include <limits>
+#include <thread>
 
 using namespace FlappedEar;
 
@@ -72,8 +75,13 @@ private slots:
     void classifiesMediaProbeProcessFailures();
     void reportsMediaProbeLifecycleHeartbeat();
     void cancelsMediaProbeWithoutLeavingItRunning();
+    void resolvesExportFilesystemsForFutureArtifacts();
     void evaluatesIndependentExportStorageVolumes();
     void estimatesTemporaryStorageFromRepresentativeSample();
+    void streamsRawFramesToSlowConsumer();
+    void failsRawFrameTransportWhenConsumerExits();
+    void timesOutStalledRawFrameTransport();
+    void cancelsBlockedRawFrameTransportPromptly();
     void cleansOnlyManifestOwnedArtifacts();
     void preservesLiveManifestForStartupRecovery();
     void supervisesUnixExportProcessTree();
@@ -218,6 +226,7 @@ void TelemetryTests::rejectsUnsafeExportPaths()
     QCOMPARE(missingDestination.prepare(directory.filePath("missing/out.mp4"), input, {vbo}, false).status,
              ExportOutputTransaction::PreparationStatus::Error);
 
+#ifndef Q_OS_WIN
     const QString unwritablePath = directory.filePath("unwritable");
     QVERIFY(QDir().mkdir(unwritablePath));
     const QFile::Permissions originalPermissions = QFileInfo(unwritablePath).permissions();
@@ -230,6 +239,7 @@ void TelemetryTests::rejectsUnsafeExportPaths()
     QCOMPARE(unwritableDestination.prepare(
                  QDir(unwritablePath).filePath("out.mp4"), input, {vbo}, false).status,
              ExportOutputTransaction::PreparationStatus::Error);
+#endif
 }
 
 void TelemetryTests::preservesExistingExportTargetOnFailures_data()
@@ -339,6 +349,7 @@ void TelemetryTests::savesProjectsAtomically()
     QCOMPARE(saved.readAll(), replacement);
     saved.close();
 
+#ifndef Q_OS_WIN
     const QFile::Permissions originalPermissions = QFileInfo(directory.path()).permissions();
     QVERIFY(QFile::setPermissions(
         directory.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
@@ -350,6 +361,7 @@ void TelemetryTests::savesProjectsAtomically()
     QFile unchanged(path);
     QVERIFY(unchanged.open(QIODevice::ReadOnly));
     QCOMPARE(unchanged.readAll(), replacement);
+#endif
 }
 
 void TelemetryTests::detectsPartialAndCommitWriteFailures()
@@ -1075,27 +1087,66 @@ void TelemetryTests::evaluatesIndependentExportStorageVolumes()
     const ExportStorageEstimate estimate{100, 50, 25};
     const auto provider = [](const QString &path) {
         return path.startsWith(QStringLiteral("/temp"))
-            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, 130, 1'000}
-            : ExportFilesystemInfo{QStringLiteral("/destination"), path, 80, 1'000};
+            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, path, 130, 1'000}
+            : ExportFilesystemInfo{QStringLiteral("/destination"), path, path, 80, 1'000};
     };
     const ExportStoragePreflight enough = ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, provider);
     QVERIFY(enough.sufficient);
     const auto insufficientTemp = [](const QString &path) {
         return path.startsWith(QStringLiteral("/temp"))
-            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, 124, 1'000}
-            : ExportFilesystemInfo{QStringLiteral("/destination"), path, 80, 1'000};
+            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, path, 124, 1'000}
+            : ExportFilesystemInfo{QStringLiteral("/destination"), path, path, 80, 1'000};
     };
     QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, insufficientTemp).sufficient);
     const auto insufficientOutput = [](const QString &path) {
         return path.startsWith(QStringLiteral("/temp"))
-            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, 130, 1'000}
-            : ExportFilesystemInfo{QStringLiteral("/destination"), path, 74, 1'000};
+            ? ExportFilesystemInfo{QStringLiteral("/temporary"), path, path, 130, 1'000}
+            : ExportFilesystemInfo{QStringLiteral("/destination"), path, path, 74, 1'000};
     };
     QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, insufficientOutput).sufficient);
     const auto sharedFilesystem = [](const QString &path) {
-        return ExportFilesystemInfo{QStringLiteral("/shared"), path, 174, 1'000};
+        return ExportFilesystemInfo{QStringLiteral("/shared"), path, path, 174, 1'000};
     };
     QVERIFY(!ExportStoragePolicy::evaluate("/temp/overlay", "/output/final", estimate, sharedFilesystem).sufficient);
+}
+
+void TelemetryTests::resolvesExportFilesystemsForFutureArtifacts()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString existingFile = directory.filePath(QStringLiteral("existing.mkv"));
+    QVERIFY(writeBytes(existingFile, "fixture"));
+
+    const auto verifyUsable = [](const ExportFilesystemInfo &filesystem, const QString &requested) {
+        QVERIFY2(filesystem.isUsable(), qPrintable(requested));
+        QCOMPARE(filesystem.inspectedPath, requested);
+        QVERIFY(QFileInfo::exists(filesystem.probePath));
+        QVERIFY(filesystem.availableBytes > 0);
+        QVERIFY(filesystem.totalBytes > 0);
+    };
+
+    const ExportFilesystemInfo fileFilesystem = ExportStoragePolicy::filesystemForPath(existingFile);
+    verifyUsable(fileFilesystem, existingFile);
+    QCOMPARE(fileFilesystem.probePath, QFileInfo(existingFile).absoluteFilePath());
+
+    const ExportFilesystemInfo directoryFilesystem = ExportStoragePolicy::filesystemForPath(directory.path());
+    verifyUsable(directoryFilesystem, directory.path());
+    QCOMPARE(directoryFilesystem.probePath, QFileInfo(directory.path()).absoluteFilePath());
+
+    const QString futureFile = directory.filePath(QStringLiteral("future.mkv"));
+    const ExportFilesystemInfo futureFilesystem = ExportStoragePolicy::filesystemForPath(futureFile);
+    verifyUsable(futureFilesystem, futureFile);
+    QCOMPARE(futureFilesystem.probePath, QFileInfo(directory.path()).absoluteFilePath());
+
+    const QString nestedFuture = directory.filePath(QStringLiteral("a/b/c/output.mkv"));
+    const ExportFilesystemInfo nestedFilesystem = ExportStoragePolicy::filesystemForPath(nestedFuture);
+    verifyUsable(nestedFilesystem, nestedFuture);
+    QCOMPARE(nestedFilesystem.probePath, QFileInfo(directory.path()).absoluteFilePath());
+
+    const ExportFilesystemInfo unresolved = ExportStoragePolicy::filesystemForPath(QString());
+    QVERIFY(!unresolved.isUsable());
+    QCOMPARE(unresolved.inspectedPath, QString());
+    QCOMPARE(ExportStoragePolicy::bytesText(unresolved.availableBytes), QStringLiteral("unavailable"));
 }
 
 void TelemetryTests::estimatesTemporaryStorageFromRepresentativeSample()
@@ -1125,6 +1176,92 @@ void TelemetryTests::estimatesTemporaryStorageFromRepresentativeSample()
         std::numeric_limits<qint64>::max(), 1, std::numeric_limits<qsizetype>::max(),
         1.0, 12'000'000);
     QCOMPARE(overflow.temporaryOverlayBytes, std::numeric_limits<qint64>::max());
+}
+
+void TelemetryTests::streamsRawFramesToSlowConsumer()
+{
+    QProcess consumer;
+    consumer.start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH), {QStringLiteral("slow")});
+    QVERIFY2(consumer.waitForStarted(5'000), qPrintable(consumer.errorString()));
+    const QByteArray fullHdFrame(1920 * 1080 * 4, 'x');
+    const QByteArray ultraHdFrame(3840 * 2160 * 4, 'y');
+    RawFrameTransport transport(consumer);
+    const RawFrameTransportResult fullHdResult = transport.writeFrame(fullHdFrame);
+    QVERIFY2(fullHdResult.succeeded(), qPrintable(fullHdResult.error));
+    const RawFrameTransportResult ultraHdResult = transport.writeFrame(ultraHdFrame);
+    QVERIFY2(ultraHdResult.succeeded(), qPrintable(ultraHdResult.error));
+    consumer.closeWriteChannel();
+    QVERIFY2(consumer.waitForFinished(15'000), qPrintable(consumer.errorString()));
+    QCOMPARE(consumer.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(consumer.exitCode(), 0);
+    QCOMPARE(consumer.readAllStandardOutput().trimmed().toLongLong(),
+             qint64(fullHdFrame.size() + ultraHdFrame.size()));
+    const RawFrameTransportConfig config;
+    QVERIFY(ultraHdResult.maximumQueuedBytes <= config.highWaterBytes + config.writeChunkBytes);
+}
+
+void TelemetryTests::failsRawFrameTransportWhenConsumerExits()
+{
+    QProcess consumer;
+    consumer.start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH), {QStringLiteral("early-exit")});
+    QVERIFY2(consumer.waitForStarted(5'000), qPrintable(consumer.errorString()));
+    const auto stopConsumer = qScopeGuard([&] {
+        if (consumer.state() != QProcess::NotRunning) {
+            consumer.kill();
+            static_cast<void>(consumer.waitForFinished(5'000));
+        }
+    });
+    const QByteArray frame(32 * 1024 * 1024, 'x');
+    RawFrameTransport transport(consumer);
+    const RawFrameTransportResult result = transport.writeFrame(frame);
+    QVERIFY(!result.succeeded());
+    QCOMPARE(result.status, RawFrameTransportResult::Status::Failure);
+    QVERIFY2(result.error.contains(QStringLiteral("exited"), Qt::CaseInsensitive)
+                 || result.error.contains(QStringLiteral("write failed"), Qt::CaseInsensitive)
+                 || result.error.contains(QStringLiteral("device error"), Qt::CaseInsensitive),
+             qPrintable(result.error));
+}
+
+void TelemetryTests::timesOutStalledRawFrameTransport()
+{
+    QProcess consumer;
+    consumer.start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH), {QStringLiteral("stall")});
+    QVERIFY2(consumer.waitForStarted(5'000), qPrintable(consumer.errorString()));
+    RawFrameTransportConfig config;
+    config.stallTimeoutMilliseconds = 700;
+    const QByteArray frame(32 * 1024 * 1024, 'x');
+    RawFrameTransport transport(consumer, config);
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const RawFrameTransportResult result = transport.writeFrame(frame);
+    QVERIFY(!result.succeeded());
+    QVERIFY2(result.error.contains(QStringLiteral("stalled")), qPrintable(result.error));
+    QVERIFY(elapsed.elapsed() >= config.stallTimeoutMilliseconds);
+    QVERIFY(elapsed.elapsed() < 5'000);
+    consumer.kill();
+    QVERIFY(consumer.waitForFinished(5'000));
+}
+
+void TelemetryTests::cancelsBlockedRawFrameTransportPromptly()
+{
+    QProcess consumer;
+    consumer.start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH), {QStringLiteral("stall")});
+    QVERIFY2(consumer.waitForStarted(5'000), qPrintable(consumer.errorString()));
+    std::atomic_bool cancelled = false;
+    RawFrameTransport transport(consumer, {}, [&cancelled] { return cancelled.load(); });
+    std::thread canceller([&cancelled] {
+        QThread::msleep(300);
+        cancelled.store(true);
+    });
+    const auto joinCanceller = qScopeGuard([&] { canceller.join(); });
+    const QByteArray frame(32 * 1024 * 1024, 'x');
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const RawFrameTransportResult result = transport.writeFrame(frame);
+    QCOMPARE(result.status, RawFrameTransportResult::Status::Cancelled);
+    QVERIFY(elapsed.elapsed() < 2'000);
+    consumer.kill();
+    QVERIFY(consumer.waitForFinished(5'000));
 }
 
 void TelemetryTests::cleansOnlyManifestOwnedArtifacts()

@@ -1,5 +1,7 @@
 #include "export/ExportStoragePolicy.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QStorageInfo>
 
 #include <algorithm>
@@ -37,9 +39,27 @@ qint64 withMargin(const qint64 value, const double margin)
 
 ExportFilesystemInfo ExportStoragePolicy::filesystemForPath(const QString &path)
 {
-    const QStorageInfo storage(path);
-    if (!storage.isValid() || !storage.isReady()) return {{}, path, -1, -1};
-    return {storage.rootPath(), path, storage.bytesAvailable(), storage.bytesTotal()};
+    ExportFilesystemInfo result;
+    result.inspectedPath = path;
+    if (path.trimmed().isEmpty()) return result;
+
+    QString candidate = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    while (!QFileInfo::exists(candidate)) {
+        const QString parent = QFileInfo(candidate).absolutePath();
+        if (parent == candidate || parent.isEmpty()) return result;
+        candidate = parent;
+    }
+
+    result.probePath = candidate;
+    const QStorageInfo storage(candidate);
+    if (!storage.isValid() || !storage.isReady()
+        || storage.bytesAvailable() < 0 || storage.bytesTotal() < 0) {
+        return result;
+    }
+    result.rootPath = storage.rootPath();
+    result.availableBytes = storage.bytesAvailable();
+    result.totalBytes = storage.bytesTotal();
+    return result;
 }
 
 ExportStorageEstimate ExportStoragePolicy::estimate(

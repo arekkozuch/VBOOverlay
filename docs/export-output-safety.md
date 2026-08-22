@@ -23,6 +23,10 @@ For an existing target, replacement requires the controller's explicit `overwrit
 Input video, VBO, and known transaction paths are compared using cleaned absolute paths and canonical
 paths where Qt can resolve them, including existing symlinks and canonicalized parent directories.
 
+Free-space checks do not require a staging, temporary, or final artifact to exist. Each intended path
+is resolved upward to its nearest existing filesystem ancestor, while diagnostics retain the original
+intended path.
+
 ## Active artifact manifests and recovery
 
 Before a worker is started, the controller writes an atomic versioned JSON manifest in the system temporary directory. It records the export UUID, creation time, worker PID, state, temporary FFV1 path, staging path, and final target for diagnostics. The manifest is the authorization record: only its validated overlay and staging paths may be removed automatically; the final target is never a cleanup candidate.

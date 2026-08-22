@@ -36,6 +36,8 @@ qt_add_library(flappedear_core STATIC
     src/export/MediaProbe.h
     src/export/PersistentExportLog.cpp
     src/export/PersistentExportLog.h
+    src/export/RawFrameTransport.cpp
+    src/export/RawFrameTransport.h
     src/export/TelemetryFrameRenderer.cpp
     src/export/TelemetryFrameRenderer.h
     src/export/TemporaryOverlayValidation.cpp

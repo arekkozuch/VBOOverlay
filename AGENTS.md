@@ -38,6 +38,9 @@
   `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
   safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
+- Raw-frame transport into encoder processes uses bounded byte-oriented backpressure. Never assume
+  `QProcess` can buffer complete raw frames. Partial, rejected, or timed-out writes must never be
+  treated as successful frame submission.
 - Final exports are CFR at one authoritative rational export rate. Preserve that exact rate across
   overlay staging, source conversion, progress, and validation; do not reconstruct it from doubles.
 - Cloud CI is intentionally disabled. Local build/tests are the current required gate, and real-media

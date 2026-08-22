@@ -9,6 +9,7 @@ namespace FlappedEar {
 struct ExportFilesystemInfo {
     QString rootPath;
     QString inspectedPath;
+    QString probePath;
     qint64 availableBytes = -1;
     qint64 totalBytes = -1;
     [[nodiscard]] bool isUsable() const { return !rootPath.isEmpty() && availableBytes >= 0; }

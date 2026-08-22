@@ -13,16 +13,19 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Asynchronous video/VBO loading, transactional project loading, and stale-result rejection.
 - [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
 - [x] Windows compilation validation.
+- [x] Windows runtime/export validation on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration.
 
 ## Correctness / release hardening
 
 - [x] Enforce final CFR at the effective rational export rate, including deterministic VFR-to-CFR, non-zero range, and audio-timeline coverage.
 - [ ] Expand final-media validation across a broader real-media matrix.
 - [ ] Validate rotation, sample aspect ratio, color, HDR, and 10-bit media policy.
-- [x] Establish process-tree termination guarantees for FFmpeg/ffprobe (macOS/Unix runtime-tested; Windows compile-only).
+- [x] Establish process-tree termination guarantees for FFmpeg/ffprobe (macOS/Unix runtime-tested; Windows validated on the known configuration above).
 - [x] Add disk-space preflight and manifest-owned temporary-file management policy, including representative FFV1 sampling.
 - [ ] Validate the QML preview/export result against broader real media.
-- [ ] Validate Windows runtime behavior with installed dependencies.
+- [ ] Broaden Windows GPU/encoder and installed-dependency runtime coverage beyond the known configuration.
+- [ ] Validate heavy 4K export GUI responsiveness on Windows.
+- [ ] Add native Windows ACL-denied filesystem coverage and validate multi-instance export-log safety.
 - [ ] Define the packaging, signing, and release gate.
 
 Development validation includes a successful private non-zero-range 4K, approximately 59.94 fps HEVC/AAC export on macOS. It does not replace wider real-media or Windows runtime validation.

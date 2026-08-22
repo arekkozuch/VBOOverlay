@@ -4,7 +4,7 @@ FlappedEar Telemetry is a native desktop editor for synchronizing motorsport tel
 
 ## Status
 
-The application is a Qt 6, C++20, and QML native application in alpha and active development. Development has been validated on macOS, and Windows compilation has been validated. Windows runtime and package validation are still pending.
+The application is a Qt 6, C++20, and QML native application in alpha and active development. Development has been validated on macOS. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; broader hardware and packaging validation remain pending.
 
 ## Current capabilities
 
@@ -67,7 +67,7 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 
 ## Current limitations
 
-- Windows runtime validation is pending.
+- Windows runtime/export validation currently covers one known Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration, not a broad hardware matrix.
 - Packaging and signing are pending.
 - A source currently contains one video file; multi-chapter timelines are not implemented.
 - Export requires external FFmpeg at runtime.
