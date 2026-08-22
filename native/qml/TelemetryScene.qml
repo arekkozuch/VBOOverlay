@@ -641,12 +641,14 @@ Item {
                     Canvas {
                         id: retroCanvas
                         anchors.fill: parent
+                        property bool hasSpeed: parent.hasSpeed
                         property real rpmValue: parent.rpmValue
                         property real speedValue: parent.speedValue
                         property real gearValue: parent.gearValue
                         property real throttleValue: parent.throttleValue
                         property real brakeValue: parent.brakeValue
                         property var timingValue: parent.timingValue
+                        onHasSpeedChanged: requestPaint()
                         onRpmValueChanged: requestPaint()
                         onSpeedValueChanged: requestPaint()
                         onGearValueChanged: requestPaint()
@@ -761,7 +763,7 @@ Item {
                             ctx.fillStyle = white;
                             ctx.font = "700 17px " + family;
                             ctx.textAlign = "left";
-                            ctx.fillText((hasSpeed ? Math.round(speedValue).toString() : "—") + " Km/h", 18, 354);
+                            ctx.fillText((retroCanvas.hasSpeed ? Math.round(speedValue).toString() : "—") + " Km/h", 18, 354);
                             ctx.textAlign = "center";
                             ctx.fillText("200", 196, 356);
                             ctx.fillText("260", 252, 320);

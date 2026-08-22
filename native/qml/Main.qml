@@ -537,16 +537,38 @@ ApplicationWindow {
             }
             Label {
                 Layout.fillWidth: true
-                visible: Object.keys(appController.exportSourceInfo).length > 0
-                text: qsTr("Source: %1×%2 · %3\n%4 · %5\n%6")
-                    .arg(appController.exportSourceInfo.width)
-                    .arg(appController.exportSourceInfo.height)
-                    .arg(appController.exportSourceInfo.frameRateText)
-                    .arg(appController.exportSourceInfo.videoCodec)
-                    .arg(appController.exportSourceInfo.audioCodecs.length > 0
-                         ? qsTr("Audio: %1").arg(appController.exportSourceInfo.audioCodecs)
-                         : qsTr("No audio stream"))
-                    .arg(qsTr("Duration: %1 s").arg(Number(appController.exportSourceInfo.duration || 0).toFixed(3)))
+                visible: text.length > 0
+                text: {
+                    const info = appController.exportSourceInfo || ({});
+                    const audioCodecs = info.audioCodecs || [];
+                    const hasValue = value => value !== undefined && value !== null && String(value).length > 0;
+                    const sourceParts = [];
+                    const streamParts = [];
+                    const lines = [];
+
+                    if (hasValue(info.width) && hasValue(info.height))
+                        sourceParts.push(qsTr("%1×%2").arg(info.width).arg(info.height));
+                    if (hasValue(info.frameRateText))
+                        sourceParts.push(info.frameRateText);
+                    if (sourceParts.length > 0)
+                        lines.push(qsTr("Source: %1").arg(sourceParts.join(" · ")));
+
+                    if (hasValue(info.videoCodec))
+                        streamParts.push(info.videoCodec);
+                    if (info.audioCodecs !== undefined && info.audioCodecs !== null) {
+                        streamParts.push(audioCodecs.length > 0
+                                         ? qsTr("Audio: %1").arg(audioCodecs)
+                                         : qsTr("No audio stream"));
+                    }
+                    if (streamParts.length > 0)
+                        lines.push(streamParts.join(" · "));
+
+                    if (info.duration !== undefined && info.duration !== null
+                            && Number.isFinite(Number(info.duration))) {
+                        lines.push(qsTr("Duration: %1 s").arg(Number(info.duration).toFixed(3)));
+                    }
+                    return lines.join("\n");
+                }
                 color: "#b5c0cd"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 11
