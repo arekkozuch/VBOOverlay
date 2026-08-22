@@ -1012,14 +1012,19 @@ ApplicationWindow {
         onPositionChanged: appController.playbackTime = position / 1000.0
     }
 
-    AnalysisWindow {
-        id: analysisWindow
-        videoSource: appController.videoSource
-        playbackPosition: mediaPlayer.position
-        playbackRunning: mediaPlayer.playbackState === MediaPlayer.PlayingState
-        mediaDuration: mediaPlayer.duration
-        onSeekRequested: milliseconds => mediaPlayer.position = milliseconds
-        onTogglePlaybackRequested: mediaPlayer.playbackState === MediaPlayer.PlayingState ? mediaPlayer.pause() : mediaPlayer.play()
+    Loader {
+        id: analysisWindowLoader
+        active: appController.analysisVisible
+        sourceComponent: Component {
+            AnalysisWindow {
+                videoSource: appController.videoSource
+                playbackPosition: mediaPlayer.position
+                playbackRunning: mediaPlayer.playbackState === MediaPlayer.PlayingState
+                mediaDuration: mediaPlayer.duration
+                onSeekRequested: milliseconds => mediaPlayer.position = milliseconds
+                onTogglePlaybackRequested: mediaPlayer.playbackState === MediaPlayer.PlayingState ? mediaPlayer.pause() : mediaPlayer.play()
+            }
+        }
     }
 
     ColumnLayout {
