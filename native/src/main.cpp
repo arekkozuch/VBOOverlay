@@ -2,6 +2,7 @@
 #include "app/AppLog.h"
 #include "export/TelemetryFrameRenderer.h"
 #include "export/ExportEngine.h"
+#include "export/ExportFormat.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
@@ -260,22 +261,26 @@ int exportWorker(const QString &configPath)
         currentMessage = QStringLiteral("Preparing telemetry scene");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
         FlappedEar::TelemetryFrameRenderer renderer;
-        if (!renderer.initialize(&widgets, &session, &geometry, sync, input.videoSize)) {
+        const QSize outputSize(config.value("outputWidth").toInt(input.videoSize.width()),
+                               config.value("outputHeight").toInt(input.videoSize.height()));
+        if (!renderer.initialize(&widgets, &session, &geometry, sync, outputSize)) {
             writeExportEvent({{"state", "failed"}, {"error", renderer.errorString()}});
             return EXIT_FAILURE;
         }
         emitEvent({{"type", "log"}, {"level", "info"}, {"component", "renderer"},
                    {"message", "Renderer initialized"},
-                   {"details", QJsonObject{{"width", input.videoSize.width()},
-                                            {"height", input.videoSize.height()}}}});
+                   {"details", QJsonObject{{"width", outputSize.width()},
+                                            {"height", outputSize.height()}}}});
         FlappedEar::ExportSettings settings;
         settings.inputPath = config.value("inputPath").toString();
         settings.outputPath = config.value("outputPath").toString();
-        settings.outputSize = input.videoSize;
-        settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
+        settings.outputSize = outputSize;
+        settings.frameRate = {config.value("frameRateNumerator").toInteger(), config.value("frameRateDenominator").toInteger(1)};
+        if (!settings.frameRate.isValid()) settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
         settings.startTime = config.value("startTime").toDouble();
         settings.endTime = config.value("endTime").toDouble(input.duration);
-        settings.quality = config.value("quality").toString("high");
+        settings.videoBitrate = config.value("videoBitrate").toInteger();
+        if (settings.videoBitrate <= 0) settings.videoBitrate = FlappedEar::ExportFormat::recommendedVideoBitrate(outputSize, settings.frameRate);
         settings.audioEnabled = config.value("audioEnabled").toBool(true);
         settings.cancellationFilePath = config.value("cancelPath").toString();
         settings.temporaryOverlayPath = config.value("temporaryOverlayPath").toString();
@@ -295,7 +300,7 @@ int exportWorker(const QString &configPath)
                           {"sourceVideoTime", sourceRangeStart},
                           {"exportRelativeTime", 0.0},
                           {"expectedFrames", static_cast<qint64>(expectedFrames)},
-                          {"width", input.videoSize.width()}, {"height", input.videoSize.height()},
+                          {"width", outputSize.width()}, {"height", outputSize.height()},
                           {"frameRate", settings.frameRate.value()}, {"audioEnabled", settings.audioEnabled}});
         settings.progressCallback = [&](const FlappedEar::ExportPipelineProgress &pipeline) {
             const qint64 elapsedMilliseconds = elapsed.elapsed();

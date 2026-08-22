@@ -152,12 +152,16 @@ public:
     Q_INVOKABLE void ignoreSyncCandidate();
     Q_INVOKABLE bool startExport(
         const QUrl &output,
-        const QString &quality,
+        int outputWidth, int outputHeight, qint64 frameRateNumerator, qint64 frameRateDenominator,
+        qint64 videoBitrate,
         bool audioEnabled,
         bool customRange,
         double rangeStart,
         double rangeEnd,
         bool overwriteAllowed = false);
+    Q_INVOKABLE QVariantMap exportFormatOptions() const;
+    Q_INVOKABLE qint64 recommendedExportBitrate(int width, int height, qint64 numerator, qint64 denominator, const QString &quality) const;
+    Q_INVOKABLE qint64 estimateExportSize(qint64 videoBitrate, bool audioEnabled, double seconds) const;
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void cancelExportAndQuit();
     Q_INVOKABLE void dismissExportProgress();

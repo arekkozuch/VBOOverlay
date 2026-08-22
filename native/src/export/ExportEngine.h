@@ -48,7 +48,8 @@ struct ExportSettings {
     double startTime = 0.0;
     double endTime = 0.0;
     QString encoder;
-    QString quality = QStringLiteral("high");
+    qint64 videoBitrate = 0;
+    qint64 audioBitrate = 192'000;
     bool audioEnabled = true;
     QString cancellationFilePath;
     QString temporaryOverlayPath;

@@ -5,6 +5,7 @@
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProcessSupervisor.h"
 #include "export/ExportStoragePolicy.h"
+#include "export/ExportFormat.h"
 #include "export/FfmpegTools.h"
 #include "export/ExportProgress.h"
 #include "export/TelemetryFrameRenderer.h"
@@ -43,17 +44,6 @@ QByteArray rgbaBytes(const QImage &image, const QSize &size)
 QString rateString(const MediaRational &rate)
 {
     return QStringLiteral("%1/%2").arg(rate.numerator).arg(rate.denominator);
-}
-
-QString qualityBitrate(const QString &quality)
-{
-    if (quality == "fast") {
-        return QStringLiteral("6M");
-    }
-    if (quality == "maximum") {
-        return QStringLiteral("24M");
-    }
-    return QStringLiteral("12M");
 }
 
 bool isCancelled(const ExportSettings &settings)
@@ -423,8 +413,8 @@ ExportResult ExportEngine::exportVideo(
         }
         const ExportStorageEstimate storageEstimate = overlaySample.error.isEmpty()
             ? ExportStoragePolicy::estimateFromSample(overlaySample.encodedBytes, overlaySample.frames,
-                                                       expectedFrames, exportDuration, settings.quality)
-            : ExportStoragePolicy::estimate(expectedFrames, outputSize, exportDuration, settings.quality);
+                                                       expectedFrames, exportDuration, settings.videoBitrate)
+            : ExportStoragePolicy::estimate(expectedFrames, outputSize, exportDuration, settings.videoBitrate);
         const ExportStoragePreflight storagePreflight = ExportStoragePolicy::evaluate(
             temporaryOverlayPath, settings.outputPath, storageEstimate);
         observe(settings, QStringLiteral("log"), QStringLiteral("preparing"),
@@ -948,7 +938,7 @@ ExportResult ExportEngine::exportVideo(
         compositing = true;
         finalizing = false;
         const QString timeRangeFilter = QStringLiteral(
-            "[0:v]trim=start=%1:end=%2,setpts=PTS-STARTPTS,"
+            "[0:v]trim=start=%1:end=%2,setpts=PTS-STARTPTS%5,"
             "fps=fps=%3:start_time=0:round=near:eof_action=round,"
             "trim=end_frame=%4,setpts=PTS-STARTPTS[sourceVideo];"
             "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
@@ -956,20 +946,22 @@ ExportResult ExportEngine::exportVideo(
                                             .arg(sourceRangeStart, 0, 'f', 9)
                                             .arg(sourceRangeEnd, 0, 'f', 9)
                                             .arg(rateString(exportFrameRate))
-                                            .arg(expectedFrames);
+                                            .arg(expectedFrames)
+                                            .arg(source.videoSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
+                                                .arg(outputSize.width()).arg(outputSize.height()));
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
             "-i", settings.inputPath, "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
-            "-b:v", qualityBitrate(settings.quality),
+            "-b:v", QString::number(settings.videoBitrate),
             "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
         };
         if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
             compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
                 ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
                 .arg(sourceRangeStart, 0, 'f', 9).arg(sourceRangeEnd, 0, 'f', 9);
-            compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", "192k"});
+            compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", QString::number(settings.audioBitrate)});
         } else {
             compositionArguments.append("-an");
         }

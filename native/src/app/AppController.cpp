@@ -1,4 +1,6 @@
 #include "app/AppController.h"
+#include "export/ExportFormat.h"
+#include "export/ExportEngine.h"
 #include "app/AppLog.h"
 
 #include "gopro/GoProTelemetrySource.h"
@@ -198,6 +200,27 @@ QVariantMap AppController::exportSourceInfo() const
         {"audioCodecs", m_exportSourceInfo.audioCodecs.join(QStringLiteral(", "))},
         {"likelyVariableFrameRate", m_exportSourceInfo.likelyVariableFrameRate},
     };
+}
+QVariantMap AppController::exportFormatOptions() const
+{
+    const MediaRational sourceRate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
+    QVariantList sizes, rates;
+    for (const QSize &size : ExportFormat::resolutionOptions(m_exportSourceInfo.videoSize))
+        sizes.append(QVariantMap{{"width", size.width()}, {"height", size.height()}});
+    for (const MediaRational &rate : ExportFormat::frameRateOptions(sourceRate))
+        rates.append(QVariantMap{{"numerator", rate.numerator}, {"denominator", rate.denominator},
+                                 {"text", QString::number(rate.value(), 'f', 2) + QStringLiteral(" fps")}});
+    return {{"sizes", sizes}, {"rates", rates}};
+}
+qint64 AppController::estimateExportSize(const qint64 videoBitrate, const bool audioEnabled, const double seconds) const
+{
+    return ExportFormat::estimatedBytes(videoBitrate, audioEnabled, seconds);
+}
+qint64 AppController::recommendedExportBitrate(const int width, const int height, const qint64 numerator,
+                                               const qint64 denominator, const QString &quality) const
+{
+    return ExportFormat::bitrateForQuality(quality, {width, height}, {numerator, denominator});
 }
 QVariantMap AppController::exportMetrics() const { return m_exportMetrics; }
 QVariantMap AppController::exportProgressInfo() const { return m_exportProgressInfo; }
@@ -929,7 +952,8 @@ void AppController::ignoreSyncCandidate()
 
 bool AppController::startExport(
     const QUrl &output,
-    const QString &quality,
+    const int outputWidth, const int outputHeight, const qint64 frameRateNumerator, const qint64 frameRateDenominator,
+    const qint64 videoBitrate,
     const bool audioEnabled,
     const bool customRange,
     const double rangeStart,
@@ -956,6 +980,15 @@ bool AppController::startExport(
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
         return false;
+    }
+    const QSize outputSize(outputWidth, outputHeight);
+    const MediaRational outputRate{frameRateNumerator, frameRateDenominator};
+    if (!outputSize.isValid() || outputSize.width() % 2 || outputSize.height() % 2
+        || outputSize.width() > m_exportSourceInfo.videoSize.width() || outputSize.height() > m_exportSourceInfo.videoSize.height()
+        || !outputRate.isValid() || outputRate.value() > ExportEngine::effectiveFrameRate(m_exportSourceInfo).value()
+        || !ExportFormat::validCustomBitrate(videoBitrate)) {
+        m_exportError = QStringLiteral("Export format is invalid. Choose an even, non-upscaled size, supported frame rate, and 0.5–120 Mbps bitrate.");
+        m_exportState = QStringLiteral("failed"); emit exportChanged(); return false;
     }
     const double sourceDuration = m_exportSourceInfo.duration;
     const double startTime = customRange ? rangeStart : 0.0;
@@ -1030,7 +1063,9 @@ bool AppController::startExport(
         {"vboPath", m_telemetryPath},
         {"widgets", m_widgetModel.toJson()},
         {"sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}}},
-        {"quality", quality},
+        {"outputWidth", outputSize.width()}, {"outputHeight", outputSize.height()},
+        {"frameRateNumerator", outputRate.numerator}, {"frameRateDenominator", outputRate.denominator},
+        {"videoBitrate", videoBitrate},
         {"audioEnabled", audioEnabled},
         {"startTime", startTime},
         {"endTime", endTime},
@@ -1065,6 +1100,8 @@ bool AppController::startExport(
                             {"outputName", QFileInfo(outputPath).fileName()},
                             {"targetExistedBeforeExport", m_exportOutputTransaction->targetExistedBeforeExport()},
                             {"syncOffset", m_sync.offset}, {"timeScale", m_sync.timeScale},
+                            {"width", outputSize.width()}, {"height", outputSize.height()},
+                            {"frameRate", outputRate.value()}, {"videoBitrate", videoBitrate},
                             {"audioLabel", audioEnabled ? QStringLiteral("AAC audio") : QStringLiteral("No audio")}};
     m_exportProgressVisible = true;
     m_exportState = QStringLiteral("starting");

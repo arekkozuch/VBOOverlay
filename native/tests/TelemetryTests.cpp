@@ -2,6 +2,7 @@
 #include "app/AppController.h"
 #include "export/EncoderDetector.h"
 #include "export/ExportEngine.h"
+#include "export/ExportFormat.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
@@ -78,6 +79,7 @@ private slots:
     void detectsHevcEncoders();
     void cancelsEncoderDiscovery();
     void calculatesTimestampDrivenExportFrames();
+    void resolvesExplicitExportFormats();
     void preservesExactExportRateRationals();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
@@ -1100,7 +1102,7 @@ void TelemetryTests::estimatesTemporaryStorageFromRepresentativeSample()
     // 513,343,525 bytes was the observed complete 4K FFV1 overlay size.
     constexpr qint64 representativeBytesPerFrame = 71'368;
     const ExportStorageEstimate measured = ExportStoragePolicy::estimateFromSample(
-        representativeBytesPerFrame * 24, 24, expectedFrames, 120.0, QStringLiteral("high"));
+        representativeBytesPerFrame * 24, 24, expectedFrames, 120.0, 12'000'000);
     QCOMPARE(measured.basis, ExportStorageEstimate::Basis::MeasuredSample);
     QCOMPARE(measured.sampleFrames, qsizetype(24));
     QCOMPARE(measured.bytesPerFrame, representativeBytesPerFrame);
@@ -1110,7 +1112,7 @@ void TelemetryTests::estimatesTemporaryStorageFromRepresentativeSample()
              "Measured representative sample must not regress to a tens-of-GiB estimate.");
 
     const ExportStorageEstimate fallback = ExportStoragePolicy::estimate(
-        expectedFrames, {3840, 2160}, 120.0, QStringLiteral("high"));
+        expectedFrames, {3840, 2160}, 120.0, 12'000'000);
     QCOMPARE(fallback.basis, ExportStorageEstimate::Basis::ConservativeFallback);
     QCOMPARE(fallback.bytesPerFrame, 512LL * 1024LL);
     QCOMPARE(fallback.safetyMargin, 1.75);
@@ -1119,7 +1121,7 @@ void TelemetryTests::estimatesTemporaryStorageFromRepresentativeSample()
 
     const ExportStorageEstimate overflow = ExportStoragePolicy::estimateFromSample(
         std::numeric_limits<qint64>::max(), 1, std::numeric_limits<qsizetype>::max(),
-        1.0, QStringLiteral("high"));
+        1.0, 12'000'000);
     QCOMPARE(overflow.temporaryOverlayBytes, std::numeric_limits<qint64>::max());
 }
 
@@ -1425,6 +1427,28 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) < 150.0);
     QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) > 149.9);
     QCOMPARE(ExportEngine::exportRelativeTime(0, ntscRate), 0.0);
+}
+
+void TelemetryTests::resolvesExplicitExportFormats()
+{
+    const QList<QSize> sizes = ExportFormat::resolutionOptions({3840, 2160});
+    QCOMPARE(sizes.first(), QSize(3840, 2160));
+    QVERIFY(sizes.contains(QSize(1920, 1080)));
+    for (const QSize &size : sizes) {
+        QVERIFY(size.width() <= 3840 && size.height() <= 2160);
+        QCOMPARE(size.width() % 2, 0); QCOMPARE(size.height() % 2, 0);
+    }
+    const MediaRational ntsc{60'000, 1'001};
+    const QList<MediaRational> rates = ExportFormat::frameRateOptions(ntsc);
+    QCOMPARE(rates.size(), 2); QCOMPARE(rates.at(1).numerator, qint64(30'000));
+    QCOMPARE(rates.at(1).denominator, qint64(1'001));
+    const qint64 recommended = ExportFormat::recommendedVideoBitrate({1920, 1080}, {30, 1});
+    QVERIFY(recommended >= 25'000'000 && recommended <= 35'000'000);
+    QCOMPARE(ExportFormat::bitrateForQuality("smaller", {1920, 1080}, {30, 1}), qRound64(recommended * .7));
+    QVERIFY(!ExportFormat::validCustomBitrate(0)); QVERIFY(!ExportFormat::validCustomBitrate(121'000'000));
+    QVERIFY(ExportFormat::validCustomBitrate(10'000'000));
+    QVERIFY(ExportFormat::estimatedBytes(10'000'000, true, 60) > 75'000'000);
+    QCOMPARE(ExportEngine::frameCount(0, 10, rates.at(1)), qsizetype(300));
 }
 
 void TelemetryTests::preservesExactExportRateRationals()

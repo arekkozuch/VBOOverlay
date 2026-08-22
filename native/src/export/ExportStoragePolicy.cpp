@@ -33,12 +33,6 @@ qint64 withMargin(const qint64 value, const double margin)
         ? std::numeric_limits<qint64>::max() : static_cast<qint64>(std::ceil(expanded));
 }
 
-qint64 targetBitrate(const QString &quality)
-{
-    if (quality == QStringLiteral("fast")) return 6'000'000;
-    if (quality == QStringLiteral("maximum")) return 24'000'000;
-    return 12'000'000;
-}
 }
 
 ExportFilesystemInfo ExportStoragePolicy::filesystemForPath(const QString &path)
@@ -49,14 +43,14 @@ ExportFilesystemInfo ExportStoragePolicy::filesystemForPath(const QString &path)
 }
 
 ExportStorageEstimate ExportStoragePolicy::estimate(
-    const qsizetype frameCount, const QSize &size, const double durationSeconds, const QString &quality)
+    const qsizetype frameCount, const QSize &size, const double durationSeconds, const qint64 videoBitrate)
 {
     // FFV1 content size is intentionally not presented as an exact prediction.
     // Until this export has a measured sample, use a deliberately conservative
     // six MiB/frame fallback (well below raw RGBA but above typical UI overlays).
     const qint64 overlayRaw = saturatedMultiply(static_cast<qint64>(frameCount), kFallbackOverlayBytesPerFrame);
     const qint64 finalRaw = static_cast<qint64>(std::ceil(
-        qMax(0.0, durationSeconds) * static_cast<double>(targetBitrate(quality)) / 8.0));
+        qMax(0.0, durationSeconds) * static_cast<double>(videoBitrate) / 8.0));
     Q_UNUSED(size);
     return {withMargin(overlayRaw, kFallbackOverlaySafetyMargin), withMargin(finalRaw, kOutputSafetyMargin),
             kMinimumReserve, kFallbackOverlayBytesPerFrame, 0, 0, kFallbackOverlaySafetyMargin,
@@ -65,16 +59,16 @@ ExportStorageEstimate ExportStoragePolicy::estimate(
 
 ExportStorageEstimate ExportStoragePolicy::estimateFromSample(
     const qint64 sampleBytes, const qsizetype sampleFrames, const qsizetype expectedFrames,
-    const double durationSeconds, const QString &quality)
+    const double durationSeconds, const qint64 videoBitrate)
 {
     if (sampleBytes <= 0 || sampleFrames <= 0) {
-        return estimate(expectedFrames, {}, durationSeconds, quality);
+        return estimate(expectedFrames, {}, durationSeconds, videoBitrate);
     }
     const qint64 frameCount = static_cast<qint64>(sampleFrames);
     const qint64 bytesPerFrame = sampleBytes / frameCount + (sampleBytes % frameCount == 0 ? 0 : 1);
     const qint64 overlayRaw = saturatedMultiply(bytesPerFrame, static_cast<qint64>(expectedFrames));
     const qint64 finalRaw = static_cast<qint64>(std::ceil(
-        qMax(0.0, durationSeconds) * static_cast<double>(targetBitrate(quality)) / 8.0));
+        qMax(0.0, durationSeconds) * static_cast<double>(videoBitrate) / 8.0));
     return {withMargin(overlayRaw, kMeasuredOverlaySafetyMargin), withMargin(finalRaw, kOutputSafetyMargin),
             kMinimumReserve, bytesPerFrame, sampleFrames, sampleBytes, kMeasuredOverlaySafetyMargin,
             ExportStorageEstimate::Basis::MeasuredSample};

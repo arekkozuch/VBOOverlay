@@ -40,10 +40,10 @@ public:
 
     [[nodiscard]] static ExportFilesystemInfo filesystemForPath(const QString &path);
     [[nodiscard]] static ExportStorageEstimate estimate(
-        qsizetype frameCount, const QSize &size, double durationSeconds, const QString &quality);
+        qsizetype frameCount, const QSize &size, double durationSeconds, qint64 videoBitrate);
     [[nodiscard]] static ExportStorageEstimate estimateFromSample(
         qint64 sampleBytes, qsizetype sampleFrames, qsizetype expectedFrames,
-        double durationSeconds, const QString &quality);
+        double durationSeconds, qint64 videoBitrate);
     [[nodiscard]] static QString estimateBasisText(ExportStorageEstimate::Basis basis);
     [[nodiscard]] static ExportStoragePreflight evaluate(
         const QString &temporaryPath, const QString &destinationPath,
