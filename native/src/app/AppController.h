@@ -12,6 +12,7 @@
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
 #include "project/ProjectDocumentState.h"
+#include "project/ProjectRecoveryStore.h"
 
 #include <QFutureWatcher>
 #include <QProcess>
@@ -19,6 +20,7 @@
 #include <QObject>
 #include <QJsonObject>
 #include <QSettings>
+#include <QTimer>
 #include <QUrl>
 #include <QVariant>
 #include <atomic>
@@ -78,9 +80,10 @@ class AppController final : public QObject {
     Q_PROPERTY(bool projectLoading READ projectLoading NOTIFY projectLoadChanged)
     Q_PROPERTY(QString projectLoadStage READ projectLoadStage NOTIFY projectLoadChanged)
     Q_PROPERTY(QString projectLoadError READ projectLoadError NOTIFY projectLoadChanged)
+    Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY recoveryChanged)
 
 public:
-    explicit AppController(QObject *parent = nullptr);
+    explicit AppController(QObject *parent = nullptr, QString recoveryPath = {});
     ~AppController() override;
 
     [[nodiscard]] QUrl videoSource() const;
@@ -133,6 +136,7 @@ public:
     [[nodiscard]] bool projectLoading() const;
     [[nodiscard]] QString projectLoadStage() const;
     [[nodiscard]] QString projectLoadError() const;
+    [[nodiscard]] bool recoveryPending() const;
 
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
@@ -148,6 +152,7 @@ public:
     Q_INVOKABLE void cancelPendingDestructiveAction();
     Q_INVOKABLE bool saveCurrentProject();
     Q_INVOKABLE bool saveProject(const QUrl &url);
+    Q_INVOKABLE void resolveStartupRecovery(const QString &decision);
     Q_INVOKABLE void autoSync();
     Q_INVOKABLE void applySyncCandidate();
     Q_INVOKABLE void ignoreSyncCandidate();
@@ -194,6 +199,7 @@ signals:
     void destructiveActionChanged();
     void sourceLoadStateChanged();
     void projectLoadChanged();
+    void recoveryChanged();
     void saveAsRequested();
     void quitApproved();
 
@@ -239,6 +245,10 @@ private:
         VboLoadResult vbo;
         QString error;
         quint64 generation = 0;
+        quint64 documentRevisionAtStart = 0;
+        bool recovered = false;
+        quint64 recoveredRevision = 0;
+        quint64 recoveredLastSavedRevision = 0;
     };
 
     [[nodiscard]] QVariant semanticValue(const QString &alias) const;
@@ -253,14 +263,20 @@ private:
     void setProjectLoadState(bool loading, QString stage = {}, QString error = {});
     [[nodiscard]] static QString normalizedSourcePath(const QString &path);
     [[nodiscard]] static QVariantList trackPointsFor(const TrackGeometry &geometry);
-    void saveSessionSettings();
-    void saveWidgetSettings();
     void markPersistentChange();
+    [[nodiscard]] QJsonObject currentProjectObject() const;
+    bool beginProjectLoad(QString projectPath, const QJsonObject &project,
+                          bool recovered = false, quint64 recoveredRevision = 0,
+                          quint64 recoveredLastSavedRevision = 0);
+    void restoreStartupState();
+    void scheduleRecoveryWrite();
+    void writeRecoverySnapshot();
+    bool clearRecovery(const QString &reason);
+    void retireLegacyDocumentSettings();
     void performClearProject();
     bool performOpenProject(const QUrl &url);
     void beginDestructiveAction(ProjectDocumentState::DestructiveAction action, const QUrl &openUrl = {});
     void performPendingDestructiveAction();
-    void restoreSources();
     void reconcileAnalysisChannels();
     void handleExportOutput();
     void finishExport(int exitCode, QProcess::ExitStatus exitStatus);
@@ -281,6 +297,10 @@ private:
     QJsonObject m_projectTemplate;
     ProjectWriter m_projectWriter;
     ProjectDocumentState m_documentState;
+    ProjectRecoveryStore m_recoveryStore;
+    ProjectRecoverySnapshot m_pendingRecovery;
+    QTimer m_recoveryTimer;
+    bool m_recoveryPending = false;
     QUrl m_pendingOpenProject;
     bool m_suppressDirtyTracking = false;
     double m_playbackTime = 0.0;

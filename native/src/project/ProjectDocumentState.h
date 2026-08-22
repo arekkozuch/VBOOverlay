@@ -21,6 +21,7 @@ public:
     void markChanged();
     void markSaved(const QString &projectPath);
     void reset(const QString &projectPath = {});
+    void restoreUnsaved(const QString &projectPath, quint64 revision, quint64 lastSavedRevision);
 
     [[nodiscard]] QString projectPath() const;
     [[nodiscard]] bool dirty() const;

@@ -28,7 +28,7 @@ Private VBO and GoPro media are ignored by Git and must remain local. A VBO-only
 - Deterministic and ambiguous GPS-speed synchronization, plus optional real GoPro/VBO synchronization.
 - GPS9 GPMF decoding and malformed-GPMF handling.
 - Widget, group, cue, template, and track-geometry behavior.
-- Project atomic-save behavior, dirty-state actions, failed async source loads, and transactional project loading.
+- Project atomic-save behavior; authoritative startup loading; QSettings document-key retirement; dirty-state actions for Quit, New, and Open; explicit saved and project-less recovery/discard; failed-save recovery retention; unknown-field preservation; failed async source loads; transactional project loading; and rejection after an intervening document edit.
 - Export-output transaction safety, export progress/diagnostics parsing, durable export-log creation/append/retention, media probing, exact rational rate comparison, and HEVC encoder detection.
 - Portable storage resolution coverage for existing files/directories, future files, nested future paths, and unavailable inputs; injectable multi-volume preflight and measured-sample/fallback/margin/overflow regressions.
 - Portable raw-frame transport helper coverage for exact 1920×1080 and 3840×2160 RGBA frame transfers to a slow consumer, early consumer exit, sustained stall, prompt cancellation, and bounded queue size.

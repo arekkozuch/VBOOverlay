@@ -187,6 +187,34 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: recoveryDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        width: 460
+        title: qsTr("Recover unsaved changes?")
+        contentItem: Label {
+            width: 400
+            text: qsTr("FlappedEar found changes that were not saved to the project file. Recover them as an unsaved document, or discard them and open the saved project?")
+            wrapMode: Text.WordWrap
+            color: "#e8edf4"
+        }
+        footer: DialogButtonBox {
+            Button {
+                text: qsTr("Discard")
+                DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+                onClicked: appController.resolveStartupRecovery("discard")
+            }
+            Button {
+                text: qsTr("Recover")
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: appController.resolveStartupRecovery("recover")
+            }
+        }
+    }
+
     Connections {
         target: appController
         function onDestructiveActionChanged() {
@@ -202,6 +230,17 @@ ApplicationWindow {
             window.closeApproved = true
             window.close()
         }
+        function onRecoveryChanged() {
+            if (appController.recoveryPending)
+                recoveryDialog.open()
+            else
+                recoveryDialog.close()
+        }
+    }
+
+    Component.onCompleted: {
+        if (appController.recoveryPending)
+            recoveryDialog.open()
     }
 
     Dialog {

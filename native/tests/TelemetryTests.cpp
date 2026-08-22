@@ -22,6 +22,7 @@
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
 #include "project/ProjectDocumentState.h"
+#include "project/ProjectRecoveryStore.h"
 
 #include <QFile>
 #include <QDateTime>
@@ -111,12 +112,19 @@ private slots:
     void preservesExistingExportTargetOnFailures();
     void commitsNewAndReplacementExports();
     void savesProjectsAtomically();
+    void writesRecoverySnapshotsAtomically();
     void detectsPartialAndCommitWriteFailures();
     void gatesDirtyDestructiveActions_data();
     void gatesDirtyDestructiveActions();
     void resolvesDirtyDecisionsSafely();
     void retainsTelemetryAfterFailedAsyncLoad();
     void opensProjectsTransactionally();
+    void restoresSavedProjectsAndPreservesUnknownFields();
+    void recoversAndDiscardsSavedChanges();
+    void recoversAndDiscardsUnsavedDocuments();
+    void discardsUnsavedStateForQuitNewAndOpen();
+    void preservesRecoveryAcrossFailedSave();
+    void rejectsProjectLoadAfterInterveningEdit();
     void syncsOptionalRealRecording();
 };
 
@@ -178,6 +186,20 @@ bool writeBytes(const QString &path, const QByteArray &bytes)
     QFile file(path);
     return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         && file.write(bytes) == bytes.size();
+}
+
+QJsonObject testProject(const double offset, const QJsonObject &extra = {})
+{
+    WidgetModel widgets;
+    widgets.resetDefaults();
+    QJsonObject project = extra;
+    project.insert(QStringLiteral("version"), 2);
+    project.insert(QStringLiteral("scene"), QJsonObject{{QStringLiteral("widgets"), widgets.toJson()}});
+    project.insert(QStringLiteral("sync"), QJsonObject{{QStringLiteral("offset"), offset},
+                                                        {QStringLiteral("timeScale"), 1.0}});
+    project.insert(QStringLiteral("analysis"), QJsonObject{{QStringLiteral("channels"), QJsonArray{}},
+                                                            {QStringLiteral("visible"), true}});
+    return project;
 }
 
 class InjectedProjectWriteDevice final : public ProjectWriteDevice {
@@ -361,6 +383,41 @@ void TelemetryTests::savesProjectsAtomically()
     QFile unchanged(path);
     QVERIFY(unchanged.open(QIODevice::ReadOnly));
     QCOMPARE(unchanged.readAll(), replacement);
+#endif
+}
+
+void TelemetryTests::writesRecoverySnapshotsAtomically()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("recovery.json"));
+    const ProjectRecoveryStore store(path);
+    const ProjectRecoverySnapshot first{
+        QStringLiteral("saved.fetproject"), 2, 1,
+        QStringLiteral("2026-08-22T12:00:00.000Z"), testProject(1.0)};
+    QString error;
+    QVERIFY2(store.write(first, &error), qPrintable(error));
+    ProjectRecoverySnapshot loaded;
+    QVERIFY2(store.load(&loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.originalProjectPath, first.originalProjectPath);
+    QCOMPARE(loaded.revision, first.revision);
+    QCOMPARE(loaded.lastSavedRevision, first.lastSavedRevision);
+    QCOMPARE(loaded.project, first.project);
+
+#ifndef Q_OS_WIN
+    const QFile::Permissions originalPermissions = QFileInfo(directory.path()).permissions();
+    QVERIFY(QFile::setPermissions(
+        directory.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    const auto restorePermissions = qScopeGuard([&] {
+        QFile::setPermissions(directory.path(), originalPermissions);
+    });
+    ProjectRecoverySnapshot replacement = first;
+    replacement.revision = 3;
+    replacement.project = testProject(9.0);
+    QVERIFY(!store.write(replacement, &error));
+    QVERIFY2(store.load(&loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.revision, first.revision);
+    QCOMPARE(loaded.project, first.project);
 #endif
 }
 
@@ -1405,6 +1462,235 @@ void TelemetryTests::opensProjectsTransactionally()
     QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
     QCOMPARE(controller.syncOffset(), 2.5);
     QVERIFY(!controller.dirty());
+}
+
+void TelemetryTests::restoresSavedProjectsAndPreservesUnknownFields()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    const QString projectPath = directory.filePath(QStringLiteral("authoritative.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    const QJsonObject future{{QStringLiteral("something"), 123}};
+    QJsonObject project = testProject(1.25, {{QStringLiteral("futureField"), future}});
+    QJsonObject scene = project.value(QStringLiteral("scene")).toObject();
+    scene.insert(QStringLiteral("futureSceneField"), QStringLiteral("preserve me"));
+    project.insert(QStringLiteral("scene"), scene);
+    QVERIFY(writeBytes(projectPath, QJsonDocument(project).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectPath);
+    settings.setValue(QStringLiteral("sync/offset"), 99.0);
+    settings.setValue(QStringLiteral("editor/widgets"), QByteArray("legacy"));
+    settings.setValue(QStringLiteral("analysis/windowWidth"), 777);
+    settings.sync();
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 1.25);
+        QVERIFY(!controller.dirty());
+        QCOMPARE(controller.analysisWindowWidth(), 777);
+        controller.setSyncOffset(2.5);
+        QVERIFY(controller.saveCurrentProject());
+        QVERIFY(!controller.dirty());
+    }
+
+    QFile saved(projectPath);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const QJsonObject reloaded = QJsonDocument::fromJson(saved.readAll()).object();
+    QCOMPARE(reloaded.value(QStringLiteral("futureField")).toObject(), future);
+    QCOMPARE(reloaded.value(QStringLiteral("scene")).toObject()
+                 .value(QStringLiteral("futureSceneField")).toString(),
+             QStringLiteral("preserve me"));
+    QCOMPARE(reloaded.value(QStringLiteral("sync")).toObject()
+                 .value(QStringLiteral("offset")).toDouble(), 2.5);
+    QVERIFY(!settings.contains(QStringLiteral("sync/offset")));
+    QVERIFY(!settings.contains(QStringLiteral("editor/widgets")));
+}
+
+void TelemetryTests::recoversAndDiscardsSavedChanges()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(1.0)).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectPath);
+    settings.sync();
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_VERIFY(!controller.projectLoading());
+        controller.setSyncOffset(7.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery(QStringLiteral("recover"));
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 7.0);
+        QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(projectPath).canonicalFilePath());
+        QVERIFY(controller.dirty());
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery(QStringLiteral("discard"));
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 1.0);
+        QVERIFY(!controller.dirty());
+        QVERIFY(!QFileInfo(recoveryPath).exists());
+    }
+}
+
+void TelemetryTests::recoversAndDiscardsUnsavedDocuments()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    int recoveredWidgetCount = 0;
+    {
+        AppController controller(nullptr, recoveryPath);
+        controller.widgetModel()->addWidget(QStringLiteral("customValue"));
+        controller.setSyncOffset(4.0);
+        recoveredWidgetCount = controller.widgetModel()->count();
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery(QStringLiteral("recover"));
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.widgetModel()->count(), recoveredWidgetCount);
+        QCOMPARE(controller.syncOffset(), 4.0);
+        QVERIFY(controller.projectPath().isEmpty());
+        QVERIFY(controller.dirty());
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery(QStringLiteral("discard"));
+        QVERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 0.0);
+        QVERIFY(controller.projectPath().isEmpty());
+        QVERIFY(!controller.dirty());
+        QVERIFY(!QFileInfo(recoveryPath).exists());
+    }
+}
+
+void TelemetryTests::discardsUnsavedStateForQuitNewAndOpen()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    const QString projectA = directory.filePath(QStringLiteral("a.fetproject"));
+    const QString projectB = directory.filePath(QStringLiteral("b.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QVERIFY(writeBytes(projectA, QJsonDocument(testProject(1.0)).toJson()));
+    QVERIFY(writeBytes(projectB, QJsonDocument(testProject(3.0)).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectA);
+    settings.sync();
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_VERIFY(!controller.projectLoading());
+        controller.widgetModel()->addWidget(QStringLiteral("customValue"));
+        controller.setSyncOffset(8.0);
+        controller.setAnalysisVisible(false);
+        controller.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+        QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        QSignalSpy quitSpy(&controller, &AppController::quitApproved);
+        controller.requestQuit();
+        controller.resolveDestructiveAction(QStringLiteral("discard"));
+        QCOMPARE(quitSpy.count(), 1);
+        QVERIFY(!QFileInfo(recoveryPath).exists());
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 1.0);
+        QVERIFY(controller.telemetryName().isEmpty());
+        QVERIFY(controller.analysisVisible());
+        QVERIFY(!controller.dirty());
+
+        controller.setSyncOffset(8.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        controller.requestNewProject();
+        controller.resolveDestructiveAction(QStringLiteral("discard"));
+        QCOMPARE(controller.syncOffset(), 0.0);
+        QVERIFY(controller.projectPath().isEmpty());
+        QVERIFY(!controller.dirty());
+        QVERIFY(!QFileInfo(recoveryPath).exists());
+
+        controller.setSyncOffset(9.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        controller.requestOpenProject(QUrl::fromLocalFile(projectB));
+        controller.resolveDestructiveAction(QStringLiteral("discard"));
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 3.0);
+        QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(projectB).canonicalFilePath());
+        QVERIFY(!controller.dirty());
+        QVERIFY(!QFileInfo(recoveryPath).exists());
+    }
+}
+
+void TelemetryTests::preservesRecoveryAcrossFailedSave()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    const QByteArray original = QJsonDocument(testProject(1.0)).toJson();
+    QVERIFY(writeBytes(projectPath, original));
+
+    AppController controller(nullptr, recoveryPath);
+    controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
+    QTRY_VERIFY(!controller.projectLoading());
+    controller.setSyncOffset(8.0);
+    QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+    QVERIFY(!controller.saveProject(
+        QUrl::fromLocalFile(directory.filePath(QStringLiteral("missing/project.fetproject")))));
+    QVERIFY(controller.dirty());
+    QVERIFY(QFileInfo(recoveryPath).isFile());
+    QFile unchanged(projectPath);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), original);
+    QVERIFY(controller.saveCurrentProject());
+    QVERIFY(!controller.dirty());
+    QVERIFY(!QFileInfo(recoveryPath).exists());
+}
+
+void TelemetryTests::rejectsProjectLoadAfterInterveningEdit()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("delayed.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(2.0)).toJson()));
+
+    AppController controller(nullptr, recoveryPath);
+    controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
+    QVERIFY(controller.projectLoading());
+    controller.setSyncOffset(9.0);
+    QTRY_VERIFY(!controller.projectLoading());
+    QCOMPARE(controller.syncOffset(), 9.0);
+    QVERIFY(controller.projectPath().isEmpty());
+    QVERIFY(controller.dirty());
+    QVERIFY(controller.projectLoadError().contains(QStringLiteral("document changed")));
 }
 
 void TelemetryTests::tracksExportStageElapsedTime()

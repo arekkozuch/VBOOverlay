@@ -21,6 +21,15 @@ void ProjectDocumentState::reset(const QString &projectPath)
     m_pendingAction = DestructiveAction::None;
 }
 
+void ProjectDocumentState::restoreUnsaved(
+    const QString &projectPath, const quint64 revision, const quint64 lastSavedRevision)
+{
+    m_projectPath = projectPath;
+    m_revision = revision;
+    m_lastSavedRevision = lastSavedRevision;
+    m_pendingAction = DestructiveAction::None;
+}
+
 QString ProjectDocumentState::projectPath() const { return m_projectPath; }
 bool ProjectDocumentState::dirty() const { return m_revision != m_lastSavedRevision; }
 quint64 ProjectDocumentState::revision() const { return m_revision; }

@@ -10,6 +10,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] HEVC/AAC export with custom source ranges, staged overlay validation, diagnostics, progress, and cancellation.
 - [x] Export output transactions, including explicit overwrite consent and protected user targets.
 - [x] Atomic project saving and dirty-state safeguards for destructive project actions.
+- [x] Separate atomic unsaved-document recovery from authoritative saved projects, including explicit startup recovery/discard and unknown-field preservation.
 - [x] Asynchronous video/VBO loading, transactional project loading, and stale-result rejection.
 - [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
 - [x] Windows compilation validation.

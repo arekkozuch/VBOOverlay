@@ -25,6 +25,7 @@
 - Do not claim functionality works without running the relevant command or integration fixture.
 - Preserve ordinary video import when GoPro metadata is absent or malformed.
 - Treat VFR as a timing concern: warn about input cadence and preserve the validated CFR conversion policy.
+- Documentation is part of every iteration.
 
 ## Safety and correctness invariants
 
@@ -32,6 +33,9 @@
   may be deleted automatically, and an existing target requires explicit overwrite consent.
 - Project saves remain atomic. New, open, and quit actions must respect dirty state, and project open
   must remain transactional.
+- The saved `.fetproject` is the authoritative clean document state. Recovery data is separate,
+  represents unsaved changes, and must never be silently marked clean. Discard removes unsaved
+  recovery state rather than persisting it as the next clean session.
 - Source and project async results must be guarded by generation and source identity. Stale results
   must never mutate committed state.
 - Parser output timestamps must remain strictly monotonic. Public telemetry boundaries must not expose

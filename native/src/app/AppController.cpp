@@ -31,24 +31,19 @@
 
 namespace FlappedEar {
 
-AppController::AppController(QObject *parent)
+AppController::AppController(QObject *parent, QString recoveryPath)
     : QObject(parent)
     , m_settings()
     , m_previewRenderContext(this)
+    , m_recoveryStore(std::move(recoveryPath))
 {
-    m_sync.offset = m_settings.value("sync/offset", 0.0).toDouble();
-    m_sync.timeScale = m_settings.value("sync/timeScale", 1.0).toDouble();
+    m_sync = {};
     m_previewRenderContext.setSyncTransform(m_sync);
-    m_analysisChannels = m_settings.value("analysis/channels").toStringList();
-    m_analysisVisible = m_settings.value("analysis/visible", true).toBool();
-    const QJsonDocument savedWidgets =
-        QJsonDocument::fromJson(m_settings.value("editor/widgets").toByteArray());
-    if (!savedWidgets.isObject() || savedWidgets.object().value("schemaVersion").toInt() != 2
-        || !m_widgetModel.fromJson(savedWidgets.object().value("widgets").toArray())) {
-        m_widgetModel.resetDefaults();
-    }
+    m_widgetModel.resetDefaults();
+    m_recoveryTimer.setSingleShot(true);
+    m_recoveryTimer.setInterval(250);
+    connect(&m_recoveryTimer, &QTimer::timeout, this, &AppController::writeRecoverySnapshot);
     connect(&m_widgetModel, &WidgetModel::revisionChanged, this, [this] {
-        saveWidgetSettings();
         markPersistentChange();
     });
     connect(&m_syncWatcher, &QFutureWatcher<AutoSyncResult>::finished, this, [this] {
@@ -144,11 +139,17 @@ AppController::AppController(QObject *parent)
             setStatus(QStringLiteral("Project could not be opened: %1").arg(result.error));
             return;
         }
+        if (result.documentRevisionAtStart != m_documentState.revision()) {
+            AppLog::warn(QStringLiteral("Stale project load rejected due to document revision: %1")
+                             .arg(result.projectPath));
+            setProjectLoadState(false, {}, QStringLiteral("document changed while project was loading."));
+            setStatus(QStringLiteral("Project load cancelled because the current document changed."));
+            return;
+        }
         commitProjectLoad(result);
     });
-    restoreSources();
-    const QString restoredProjectPath = m_settings.value("project/path").toString();
-    m_documentState.reset(QFileInfo::exists(restoredProjectPath) ? restoredProjectPath : QString());
+    retireLegacyDocumentSettings();
+    restoreStartupState();
 }
 
 AppController::~AppController()
@@ -284,6 +285,7 @@ QString AppController::vboLoadState() const { return m_vboLoadState; }
 bool AppController::projectLoading() const { return m_projectLoading; }
 QString AppController::projectLoadStage() const { return m_projectLoadStage; }
 QString AppController::projectLoadError() const { return m_projectLoadError; }
+bool AppController::recoveryPending() const { return m_recoveryPending; }
 
 QString AppController::normalizedSourcePath(const QString &path)
 {
@@ -396,7 +398,6 @@ void AppController::commitVideoProbe(const VideoProbeResult &result, const bool 
     m_videoLoadState = QStringLiteral("ready");
     m_pendingVideoPath.clear();
     m_syncCandidate.clear();
-    m_settings.setValue("sources/video", result.path);
     emit videoSourceChanged();
     emit exportChanged();
     emit syncCandidateChanged();
@@ -419,7 +420,6 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     m_syncCandidate.clear();
     m_previewRenderContext.setSession(m_session.get());
     m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
-    m_settings.setValue("sources/vbo", m_telemetryPath);
     reconcileAnalysisChannels();
     emit telemetryChanged();
     emit liveValuesChanged();
@@ -509,8 +509,6 @@ void AppController::performClearProject()
     m_syncCandidate.clear();
     m_projectTemplate = {};
     m_widgetModel.resetDefaults();
-    m_settings.remove("sources");
-    saveSessionSettings();
     emit videoSourceChanged();
     emit telemetryChanged();
     emit playbackTimeChanged();
@@ -521,6 +519,7 @@ void AppController::performClearProject()
     m_documentState.reset();
     m_pendingOpenProject = QUrl();
     m_settings.remove("project/path");
+    m_settings.sync();
     emit documentStateChanged();
     emit destructiveActionChanged();
     setStatus("New native project created.");
@@ -667,6 +666,40 @@ bool AppController::saveCurrentProject()
     return saveProject(QUrl::fromLocalFile(m_documentState.projectPath()));
 }
 
+void AppController::resolveStartupRecovery(const QString &decision)
+{
+    if (!m_recoveryPending || (decision != QStringLiteral("recover")
+                               && decision != QStringLiteral("discard"))) {
+        return;
+    }
+    const ProjectRecoverySnapshot snapshot = m_pendingRecovery;
+    m_pendingRecovery = {};
+    m_recoveryPending = false;
+    emit recoveryChanged();
+    if (decision == QStringLiteral("recover")) {
+        if (!beginProjectLoad(snapshot.originalProjectPath, snapshot.project, true,
+                              snapshot.revision, snapshot.lastSavedRevision)) {
+            m_pendingRecovery = snapshot;
+            m_recoveryPending = true;
+            emit recoveryChanged();
+        }
+        return;
+    }
+    if (!clearRecovery(QStringLiteral("startup discard"))) {
+        m_pendingRecovery = snapshot;
+        m_recoveryPending = true;
+        emit recoveryChanged();
+        setStatus(QStringLiteral("Could not discard recovery data."));
+        return;
+    }
+    AppLog::info(QStringLiteral("Recovery discarded"));
+    if (!snapshot.originalProjectPath.isEmpty() && QFileInfo(snapshot.originalProjectPath).isFile()) {
+        performOpenProject(QUrl::fromLocalFile(snapshot.originalProjectPath));
+    } else {
+        performClearProject();
+    }
+}
+
 bool AppController::performOpenProject(const QUrl &url)
 {
     AppLog::info(QStringLiteral("Project load started: %1").arg(url.toLocalFile()));
@@ -678,13 +711,19 @@ bool AppController::performOpenProject(const QUrl &url)
         return false;
     }
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    const QJsonObject project = document.object();
+    return beginProjectLoad(normalizedSourcePath(file.fileName()), document.object());
+}
+
+bool AppController::beginProjectLoad(
+    QString projectPath, const QJsonObject &project, const bool recovered,
+    const quint64 recoveredRevision, const quint64 recoveredLastSavedRevision)
+{
     const QJsonObject scene = project.value("scene").toObject();
     WidgetModel candidateWidgets;
     if (project.value("version").toInt() != 2 || !scene.value("widgets").isArray()
         || !candidateWidgets.fromJson(scene.value("widgets").toArray())) {
         AppLog::error(QStringLiteral("Project load failed: unsupported or invalid file: %1")
-                          .arg(url.toLocalFile()));
+                          .arg(projectPath));
         setStatus("Project error: unsupported or invalid .fetproject file.");
         return false;
     }
@@ -693,7 +732,7 @@ bool AppController::performOpenProject(const QUrl &url)
     const double timeScale = sync.value("timeScale").toDouble(1.0);
     if (!std::isfinite(offset) || !std::isfinite(timeScale) || timeScale <= 0.0) {
         AppLog::error(QStringLiteral("Project load failed: invalid synchronization state: %1")
-                          .arg(url.toLocalFile()));
+                          .arg(projectPath));
         setStatus("Project error: synchronization state is invalid.");
         return false;
     }
@@ -707,7 +746,7 @@ bool AppController::performOpenProject(const QUrl &url)
     const quint64 generation = beginSourceGeneration();
     m_projectLoadCancellation = std::make_shared<std::atomic_bool>(false);
     const std::shared_ptr<std::atomic_bool> cancellation = m_projectLoadCancellation;
-    const QString projectPath = normalizedSourcePath(file.fileName());
+    const quint64 documentRevisionAtStart = m_documentState.revision();
     const QString videoPath = project.value("videoPath").toString();
     const QString vboPath = project.value("vboPath").toString();
     const QString normalizedVideoPath = videoPath.isEmpty() ? QString() : normalizedSourcePath(videoPath);
@@ -721,7 +760,8 @@ bool AppController::performOpenProject(const QUrl &url)
         [projectPath, project, widgets = scene.value("widgets").toArray(), channels,
          analysisVisible = analysis.value("visible").toBool(true),
          syncTransform = SyncTransform{offset, timeScale}, normalizedVideoPath, normalizedVboPath,
-         generation, cancellation] {
+         generation, cancellation, documentRevisionAtStart, recovered, recoveredRevision,
+         recoveredLastSavedRevision] {
             ProjectLoadResult result;
             result.projectPath = projectPath;
             result.project = project;
@@ -730,6 +770,10 @@ bool AppController::performOpenProject(const QUrl &url)
             result.analysisVisible = analysisVisible;
             result.sync = syncTransform;
             result.generation = generation;
+            result.documentRevisionAtStart = documentRevisionAtStart;
+            result.recovered = recovered;
+            result.recoveredRevision = recoveredRevision;
+            result.recoveredLastSavedRevision = recoveredLastSavedRevision;
             if (!normalizedVideoPath.isEmpty()) {
                 result.video.path = normalizedVideoPath;
                 result.video.generation = generation;
@@ -817,11 +861,15 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     setAnalysisChannels(result.analysisChannels);
     setAnalysisVisible(result.analysisVisible);
     reconcileAnalysisChannels();
-    m_settings.setValue("sources/video", result.video.path);
-    m_settings.setValue("sources/vbo", result.vbo.path);
-    m_settings.setValue("project/path", result.projectPath);
-    saveSessionSettings();
-    m_documentState.reset(result.projectPath);
+    if (!result.projectPath.isEmpty()) {
+        m_settings.setValue("project/path", result.projectPath);
+    }
+    if (result.recovered) {
+        m_documentState.restoreUnsaved(
+            result.projectPath, result.recoveredRevision, result.recoveredLastSavedRevision);
+    } else {
+        m_documentState.reset(result.projectPath);
+    }
     emit videoSourceChanged();
     emit telemetryChanged();
     emit exportChanged();
@@ -832,8 +880,40 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     emit sourceLoadStateChanged();
     emit documentStateChanged();
     setProjectLoadState(false);
-    AppLog::info(QStringLiteral("Project load succeeded: %1").arg(result.projectPath));
-    setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(result.projectPath).fileName()));
+    if (result.recovered) {
+        AppLog::info(QStringLiteral("Recovery accepted"));
+        setStatus(QStringLiteral("Recovered unsaved changes. Save to keep them."));
+    } else {
+        AppLog::info(QStringLiteral("Project load succeeded: %1").arg(result.projectPath));
+        AppLog::info(QStringLiteral("Saved project restored from disk: %1").arg(result.projectPath));
+        setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(result.projectPath).fileName()));
+    }
+}
+
+QJsonObject AppController::currentProjectObject() const
+{
+    QJsonObject project = m_projectTemplate;
+    project.insert("version", 2);
+    project.insert("videoPath", m_videoSource.toLocalFile());
+    project.insert("vboPath", m_telemetryPath);
+    QJsonObject sync = project.value("sync").toObject();
+    sync.insert("offset", m_sync.offset);
+    sync.insert("timeScale", m_sync.timeScale);
+    project.insert("sync", sync);
+    QJsonObject scene = project.value("scene").toObject();
+    scene.insert("widgets", m_widgetModel.toJson());
+    project.insert("scene", scene);
+    QJsonObject analysis = project.value("analysis").toObject();
+    analysis.insert("channels", QJsonArray::fromStringList(m_analysisChannels));
+    analysis.insert("visible", m_analysisVisible);
+    project.insert("analysis", analysis);
+    if (!project.contains("mapSettings")) {
+        project.insert("mapSettings", QJsonObject{{"providerId", "none"}});
+    }
+    if (!project.contains("exportSettings")) {
+        project.insert("exportSettings", QJsonObject{{"quality", "high"}});
+    }
+    return project;
 }
 
 bool AppController::saveProject(const QUrl &url)
@@ -843,23 +923,7 @@ bool AppController::saveProject(const QUrl &url)
         path.append(".fetproject");
     }
     AppLog::info(QStringLiteral("Project save requested: %1").arg(path));
-    QJsonObject project = m_projectTemplate;
-    project.insert("version", 2);
-    project.insert("videoPath", m_videoSource.toLocalFile());
-    project.insert("vboPath", m_telemetryPath);
-    project.insert(
-        "sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}});
-    project.insert("scene", QJsonObject{{"widgets", m_widgetModel.toJson()}});
-    project.insert(
-        "analysis",
-        QJsonObject{{"channels", QJsonArray::fromStringList(m_analysisChannels)},
-                    {"visible", m_analysisVisible}});
-    if (!project.contains("mapSettings")) {
-        project.insert("mapSettings", QJsonObject{{"providerId", "none"}});
-    }
-    if (!project.contains("exportSettings")) {
-        project.insert("exportSettings", QJsonObject{{"quality", "high"}});
-    }
+    const QJsonObject project = currentProjectObject();
     const QByteArray payload = QJsonDocument(project).toJson(QJsonDocument::Indented);
     const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
     if (!writeResult.success) {
@@ -872,7 +936,10 @@ bool AppController::saveProject(const QUrl &url)
     }
     m_projectTemplate = project;
     m_settings.setValue("project/path", path);
+    m_settings.sync();
     m_documentState.markSaved(path);
+    m_recoveryTimer.stop();
+    clearRecovery(QStringLiteral("successful save"));
     emit documentStateChanged();
     AppLog::info(QStringLiteral("Project save succeeded: %1").arg(path));
     setStatus(QStringLiteral("Project saved: %1").arg(QFileInfo(path).fileName()));
@@ -1619,7 +1686,6 @@ void AppController::setSyncOffset(const double seconds)
     }
     m_sync.offset = seconds;
     m_previewRenderContext.setSyncTransform(m_sync);
-    saveSessionSettings();
     emit syncChanged();
     emit liveValuesChanged();
     markPersistentChange();
@@ -1632,7 +1698,6 @@ void AppController::setTimeScale(const double scale)
     }
     m_sync.timeScale = scale;
     m_previewRenderContext.setSyncTransform(m_sync);
-    saveSessionSettings();
     emit syncChanged();
     emit liveValuesChanged();
     markPersistentChange();
@@ -1654,7 +1719,6 @@ void AppController::setAnalysisChannels(const QStringList &channels)
         return;
     }
     m_analysisChannels = normalized;
-    m_settings.setValue("analysis/channels", m_analysisChannels);
     emit analysisChanged();
     markPersistentChange();
 }
@@ -1665,7 +1729,6 @@ void AppController::setAnalysisVisible(const bool visible)
         return;
     }
     m_analysisVisible = visible;
-    m_settings.setValue("analysis/visible", visible);
     emit analysisChanged();
     markPersistentChange();
 }
@@ -1689,21 +1752,6 @@ void AppController::setStatus(QString status)
     emit statusTextChanged();
 }
 
-void AppController::saveSessionSettings()
-{
-    m_settings.setValue("sync/offset", m_sync.offset);
-    m_settings.setValue("sync/timeScale", m_sync.timeScale);
-    m_settings.sync();
-}
-
-void AppController::saveWidgetSettings()
-{
-    const QJsonDocument document(
-        QJsonObject{{"schemaVersion", 2}, {"widgets", m_widgetModel.toJson()}});
-    m_settings.setValue("editor/widgets", document.toJson(QJsonDocument::Compact));
-    m_settings.sync();
-}
-
 void AppController::markPersistentChange()
 {
     if (m_suppressDirtyTracking) {
@@ -1711,6 +1759,91 @@ void AppController::markPersistentChange()
     }
     m_documentState.markChanged();
     emit documentStateChanged();
+    scheduleRecoveryWrite();
+}
+
+void AppController::scheduleRecoveryWrite()
+{
+    if (!m_recoveryPending && m_documentState.dirty()) {
+        m_recoveryTimer.start();
+    }
+}
+
+void AppController::writeRecoverySnapshot()
+{
+    if (m_recoveryPending || !m_documentState.dirty()) {
+        return;
+    }
+    const ProjectRecoverySnapshot snapshot{
+        m_documentState.projectPath(),
+        m_documentState.revision(),
+        m_documentState.lastSavedRevision(),
+        QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs),
+        currentProjectObject(),
+    };
+    QString error;
+    if (!m_recoveryStore.write(snapshot, &error)) {
+        AppLog::error(QStringLiteral("Recovery snapshot write failed: %1").arg(error));
+        return;
+    }
+    AppLog::info(QStringLiteral("Recovery snapshot written"));
+}
+
+bool AppController::clearRecovery(const QString &reason)
+{
+    const bool existed = m_recoveryStore.exists();
+    QString error;
+    if (!m_recoveryStore.clear(&error)) {
+        AppLog::error(QStringLiteral("Recovery clear failed: %1").arg(error));
+        return false;
+    }
+    if (existed) {
+        AppLog::info(QStringLiteral("Recovery cleared after %1").arg(reason));
+    }
+    return true;
+}
+
+void AppController::retireLegacyDocumentSettings()
+{
+    m_settings.remove(QStringLiteral("editor/widgets"));
+    m_settings.remove(QStringLiteral("sync/offset"));
+    m_settings.remove(QStringLiteral("sync/timeScale"));
+    m_settings.remove(QStringLiteral("sources/video"));
+    m_settings.remove(QStringLiteral("sources/vbo"));
+    m_settings.remove(QStringLiteral("analysis/channels"));
+    m_settings.remove(QStringLiteral("analysis/visible"));
+    m_settings.sync();
+}
+
+void AppController::restoreStartupState()
+{
+    ProjectRecoverySnapshot snapshot;
+    QString error;
+    if (m_recoveryStore.exists() && m_recoveryStore.load(&snapshot, &error)) {
+        m_pendingRecovery = snapshot;
+        m_recoveryPending = true;
+        m_documentState.reset();
+        AppLog::info(QStringLiteral("Recovery detected"));
+        setStatus(QStringLiteral("Unsaved changes are available for recovery."));
+        return;
+    }
+    if (m_recoveryStore.exists()) {
+        AppLog::error(QStringLiteral("Recovery snapshot ignored: %1").arg(error));
+    }
+    const QString projectPath = m_settings.value(QStringLiteral("project/path")).toString();
+    if (projectPath.isEmpty()) {
+        m_documentState.reset();
+        return;
+    }
+    if (!QFileInfo(projectPath).isFile()) {
+        m_settings.remove(QStringLiteral("project/path"));
+        m_settings.sync();
+        m_documentState.reset();
+        setStatus(QStringLiteral("The previous project could not be found; a new project was started."));
+        return;
+    }
+    m_documentState.reset();
+    performOpenProject(QUrl::fromLocalFile(projectPath));
 }
 
 void AppController::beginDestructiveAction(
@@ -1739,6 +1872,12 @@ void AppController::performPendingDestructiveAction()
     const QUrl openUrl = m_pendingOpenProject;
     m_pendingOpenProject = QUrl();
     emit destructiveActionChanged();
+    m_recoveryTimer.stop();
+    if (action != ProjectDocumentState::DestructiveAction::None
+        && !clearRecovery(QStringLiteral("discarded document state"))) {
+        setStatus(QStringLiteral("Could not discard recovery data; action cancelled."));
+        return;
+    }
     switch (action) {
     case ProjectDocumentState::DestructiveAction::NewProject:
         performClearProject();
@@ -1753,35 +1892,6 @@ void AppController::performPendingDestructiveAction()
     case ProjectDocumentState::DestructiveAction::None:
         break;
     }
-}
-
-void AppController::restoreSources()
-{
-    const QString videoPath = m_settings.value("sources/video").toString();
-    const QString vboPath = m_settings.value("sources/vbo").toString();
-    if (videoPath.isEmpty() && vboPath.isEmpty()) {
-        return;
-    }
-    const quint64 generation = beginSourceGeneration();
-    if (!videoPath.isEmpty()) {
-        if (QFileInfo(videoPath).isFile()) {
-            startVideoProbe(normalizedSourcePath(videoPath), generation, false);
-        } else {
-            m_videoLoadState = QStringLiteral("error");
-            emit sourceLoadStateChanged();
-            setStatus(QStringLiteral("Could not restore video: %1").arg(videoPath));
-        }
-    }
-    if (!vboPath.isEmpty()) {
-        if (QFileInfo(vboPath).isFile()) {
-            startVboLoad(normalizedSourcePath(vboPath), generation, false);
-        } else {
-            m_vboLoadState = QStringLiteral("error");
-            emit sourceLoadStateChanged();
-            setStatus(QStringLiteral("Could not restore VBO: %1").arg(vboPath));
-        }
-    }
-    setStatus("Restoring previous sources…");
 }
 
 void AppController::reconcileAnalysisChannels()

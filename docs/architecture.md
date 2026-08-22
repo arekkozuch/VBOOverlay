@@ -29,13 +29,23 @@ video + VBO/project
 
 `ProjectWriter` saves serialized `.fetproject` data through `QSaveFile` with direct-write fallback disabled. A project is marked saved only after the atomic write commits.
 
+The saved `.fetproject` is the authoritative clean document. `AppController` retains its complete JSON object as the serialization base and overlays known edits onto nested project objects, so unknown or future fields survive open/edit/save cycles. Successful Save/Save As updates that base, marks the current revision saved, and removes stale recovery only after the project write commits. A failed save leaves both dirty state and recovery intact.
+
+Persistent unsaved edits are serialized as one complete project object plus recovery version, original project path, timestamp, and revision metadata. `ProjectRecoveryStore` atomically replaces `project-recovery.json` under `AppLocalDataLocation` through `QSaveFile`; playback position and other transient UI state do not trigger it. Recovery-write failure is logged and cannot modify the saved project.
+
+QSettings is application preference storage, not document storage. It retains window and analysis-window geometry and the last project path. Legacy `editor/widgets`, `sync/*`, `sources/*`, and document-level `analysis/channels`/`analysis/visible` values are deleted and are never reconstructed as a clean document.
+
+On a clean startup, the remembered `.fetproject` is opened through the ordinary transactional loader. If it is missing, the path is forgotten and a default new document is used. If dirty recovery exists, startup waits for an explicit choice: Recover transactionally loads the snapshot with its original path and keeps it dirty; Discard deletes it and loads the saved file, or starts a default document when there is no saved file. Discard during Quit, Open, or New also deletes recovery before continuing.
+
 Project open first validates the JSON version, widget scene, and synchronization data. It then loads requested sources in the background into a candidate result. The existing project remains committed until the candidate is complete; only then does `AppController` replace widgets, sources, track data, sync state, and project metadata together.
+
+Each project-load candidate also carries the document revision captured at load start. Completion is rejected if a persistent edit changed that revision, preventing an async load from replacing intervening user edits or marking them clean.
 
 ## Source loading
 
 Video metadata probing uses `MediaProbe`/`ffprobe`; VBO loading parses telemetry and builds `TrackGeometry`. The standalone loads and project-source loads run asynchronously.
 
-Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. Cancellation flags are passed to probe operations. At startup, saved source paths are restored through the same asynchronous loaders when their files still exist.
+Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. Cancellation flags are passed to probe operations. At startup, sources are restored only as part of loading the authoritative saved project or an explicitly accepted recovery snapshot.
 
 ## Telemetry
 

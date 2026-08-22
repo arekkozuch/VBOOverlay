@@ -15,7 +15,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - Synchronized telemetry analysis, including charts and a track view.
 - CFR HEVC/AAC MP4 export at the effective rational export rate, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
 - Asynchronous video/VBO loading, transactional project loading, and stale asynchronous-result rejection.
-- Crash-safe export-output handling and atomic project saving.
+- Crash-safe export-output handling, atomic project saving, and explicit unsaved-change recovery.
 
 ## Requirements
 
@@ -42,6 +42,8 @@ open "build-native/native/FlappedEar Telemetry.app"
 ## Architecture
 
 The application keeps telemetry parsing, synchronization, video/media handling, widgets, and QML presentation separate. Preview and export mount the same `TelemetryScene.qml` with independent render contexts.
+
+A saved `.fetproject` is the authoritative clean document. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup; QSettings stores only application preferences and the last project path.
 
 Module details are in [docs/architecture.md](docs/architecture.md). The project source lives in [`native/src/project`](native/src/project).
 
