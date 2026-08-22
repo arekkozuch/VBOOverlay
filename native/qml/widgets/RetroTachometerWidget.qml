@@ -1,0 +1,70 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Item {
+    property var frame: parent.frame
+    anchors.fill: parent
+    property real value: Number(frame.adjusted(frame.raw("source", "rpm")) || 0)
+    Canvas {
+        id: retroTachometerCanvas
+        anchors.fill: parent
+        property real value: parent.value
+        onValueChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d");
+            ctx.reset();
+            const settings = frame.widgetSettings;
+            const cx = width / 2;
+            const cy = height * 0.52;
+            const radius = Math.min(width, height) * 0.31;
+            const minimum = Number(settings.minValue ?? 0);
+            const maximum = Math.max(minimum + 1, Number(settings.maxValue ?? 8000));
+            const steps = Math.max(4, Math.min(16, Math.round((maximum - minimum) / 1000)));
+            const progress = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
+            ctx.globalAlpha = Number(settings.panelOpacity ?? 0.58);
+            ctx.fillStyle = settings.panelColor || "#111111";
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = settings.dialColor || "#f4f4f4";
+            ctx.fillStyle = settings.dialColor || "#f4f4f4";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "700 " + Math.max(9, radius * 0.18) + "px " + frame.family;
+            for (const ring of [0.92, 1.0]) {
+                ctx.lineWidth = Math.max(2, radius * 0.035);
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius * ring, Math.PI * 0.5, Math.PI * 2);
+                ctx.stroke();
+            }
+            for (let step = 0; step <= steps; ++step) {
+                const angle = Math.PI * 0.5 + Math.PI * 1.5 * step / steps;
+                ctx.lineWidth = Math.max(1, radius * 0.025);
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(angle) * radius * 1.03, cy + Math.sin(angle) * radius * 1.03);
+                ctx.lineTo(cx + Math.cos(angle) * radius * 1.14, cy + Math.sin(angle) * radius * 1.14);
+                ctx.stroke();
+                ctx.fillText(String(Math.round((minimum + (maximum - minimum) * step / steps) / 1000)), cx + Math.cos(angle) * radius * 1.35, cy + Math.sin(angle) * radius * 1.35);
+            }
+            const angle = Math.PI * 0.5 + Math.PI * 1.5 * progress;
+            ctx.strokeStyle = settings.needleColor || "#e32636";
+            ctx.lineWidth = Math.max(3, radius * 0.05);
+            ctx.beginPath();
+            ctx.moveTo(cx - Math.cos(angle) * radius * 0.13, cy - Math.sin(angle) * radius * 0.13);
+            ctx.lineTo(cx + Math.cos(angle) * radius * 0.86, cy + Math.sin(angle) * radius * 0.86);
+            ctx.stroke();
+            ctx.fillStyle = settings.dialColor || "#f4f4f4";
+            ctx.beginPath();
+            ctx.arc(cx, cy, Math.max(5, radius * 0.12), 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    Connections {
+        target: frame.widgetModel
+        function onRevisionChanged() {
+            retroTachometerCanvas.requestPaint();
+        }
+    }
+}

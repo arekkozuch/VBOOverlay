@@ -124,6 +124,23 @@ qt_add_qml_module(flappedear_native
         qml/TrackMapPanel.qml
         qml/TelemetryScene.qml
         qml/WidgetOverlay.qml
+        qml/widgets/ArcGaugeWidget.qml
+        qml/widgets/BrandLogoWidget.qml
+        qml/widgets/CustomValueWidget.qml
+        qml/widgets/DialGaugeWidget.qml
+        qml/widgets/GForceWidget.qml
+        qml/widgets/HeartRateWidget.qml
+        qml/widgets/PedalsWidget.qml
+        qml/widgets/RetroGearWidget.qml
+        qml/widgets/RetroGrandPrixWidget.qml
+        qml/widgets/RetroNameplateWidget.qml
+        qml/widgets/RetroPedalWidget.qml
+        qml/widgets/RetroSpeedArcWidget.qml
+        qml/widgets/RetroTachometerWidget.qml
+        qml/widgets/RpmWidget.qml
+        qml/widgets/SpeedWidget.qml
+        qml/widgets/TelemetryOverlayWidget.qml
+        qml/widgets/TrackWidget.qml
 )
 
 set_target_properties(flappedear_native PROPERTIES

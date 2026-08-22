@@ -49,7 +49,7 @@ Each source operation begins a new source generation and uses normalized source 
 
 ## Widgets and QML
 
-`WidgetModel` owns persistent widgets, groups, appearance cues, and templates. `TelemetryScene.qml` is the render-only telemetry layer: it has a render context and widget model but no editor-selection or media-player dependency. Editor interaction remains in the surrounding QML components, while preview and export use the same scene definition.
+`WidgetModel` owns persistent widgets, groups, appearance cues, and templates. `TelemetryScene.qml` is the render-only telemetry layer: it has a render context and widget model but no editor-selection or media-player dependency. Its shared frame owns normalized geometry, appearance cues, background, border, title, and formatting helpers; one `Loader` then instantiates only the renderer matching each widget type from `qml/widgets/`. Editor interaction remains in the surrounding QML components, while preview and export use the same scene definition.
 
 ## Export
 
