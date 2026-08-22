@@ -162,16 +162,22 @@ ApplicationWindow {
         }
         footer: DialogButtonBox {
             standardButtons: DialogButtonBox.Save | DialogButtonBox.Discard | DialogButtonBox.Cancel
-            onClicked: button => {
-                const role = buttonRole(button)
+            onAccepted: {
                 dirtyProjectDialog.resolvingDecision = true
                 dirtyProjectDialog.close()
-                if (role === DialogButtonBox.AcceptRole)
-                    appController.resolveDestructiveAction("save")
-                else if (role === DialogButtonBox.DestructiveRole)
-                    appController.resolveDestructiveAction("discard")
-                else
-                    appController.resolveDestructiveAction("cancel")
+                appController.resolveDestructiveAction("save")
+                dirtyProjectDialog.resolvingDecision = false
+            }
+            onDiscarded: {
+                dirtyProjectDialog.resolvingDecision = true
+                dirtyProjectDialog.close()
+                appController.resolveDestructiveAction("discard")
+                dirtyProjectDialog.resolvingDecision = false
+            }
+            onRejected: {
+                dirtyProjectDialog.resolvingDecision = true
+                dirtyProjectDialog.close()
+                appController.resolveDestructiveAction("cancel")
                 dirtyProjectDialog.resolvingDecision = false
             }
         }
