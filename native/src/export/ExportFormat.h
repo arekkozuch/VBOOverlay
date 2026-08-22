@@ -15,6 +15,7 @@ public:
     [[nodiscard]] static qint64 bitrateForQuality(const QString &quality, const QSize &size, const MediaRational &rate);
     [[nodiscard]] static bool validCustomBitrate(qint64 bitrate);
     [[nodiscard]] static qint64 estimatedBytes(qint64 videoBitrate, bool audioEnabled, double seconds);
+    [[nodiscard]] static QString formatEstimatedSize(qint64 bytes);
 };
 
 } // namespace FlappedEar

@@ -506,17 +506,31 @@ ApplicationWindow {
         property double selectedDuration: exportRangeMode.currentIndex === 1
             ? Math.max(0, Number(exportRangeEnd.text) - Number(exportRangeStart.text))
             : Number(appController.exportSourceInfo.duration || 0)
-        function selectedSize() { return formatOptions.sizes && formatOptions.sizes.length ? formatOptions.sizes[exportResolution.currentIndex] : ({ width: 0, height: 0 }); }
-        function selectedRate() { return formatOptions.rates && formatOptions.rates.length ? formatOptions.rates[exportFrameRate.currentIndex] : ({ numerator: 0, denominator: 1 }); }
+        function sourceHasAudio() {
+            const codecs = appController.exportSourceInfo.audioCodecs;
+            return codecs !== undefined && codecs !== null && codecs.length > 0;
+        }
+        function selectSourceFormat() {
+            exportResolution.currentIndex = formatOptions.sizes && formatOptions.sizes.length > 0 ? 0 : -1;
+            exportFrameRate.currentIndex = formatOptions.rates && formatOptions.rates.length > 0 ? 0 : -1;
+            updateBitrate();
+        }
+        function selectedSize() { return formatOptions.sizes && exportResolution.currentIndex >= 0 && exportResolution.currentIndex < formatOptions.sizes.length ? formatOptions.sizes[exportResolution.currentIndex] : ({ width: 0, height: 0 }); }
+        function selectedRate() { return formatOptions.rates && exportFrameRate.currentIndex >= 0 && exportFrameRate.currentIndex < formatOptions.rates.length ? formatOptions.rates[exportFrameRate.currentIndex] : ({ numerator: 0, denominator: 1 }); }
         function updateBitrate() {
             const size = selectedSize(); const rate = selectedRate();
+            if (size.width <= 0 || size.height <= 0 || rate.numerator <= 0 || rate.denominator <= 0) return;
+            if (exportQuality.currentIndex === 3) {
+                selectedBitrate = Math.round(Number(exportCustomBitrate.text) * 1000000);
+                return;
+            }
             const quality = exportQuality.currentIndex === 0 ? "smaller" : exportQuality.currentIndex === 2 ? "high" : "recommended";
             selectedBitrate = appController.recommendedExportBitrate(size.width, size.height, rate.numerator, rate.denominator, quality);
             if (exportQuality.currentIndex !== 3) exportCustomBitrate.text = (selectedBitrate / 1000000).toFixed(1);
         }
         function startExport(overwriteAllowed) {
             const size = selectedSize(); const rate = selectedRate();
-            const bitrate = Math.round(Number(exportCustomBitrate.text) * 1000000);
+            const bitrate = selectedBitrate;
             if (appController.startExport(
                 outputFile,
                 size.width, size.height, rate.numerator, rate.denominator, bitrate,
@@ -530,14 +544,16 @@ ApplicationWindow {
                 exportOverwriteDialog.open();
             }
         }
-        onOpened: {
+        onAboutToShow: {
             formatOptions = appController.exportFormatOptions();
-            exportResolution.currentIndex = 0; exportFrameRate.currentIndex = 0;
-            updateBitrate();
+            exportQuality.currentIndex = 1;
+            selectSourceFormat();
+            Qt.callLater(selectSourceFormat);
             const duration = Number(appController.exportSourceInfo.duration || 0);
             exportRangeStart.text = "0.000";
             exportRangeEnd.text = duration.toFixed(3);
         }
+        onOpened: selectSourceFormat()
         background: Rectangle {
             radius: 14
             color: "#0d141d"
@@ -617,16 +633,14 @@ ApplicationWindow {
                 id: exportResolution; Layout.fillWidth: true
                 model: exportDialog.formatOptions.sizes || []
                 textRole: "label"
-                delegate: ItemDelegate { width: exportResolution.width; text: modelData.width + "×" + modelData.height + (index === 0 ? " (Source)" : "") }
+                delegate: ItemDelegate { width: exportResolution.width; text: modelData.label }
                 onCurrentIndexChanged: exportDialog.updateBitrate()
-                displayText: exportDialog.formatOptions.sizes && exportDialog.formatOptions.sizes.length ? selectedSize().width + "×" + selectedSize().height + (currentIndex === 0 ? " (Source)" : "") : ""
             }
             Label { text: qsTr("Frame rate"); color: "#8b98a8"; font.pixelSize: 11 }
             FeComboBox {
                 id: exportFrameRate; Layout.fillWidth: true; model: exportDialog.formatOptions.rates || []
-                textRole: "text"; onCurrentIndexChanged: exportDialog.updateBitrate()
-                delegate: ItemDelegate { width: exportFrameRate.width; text: modelData.text + (index === 0 ? " (Source)" : "") }
-                displayText: exportDialog.formatOptions.rates && exportDialog.formatOptions.rates.length ? selectedRate().text + (currentIndex === 0 ? " (Source)" : "") : ""
+                textRole: "label"; onCurrentIndexChanged: exportDialog.updateBitrate()
+                delegate: ItemDelegate { width: exportFrameRate.width; text: modelData.label }
             }
             Label {
                 text: qsTr("Quality")
@@ -646,17 +660,26 @@ ApplicationWindow {
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
                 validator: DoubleValidator { bottom: 0.5; top: 120 }
                 readOnly: exportQuality.currentIndex !== 3
+                opacity: readOnly ? 0.72 : 1.0
                 onTextChanged: if (exportQuality.currentIndex === 3) exportDialog.selectedBitrate = Math.round(Number(text) * 1000000)
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: exportCustomBitrate.readOnly
+                text: qsTr("Automatically selected for %1 @ %2").arg(selectedSize().label || "").arg(selectedRate().label || "")
+                color: "#718092"
+                font.pixelSize: 11
+                elide: Text.ElideRight
             }
             FeCheckBox {
                 id: exportAudio
-                text: appController.exportSourceInfo.audioCodecs.length > 0 ? qsTr("Audio — AAC 192 kbps") : qsTr("No audio stream")
-                enabled: appController.exportSourceInfo.audioCodecs.length > 0
+                text: exportDialog.sourceHasAudio() ? qsTr("Audio — AAC 192 kbps") : qsTr("No audio stream")
+                enabled: exportDialog.sourceHasAudio()
                 checked: enabled
             }
             Label {
                 Layout.fillWidth: true; color: "#b5c0cd"; font.pixelSize: 11
-                text: qsTr("Estimated size: ~%1 MiB").arg((appController.estimateExportSize(Math.round(Number(exportCustomBitrate.text) * 1000000), exportAudio.checked, exportDialog.selectedDuration) / (1024 * 1024)).toFixed(1))
+                text: qsTr("Estimated size: %1").arg(appController.formatEstimatedExportSize(appController.estimateExportSize(exportDialog.selectedBitrate, exportAudio.checked, exportDialog.selectedDuration)))
             }
             Label {
                 text: qsTr("Range")

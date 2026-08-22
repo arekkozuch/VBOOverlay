@@ -208,16 +208,28 @@ QVariantMap AppController::exportFormatOptions() const
     const MediaRational sourceRate = m_exportSourceInfo.averageFrameRate.isValid()
         ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
     QVariantList sizes, rates;
-    for (const QSize &size : ExportFormat::resolutionOptions(m_exportSourceInfo.videoSize))
-        sizes.append(QVariantMap{{"width", size.width()}, {"height", size.height()}});
-    for (const MediaRational &rate : ExportFormat::frameRateOptions(sourceRate))
+    int index = 0;
+    for (const QSize &size : ExportFormat::resolutionOptions(m_exportSourceInfo.videoSize)) {
+        const QString label = QStringLiteral("%1×%2%3").arg(size.width()).arg(size.height())
+                                  .arg(index++ == 0 ? QStringLiteral(" (Source)") : QString());
+        sizes.append(QVariantMap{{"width", size.width()}, {"height", size.height()}, {"label", label}});
+    }
+    index = 0;
+    for (const MediaRational &rate : ExportFormat::frameRateOptions(sourceRate)) {
+        const QString label = QString::number(rate.value(), 'f', 2) + QStringLiteral(" fps")
+                              + (index++ == 0 ? QStringLiteral(" (Source)") : QString());
         rates.append(QVariantMap{{"numerator", rate.numerator}, {"denominator", rate.denominator},
-                                 {"text", QString::number(rate.value(), 'f', 2) + QStringLiteral(" fps")}});
+                                 {"label", label}});
+    }
     return {{"sizes", sizes}, {"rates", rates}};
 }
 qint64 AppController::estimateExportSize(const qint64 videoBitrate, const bool audioEnabled, const double seconds) const
 {
     return ExportFormat::estimatedBytes(videoBitrate, audioEnabled, seconds);
+}
+QString AppController::formatEstimatedExportSize(const qint64 bytes) const
+{
+    return ExportFormat::formatEstimatedSize(bytes);
 }
 qint64 AppController::recommendedExportBitrate(const int width, const int height, const qint64 numerator,
                                                const qint64 denominator, const QString &quality) const

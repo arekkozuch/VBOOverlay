@@ -8,6 +8,10 @@ Export uses two FFmpeg stages so telemetry frames are generated from the same QM
 
 Likely variable-frame-rate input is detected from a meaningful difference between nominal and average frame rate and is surfaced as a warning.
 
+## Export format recommendations
+
+The export dialog resolves its displayed dimensions, exact rational rate, video bitrate, and size estimate from one shared format model. HEVC recommendations for high-motion onboard footage use 30 fps resolution-tier baselines: 6 Mbps (720p), 12.5 Mbps (1080p), 21.2 Mbps (1440p), and 36.5 Mbps (2160p+). The selected rate applies a square-root `sqrt(fps / 30)` adjustment, so 60 fps preserves additional temporal detail without doubling the bitrate. Smaller file and High quality apply 0.70x and 1.30x to that recommendation; Custom is the only editable bitrate mode and remains validated at 0.5–120 Mbps. Estimated output size uses the resolved video bitrate plus enabled 192 kbps AAC audio, including its existing 3% container allowance, and is displayed in MiB below 1024 MiB or GiB otherwise.
+
 Before Stage A, export renders 24 evenly distributed telemetry frames (or fewer for short ranges) with the production QRhi scene and encodes them to an in-memory FFV1/BGRA Matroska sample. The measured encoded bytes/frame is projected across the exact scheduled frame count with a 1.50 safety margin. Sampling does not decode source video or create a disk artifact. If that tiny sample cannot complete, the fallback remains 512 KiB/frame with a 1.75 margin: intentionally far above the observed roughly 71 KiB/frame 4K telemetry overlay, without treating a mostly transparent scene as raw RGBA. The selected final bitrate receives a 25% margin and a 2 GiB reserve is retained. Temporary and destination filesystems are inspected independently with `QStorageInfo`; if they resolve to one volume, concurrent requirements are combined. An export fails before Stage A when the requirement cannot fit. During encoding the temporary volume is sampled about once per second and the process is stopped before the reserve is exhausted.
 
 ## Stage A: render and stage telemetry

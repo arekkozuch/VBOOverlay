@@ -4,7 +4,7 @@ import QtQuick.Controls
 TextField {
     id: control
     implicitHeight: 36
-    color: "#e8edf4"
+    color: control.readOnly ? "#b5c0cd" : "#e8edf4"
     placeholderTextColor: "#596575"
     selectionColor: "#55e6a5"
     selectedTextColor: "#07140f"
@@ -14,8 +14,8 @@ TextField {
     font.pixelSize: 12
     background: Rectangle {
         radius: 7
-        color: control.enabled ? "#0d131b" : "#10151c"
+        color: control.readOnly ? "#101923" : control.enabled ? "#0d131b" : "#10151c"
         border.width: control.activeFocus ? 2 : 1
-        border.color: control.activeFocus ? "#55e6a5" : "#273342"
+        border.color: control.activeFocus ? "#55e6a5" : control.readOnly ? "#22303d" : "#273342"
     }
 }

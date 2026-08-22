@@ -42,8 +42,15 @@ QList<MediaRational> ExportFormat::frameRateOptions(const MediaRational &source)
 qint64 ExportFormat::recommendedVideoBitrate(const QSize &size, const MediaRational &rate)
 {
     if (!size.isValid() || !rate.isValid()) return 0;
-    // 0.50 bits/pixel/frame: intentionally conservative for fast-moving motorsport footage.
-    return qBound<qint64>(qint64{1'000'000}, qRound64(size.width() * double(size.height()) * rate.value() * 0.50), qint64{120'000'000});
+    // HEVC baselines for high-motion onboard footage, at 30 fps.  The square-root
+    // cadence adjustment retains extra temporal detail without treating 60 fps as
+    // a full 2x bitrate requirement.
+    const qint64 baseline = size.height() <= 720 ? 6'000'000
+        : size.height() <= 1080 ? 12'500'000
+        : size.height() <= 1440 ? 21'200'000
+        : 36'500'000;
+    const double fpsMultiplier = std::sqrt(rate.value() / 30.0);
+    return qBound<qint64>(qint64{1'000'000}, qRound64(baseline * fpsMultiplier), qint64{120'000'000});
 }
 
 qint64 ExportFormat::bitrateForQuality(const QString &quality, const QSize &size, const MediaRational &rate)
@@ -62,5 +69,15 @@ qint64 ExportFormat::estimatedBytes(const qint64 videoBitrate, const bool audioE
 {
     if (!validCustomBitrate(videoBitrate) || !std::isfinite(seconds) || seconds < 0) return 0;
     return qRound64((videoBitrate + (audioEnabled ? audioBitrate : 0)) * seconds / 8.0 * 1.03);
+}
+
+QString ExportFormat::formatEstimatedSize(const qint64 bytes)
+{
+    if (bytes <= 0) return QStringLiteral("~0 MiB");
+    const double mebibytes = bytes / (1024.0 * 1024.0);
+    if (mebibytes < 1024.0)
+        return QStringLiteral("~%1 MiB").arg(QString::number(mebibytes, 'f', mebibytes < 100.0 ? 1 : 0));
+    const double gibibytes = mebibytes / 1024.0;
+    return QStringLiteral("~%1 GiB").arg(QString::number(gibibytes, 'f', gibibytes < 10.0 ? 2 : 1));
 }
 } // namespace FlappedEar

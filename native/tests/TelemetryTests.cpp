@@ -1486,11 +1486,25 @@ void TelemetryTests::resolvesExplicitExportFormats()
     QCOMPARE(rates.size(), 2); QCOMPARE(rates.at(1).numerator, qint64(30'000));
     QCOMPARE(rates.at(1).denominator, qint64(1'001));
     const qint64 recommended = ExportFormat::recommendedVideoBitrate({1920, 1080}, {30, 1});
-    QVERIFY(recommended >= 25'000'000 && recommended <= 35'000'000);
+    QVERIFY(recommended >= 10'000'000 && recommended <= 14'000'000);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({1920, 1080}, {60'000, 1'001}) >= 15'000'000);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({1920, 1080}, {60'000, 1'001}) <= 20'000'000);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({2560, 1440}, {60, 1}) >= 26'000'000);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({2560, 1440}, {60, 1}) <= 34'000'000);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({3840, 2160}, {30, 1}) >= 30'000'000);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({3840, 2160}, {30, 1}) <= 40'000'000);
+    const qint64 fourK60 = ExportFormat::recommendedVideoBitrate({3840, 2160}, {60'000, 1'001});
+    QVERIFY(fourK60 >= 45'000'000 && fourK60 <= 60'000'000);
+    QVERIFY(fourK60 < 120'000'000);
     QCOMPARE(ExportFormat::bitrateForQuality("smaller", {1920, 1080}, {30, 1}), qRound64(recommended * .7));
+    const qint64 high = ExportFormat::bitrateForQuality("high", {3840, 2160}, {60'000, 1'001});
+    QVERIFY(ExportFormat::bitrateForQuality("smaller", {3840, 2160}, {60'000, 1'001}) < fourK60);
+    QVERIFY(fourK60 < high); QVERIFY(ExportFormat::validCustomBitrate(high));
     QVERIFY(!ExportFormat::validCustomBitrate(0)); QVERIFY(!ExportFormat::validCustomBitrate(121'000'000));
     QVERIFY(ExportFormat::validCustomBitrate(10'000'000));
     QVERIFY(ExportFormat::estimatedBytes(10'000'000, true, 60) > 75'000'000);
+    QCOMPARE(ExportFormat::formatEstimatedSize(qint64(850) * 1024 * 1024), QStringLiteral("~850 MiB"));
+    QCOMPARE(ExportFormat::formatEstimatedSize(qint64(46) * 1024 * 1024 * 1024 / 10), QStringLiteral("~4.60 GiB"));
     QCOMPARE(ExportEngine::frameCount(0, 10, rates.at(1)), qsizetype(300));
 }
 
