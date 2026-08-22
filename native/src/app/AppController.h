@@ -7,6 +7,7 @@
 #include "export/ExportDiagnostics.h"
 #include "export/ExportOutputTransaction.h"
 #include "export/ExportProcessSupervisor.h"
+#include "export/PersistentExportLog.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -262,6 +263,9 @@ private:
     void reconcileAnalysisChannels();
     void handleExportOutput();
     void finishExport(int exitCode, QProcess::ExitStatus exitStatus);
+    void appendExportDiagnostic(const QString &entry);
+    void appendExportLifecycle(const QString &event);
+    void finishPersistentExportLog(const QString &result, const QString &error = {});
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
 
     QSettings m_settings;
@@ -313,6 +317,7 @@ private:
     QVariantMap m_exportMetrics;
     QVariantMap m_exportProgressInfo;
     BoundedDiagnosticLog m_exportDiagnosticLog{1500};
+    std::unique_ptr<PersistentExportLog> m_persistentExportLog;
     bool m_exportProgressVisible = false;
     bool m_quitAfterExport = false;
     QVariantMap m_syncCandidate;

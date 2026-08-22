@@ -55,6 +55,6 @@ The scene uses 1920×1080 as its canonical visual canvas. Normalized widget geom
 
 ## Export
 
-`MediaProbe` reads source and output metadata; `EncoderDetector` tests usable HEVC encoders; `TelemetryFrameRenderer` mounts `TelemetryScene.qml` offscreen through `QQuickRenderControl` and QRhi; and `ExportEngine` runs the two-stage FFmpeg pipeline. `ExportOutputTransaction` creates and owns a same-directory staging output, validates it through the worker, and commits it to the selected target only after success.
+`MediaProbe` reads source and output metadata; `EncoderDetector` tests usable HEVC encoders; `TelemetryFrameRenderer` mounts `TelemetryScene.qml` offscreen through `QQuickRenderControl` and QRhi; and `ExportEngine` runs the two-stage FFmpeg pipeline. `ExportOutputTransaction` creates and owns a same-directory staging output, validates it through the worker, and commits it to the selected target only after success. `AppController` consumes worker events and is the sole writer of the corresponding durable export diagnostic file, preserving the same formatted entries shown by Very Verbose without concurrent worker/UI file access.
 
 The detailed pipeline and timing contract are in [export-pipeline.md](export-pipeline.md). Target-file transaction guarantees are in [export-output-safety.md](export-output-safety.md).

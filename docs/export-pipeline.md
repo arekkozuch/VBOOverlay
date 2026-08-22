@@ -55,6 +55,15 @@ Telemetry rendering still uses absolute source time: exporting source seconds 12
 Progress and Very Verbose diagnostics report stage activity, FFmpeg progress,
 temporary-overlay size, frame-count source, reported rates/time base, metadata
 validation elapsed time, validation checks, and bounded diagnostic output.
+When an export is prepared, the controller also creates one flushed text log in
+`QStandardPaths::AppLocalDataLocation/exports/`, named
+`export-YYYYMMDD-hhmmss-<export-uuid>.log`. Its header records the source,
+requested resolved dimensions/rational rate/video bitrate/audio policy, and range;
+the controller writes the same formatted worker diagnostics plus lifecycle events
+and a final success, cancellation, or failure footer. Logs are support artifacts,
+so inability to create one does not prevent an export. Retention removes only
+older files matching that export-log naming convention in this dedicated directory,
+keeping approximately the ten newest logs.
 One cancellation file is consulted by input/temporary/final `ffprobe` calls, encoder discovery/capability checks, and both FFmpeg stages. Cancellation follows cooperative request, a short graceful wait, process-tree termination, then force kill. On macOS/Unix the GUI worker starts in a dedicated process group; FFmpeg and ffprobe inherit it, so forced worker shutdown reaches the complete export tree. The current Unix behavior is runtime-tested. Windows assigns the top-level worker to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job and reports the exact failed Job Object API if that cannot be established; export then fails before worker release. The worker waits for an explicit parent readiness file before starting FFmpeg/ffprobe work, closing the assignment-before-descendant race in the current design. Windows runtime validation remains pending.
 Final validation checks for a nonempty result, HEVC codec, dimensions, exact
 nominal and average rate, progress frame count, independent video packet count

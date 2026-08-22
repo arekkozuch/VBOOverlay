@@ -5,6 +5,7 @@
 
 #include "gopro/GoProTelemetrySource.h"
 #include "export/ExportArtifactManifest.h"
+#include "export/PersistentExportLog.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/VboParser.h"
 
@@ -18,6 +19,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QDateTime>
+#include <QStandardPaths>
 #include <QScopedValueRollback>
 #include <QTimer>
 #include <QtConcurrent>
@@ -1095,6 +1097,50 @@ bool AppController::startExport(
     m_exportError.clear();
     m_exportMetrics.clear();
     m_exportDiagnosticLog.clear();
+    const QDateTime exportStarted = QDateTime::currentDateTime();
+    const QString exportLogDirectory = QDir(
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(
+        QStringLiteral("exports"));
+    const QString sourceRate = QStringLiteral("%1/%2")
+                                   .arg(m_exportSourceInfo.frameRate.numerator)
+                                   .arg(m_exportSourceInfo.frameRate.denominator);
+    const QString outputRateText = QStringLiteral("%1/%2")
+                                      .arg(outputRate.numerator)
+                                      .arg(outputRate.denominator);
+    const QString exportHeader = QStringLiteral(
+        "FlappedEar Telemetry Export Log\n\n"
+        "Started: %1\n"
+        "Export ID: %2\n"
+        "Application version: %3\n\n"
+        "Source:\n"
+        "  Path: %4\n"
+        "  Video: %5x%6, %7 fps, codec %8, duration %9 s\n\n"
+        "Output:\n"
+        "  Target: %10\n"
+        "  Requested: %11x%12, %13 fps\n"
+        "  Video bitrate: %14 bps\n"
+        "  Audio: %15\n\n"
+        "Range: %16 -> %17 s\n")
+        .arg(exportStarted.toString(Qt::ISODate), exportId, QCoreApplication::applicationVersion(), inputPath)
+        .arg(m_exportSourceInfo.videoSize.width()).arg(m_exportSourceInfo.videoSize.height())
+        .arg(sourceRate, m_exportSourceInfo.videoCodec)
+        .arg(m_exportSourceInfo.duration, 0, 'f', 3)
+        .arg(m_exportOutputTransaction->userTargetPath())
+        .arg(outputSize.width()).arg(outputSize.height()).arg(outputRateText)
+        .arg(videoBitrate)
+        .arg(audioEnabled ? QStringLiteral("enabled, AAC %1 bps").arg(ExportFormat::audioBitrate)
+                           : QStringLiteral("disabled"))
+        .arg(startTime, 0, 'f', 3).arg(endTime, 0, 'f', 3);
+    QString exportLogError;
+    m_persistentExportLog = PersistentExportLog::create(
+        exportLogDirectory, exportId, exportHeader, &exportLogError, exportStarted);
+    if (m_persistentExportLog) {
+        PersistentExportLog::retainNewest(
+            exportLogDirectory, m_persistentExportLog->path());
+        AppLog::info(QStringLiteral("Export diagnostics: %1").arg(m_persistentExportLog->path()));
+    } else {
+        AppLog::warn(QStringLiteral("Could not create export diagnostic log: %1").arg(exportLogError));
+    }
     m_exportProgressInfo = {{"outputPath", m_exportOutputTransaction->userTargetPath()},
                             {"stagingPath", m_exportOutputTransaction->stagingPath()},
                             {"outputName", QFileInfo(outputPath).fileName()},
@@ -1105,6 +1151,7 @@ bool AppController::startExport(
                             {"audioLabel", audioEnabled ? QStringLiteral("AAC audio") : QStringLiteral("No audio")}};
     m_exportProgressVisible = true;
     m_exportState = QStringLiteral("starting");
+    appendExportLifecycle(QStringLiteral("Preparing"));
     AppLog::info(QStringLiteral("Export Stage A preparing"));
     m_exportProcess = std::make_unique<QProcess>(this);
     m_exportSupervisor = std::make_unique<ExportProcessSupervisor>(*m_exportProcess);
@@ -1124,6 +1171,7 @@ bool AppController::startExport(
             : QStringLiteral("Could not establish export process supervision: %1").arg(supervisionError);
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        finishPersistentExportLog(QStringLiteral("FAILED"), m_exportError);
         static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
         m_exportManifestPath.clear();
         m_exportSupervisor.reset();
@@ -1138,6 +1186,7 @@ bool AppController::startExport(
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        finishPersistentExportLog(QStringLiteral("FAILED"), m_exportError);
         emit exportChanged();
         return false;
     }
@@ -1147,6 +1196,7 @@ bool AppController::startExport(
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        finishPersistentExportLog(QStringLiteral("FAILED"), m_exportError);
         emit exportChanged();
         return false;
     }
@@ -1156,6 +1206,7 @@ bool AppController::startExport(
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        finishPersistentExportLog(QStringLiteral("FAILED"), m_exportError);
         emit exportChanged();
         return false;
     }
@@ -1166,6 +1217,7 @@ bool AppController::startExport(
         static_cast<void>(m_exportSupervisor->stopAndWait());
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        finishPersistentExportLog(QStringLiteral("FAILED"), m_exportError);
         emit exportChanged();
         return false;
     }
@@ -1189,6 +1241,7 @@ void AppController::cancelExport()
     }
     cancellationFile.close();
     AppLog::warn(QStringLiteral("Export cancellation requested"));
+    appendExportLifecycle(QStringLiteral("Cancellation requested"));
     m_exportState = QStringLiteral("cancelling");
     m_exportProgressInfo.insert("stage", QStringLiteral("cancelling"));
     emit exportChanged();
@@ -1228,6 +1281,41 @@ void AppController::copyExportDiagnostics()
     if (QGuiApplication::clipboard()) {
         QGuiApplication::clipboard()->setText(m_exportDiagnosticLog.text());
     }
+}
+
+void AppController::appendExportDiagnostic(const QString &entry)
+{
+    m_exportDiagnosticLog.append(entry);
+    if (m_persistentExportLog && !m_persistentExportLog->append(entry)) {
+        AppLog::warn(QStringLiteral("Could not append export diagnostic log: %1")
+                         .arg(m_persistentExportLog->path()));
+        m_persistentExportLog.reset();
+    }
+}
+
+void AppController::appendExportLifecycle(const QString &event)
+{
+    appendExportDiagnostic(QStringLiteral("[lifecycle] %1").arg(event));
+}
+
+void AppController::finishPersistentExportLog(const QString &result, const QString &error)
+{
+    if (!m_persistentExportLog) return;
+    QString footer = QStringLiteral("\nFinished: %1\nResult: %2\n")
+                         .arg(QDateTime::currentDateTime().toString(Qt::ISODate), result);
+    if (!error.isEmpty()) footer += QStringLiteral("Error: %1\n").arg(error);
+    const auto value = [this](const QString &key) { return m_exportProgressInfo.value(key).toString(); };
+    if (result == QStringLiteral("SUCCESS")) {
+        footer += QStringLiteral("Output: %1x%2\nAverage FPS: %3\nEncoded frames: %4\n"
+                                 "Output bytes: %5\nEncoder: %6\nValidation: %7\n")
+                      .arg(value(QStringLiteral("outputWidth")), value(QStringLiteral("outputHeight")),
+                           value(QStringLiteral("outputAverageFrameRate")), value(QStringLiteral("encodedFrames")),
+                           value(QStringLiteral("outputBytes")), value(QStringLiteral("encoderName")),
+                           m_exportState == QStringLiteral("validationWarning")
+                               ? QStringLiteral("warning") : QStringLiteral("passed"));
+    }
+    appendExportDiagnostic(footer.trimmed());
+    m_persistentExportLog.reset();
 }
 
 namespace {
@@ -1291,28 +1379,35 @@ void AppController::handleExportOutput()
         m_exportStdout.remove(0, newline + 1);
         const QJsonObject event = QJsonDocument::fromJson(line).object();
         if (event.value("type").toString() == QStringLiteral("log")) {
-            m_exportDiagnosticLog.append(formatDiagnosticEvent(event));
+            appendExportDiagnostic(formatDiagnosticEvent(event));
         }
         const QString state = event.value("state").toString();
         if (!state.isEmpty()) {
             if (state != m_exportState) {
                 if (state == QStringLiteral("renderingOverlay")) {
                     AppLog::info(QStringLiteral("Export Stage A started"));
+                    appendExportLifecycle(QStringLiteral("Stage A started"));
                 } else if (state == QStringLiteral("validatingOverlay")) {
                     AppLog::info(QStringLiteral("Export Stage A ended"));
                     AppLog::info(QStringLiteral("Export overlay validation started"));
+                    appendExportLifecycle(QStringLiteral("Stage A completed; temporary overlay validation started"));
                 } else if (state == QStringLiteral("encodingVideo")) {
                     AppLog::info(QStringLiteral("Export overlay validation passed"));
                     AppLog::info(QStringLiteral("Export Stage B started"));
+                    appendExportLifecycle(QStringLiteral("Temporary overlay validation passed; Stage B started"));
                 } else if (state == QStringLiteral("validatingOutput")) {
                     AppLog::info(QStringLiteral("Export Stage B ended"));
                     AppLog::info(QStringLiteral("Export final validation started"));
+                    appendExportLifecycle(QStringLiteral("Stage B completed; final validation started"));
                 } else if (state == QStringLiteral("complete")) {
                     AppLog::info(QStringLiteral("Export final validation passed"));
+                    appendExportLifecycle(QStringLiteral("Final validation passed"));
                 } else if (state == QStringLiteral("validationWarning")) {
                     AppLog::warn(QStringLiteral("Export validation completed with a warning"));
+                    appendExportLifecycle(QStringLiteral("Validation warning"));
                 } else if (state == QStringLiteral("cancelled")) {
                     AppLog::warn(QStringLiteral("Export cancelled"));
+                    appendExportLifecycle(QStringLiteral("Cancelled"));
                 }
             }
             m_exportState = state;
@@ -1397,10 +1492,13 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
     const QString workerError = m_exportProcess
         ? QString::fromUtf8(m_exportProcess->readAllStandardError()).trimmed()
         : QString();
+    QString persistentResult;
+    QString persistentError;
     if (cancelled) {
         m_exportState = QStringLiteral("cancelled");
         m_exportError.clear();
         setStatus("Export cancelled.");
+        persistentResult = QStringLiteral("CANCELLED");
     } else if (exitStatus == QProcess::NormalExit && exitCode == 0
                && m_exportState == QStringLiteral("complete")) {
         QString commitError;
@@ -1416,12 +1514,15 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
             AppLog::info(QStringLiteral("Export succeeded: %1")
                              .arg(m_exportOutputTransaction->userTargetPath()));
             setStatus("HEVC export finished and passed validation.");
+            persistentResult = QStringLiteral("SUCCESS");
         } else {
             m_exportState = QStringLiteral("failed");
             m_exportError = commitError.isEmpty()
                 ? QStringLiteral("Validated export could not be committed to its target.") : commitError;
             AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
             setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
+            persistentResult = QStringLiteral("FAILED");
+            persistentError = m_exportError;
         }
     } else {
         m_exportState = QStringLiteral("failed");
@@ -1430,16 +1531,22 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         }
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         setStatus(QStringLiteral("Export failed: %1").arg(m_exportError));
+        persistentResult = QStringLiteral("FAILED");
+        persistentError = m_exportError;
     }
     m_exportProgressInfo.insert("stage", m_exportState);
     m_exportProgressInfo.insert("progressPercent", m_exportProgress);
     QFile::remove(m_exportCancelPath);
     QFile::remove(m_exportSupervisionReadyPath);
+    appendExportLifecycle(QStringLiteral("Cleanup started"));
     QString cleanupError;
     if (!m_exportManifestPath.isEmpty()
         && !ExportArtifactManifest::cleanupOwned(m_exportManifestPath, &cleanupError)) {
-        m_exportDiagnosticLog.append(QStringLiteral("Owned export cleanup deferred: %1").arg(cleanupError));
+        appendExportDiagnostic(QStringLiteral("Owned export cleanup deferred: %1").arg(cleanupError));
     }
+    appendExportLifecycle(cleanupError.isEmpty() ? QStringLiteral("Cleanup completed")
+                                                 : QStringLiteral("Cleanup deferred"));
+    finishPersistentExportLog(persistentResult, persistentError);
     m_exportManifestPath.clear();
     m_exportSupervisor.reset();
     m_exportProcess.reset();

@@ -4,6 +4,7 @@
 #include "export/ExportEngine.h"
 #include "export/ExportFormat.h"
 #include "export/ExportDiagnostics.h"
+#include "export/PersistentExportLog.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
 #include "export/ExportArtifactManifest.h"
@@ -90,6 +91,7 @@ private slots:
     void estimatesExportProgress();
     void tracksExportStageElapsedTime();
     void boundsVerboseDiagnosticStorage();
+    void persistsExportDiagnosticsAndRetainsKnownLogs();
     void formatsStageAFailureDiagnostics();
     void throttlesDiagnosticHeartbeats();
     void tracksValidationSubstepStages();
@@ -1295,6 +1297,47 @@ void TelemetryTests::boundsVerboseDiagnosticStorage()
     QVERIFY(log.text().startsWith(QStringLiteral("[older diagnostic entries omitted]\n")));
     QVERIFY(!log.text().contains(QStringLiteral("one")));
     QVERIFY(log.text().endsWith(QStringLiteral("five\nwith details")));
+}
+
+void TelemetryTests::persistsExportDiagnosticsAndRetainsKnownLogs()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QDateTime started(QDate(2026, 8, 22), QTime(21, 25, 30), QTimeZone::UTC);
+    QCOMPARE(PersistentExportLog::fileName(started, QStringLiteral("a83f91c2d4e5f678")),
+             QStringLiteral("export-20260822-212530-a83f91c2d4e5f678.log"));
+
+    QString error;
+    auto log = PersistentExportLog::create(
+        directory.path(), QStringLiteral("a83f91c2d4e5f678"),
+        QStringLiteral("FlappedEar Telemetry Export Log\nExport ID: a83f91c2d4e5f678"), &error, started);
+    QVERIFY2(log, qPrintable(error));
+    const QString activePath = log->path();
+    QVERIFY(log->append(QStringLiteral("[lifecycle] Preparing")));
+    QVERIFY(log->append(QStringLiteral("[00:00:01.000] Stage A started")));
+    QVERIFY(log->append(QStringLiteral("Result: SUCCESS")));
+    QFile saved(activePath);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const QString contents = QString::fromUtf8(saved.readAll());
+    QVERIFY(contents.contains(QStringLiteral("Export ID: a83f91c2d4e5f678")));
+    QVERIFY(contents.contains(QStringLiteral("Stage A started")));
+    QVERIFY(contents.contains(QStringLiteral("Result: SUCCESS")));
+
+    QFile unrelated(directory.filePath(QStringLiteral("keep-me.log")));
+    QVERIFY(unrelated.open(QIODevice::WriteOnly));
+    unrelated.close();
+    for (int index = 0; index < 12; ++index) {
+        const QDateTime time = started.addSecs(index + 1);
+        const QString id = QStringLiteral("%1abcdef012345678").arg(index, 8, 16, QLatin1Char('0'));
+        auto oldLog = PersistentExportLog::create(directory.path(), id, QStringLiteral("Result: CANCELLED"),
+                                                   &error, time);
+        QVERIFY2(oldLog, qPrintable(error));
+    }
+    PersistentExportLog::retainNewest(directory.path(), activePath, 10);
+    QVERIFY(QFileInfo::exists(activePath));
+    QVERIFY(QFileInfo::exists(unrelated.fileName()));
+    const QStringList remaining = QDir(directory.path()).entryList({QStringLiteral("export-*.log")}, QDir::Files);
+    QCOMPARE(remaining.size(), 11); // ten most recent plus the active log
 }
 
 void TelemetryTests::formatsStageAFailureDiagnostics()
