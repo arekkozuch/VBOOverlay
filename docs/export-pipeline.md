@@ -72,6 +72,9 @@ One cancellation file is consulted by input/temporary/final `ffprobe` calls, enc
 Final validation checks for a nonempty result, HEVC codec, dimensions, exact
 nominal and average rate, progress frame count, independent video packet count
 when available, zero video start, scheduled video duration, and requested audio.
+After validation, an existing destination is replaced only if its prepare-time native regular-file
+identity, size, and modification state still match; otherwise encoding is reported as finished but the
+changed destination is preserved and commit fails.
 
 Audio is trimmed from the requested source interval and reset to output time zero. Its start is compared with video using at most one AAC access-unit duration (1024 samples at the reported sample rate, or the audio time base when larger); its duration is compared with the requested interval using that same defensible tolerance. This permits normal AAC priming/edit-list granularity without accepting arbitrary A/V drift.
 

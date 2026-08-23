@@ -1,5 +1,7 @@
 #pragma once
 
+#include "export/ExportTargetIdentity.h"
+
 #include <QString>
 #include <QStringList>
 #include <QSet>
@@ -49,6 +51,7 @@ private:
     QString m_stagingPath;
     QString m_transactionId;
     QSet<QString> m_ownedPaths;
+    ExportTargetIdentity m_approvedTargetIdentity;
     bool m_targetExistedBeforeExport = false;
     bool m_overwriteAllowed = false;
     bool m_committed = false;

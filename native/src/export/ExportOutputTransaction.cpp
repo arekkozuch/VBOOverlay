@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QDebug>
 #include <QUuid>
 
 #include <cerrno>
@@ -76,6 +77,34 @@ ExportOutputTransaction::PreparationResult ExportOutputTransaction::prepare(
         return {PreparationStatus::Error, QStringLiteral("Choose an export output file.")};
     }
     m_userTargetPath = QDir::cleanPath(QFileInfo(userTargetPath).absoluteFilePath());
+    const QFileInfo targetInfo(m_userTargetPath);
+    const QDir destination(targetInfo.absolutePath());
+    if (!destination.exists()) {
+        reset();
+        return {PreparationStatus::Error, QStringLiteral("Export destination directory does not exist.")};
+    }
+    QString identityError;
+    ExportTargetIdentity capturedIdentity;
+    const ExportTargetIdentity::CaptureStatus captureStatus = ExportTargetIdentity::capture(
+        m_userTargetPath, &capturedIdentity, &identityError);
+    if (captureStatus == ExportTargetIdentity::CaptureStatus::Link) {
+        qWarning().noquote() << QStringLiteral("Export symlink/reparse-point target rejected: %1")
+                                    .arg(m_userTargetPath);
+        reset();
+        return {PreparationStatus::Error,
+                QStringLiteral("Export target must be a regular file, not a symbolic link or reparse point.")};
+    }
+    if (captureStatus == ExportTargetIdentity::CaptureStatus::NotRegularFile) {
+        reset();
+        return {PreparationStatus::Error, QStringLiteral("Export target is not a regular file.")};
+    }
+    if (captureStatus == ExportTargetIdentity::CaptureStatus::Error) {
+        reset();
+        return {PreparationStatus::Error,
+                QStringLiteral("Could not inspect the export target: %1").arg(identityError)};
+    }
+    m_targetExistedBeforeExport = captureStatus == ExportTargetIdentity::CaptureStatus::Captured;
+    m_overwriteAllowed = overwriteAllowed;
     const QString normalizedTarget = normalizedComparisonPath(m_userTargetPath);
     if (normalizedTarget == normalizedComparisonPath(inputPath)) {
         reset();
@@ -89,21 +118,13 @@ ExportOutputTransaction::PreparationResult ExportOutputTransaction::prepare(
                     QStringLiteral("Export output collides with a source or temporary file.")};
         }
     }
-
-    const QFileInfo targetInfo(m_userTargetPath);
-    const QDir destination(targetInfo.absolutePath());
-    if (!destination.exists()) {
-        reset();
-        return {PreparationStatus::Error, QStringLiteral("Export destination directory does not exist.")};
-    }
-    m_targetExistedBeforeExport = targetInfo.exists() || targetInfo.isSymLink();
-    m_overwriteAllowed = overwriteAllowed;
     if (m_targetExistedBeforeExport && !overwriteAllowed) {
         return {PreparationStatus::OverwriteConfirmationRequired, {}};
     }
-    if (m_targetExistedBeforeExport && !targetInfo.isFile() && !targetInfo.isSymLink()) {
-        reset();
-        return {PreparationStatus::Error, QStringLiteral("Export target is not a regular file.")};
+    if (m_targetExistedBeforeExport) {
+        m_approvedTargetIdentity = capturedIdentity;
+        qInfo().noquote() << QStringLiteral("Existing export target identity captured: %1")
+                                 .arg(m_userTargetPath);
     }
 
     m_transactionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -138,7 +159,13 @@ bool ExportOutputTransaction::commit(QString *error)
         return false;
     }
     if (!m_targetExistedBeforeExport) {
-        if (QFileInfo::exists(m_userTargetPath) || QFileInfo(m_userTargetPath).isSymLink()) {
+        ExportTargetIdentity unexpectedIdentity;
+        QString identityError;
+        const ExportTargetIdentity::CaptureStatus status = ExportTargetIdentity::capture(
+            m_userTargetPath, &unexpectedIdentity, &identityError);
+        if (status != ExportTargetIdentity::CaptureStatus::Missing) {
+            qWarning().noquote() << QStringLiteral("Export target appeared before commit: %1")
+                                        .arg(m_userTargetPath);
             if (error) *error = QStringLiteral("Export target appeared while the export was running.");
             return false;
         }
@@ -151,9 +178,35 @@ bool ExportOutputTransaction::commit(QString *error)
             if (error) *error = QStringLiteral("Replacing the existing export target was not approved.");
             return false;
         }
+        ExportTargetIdentity currentIdentity;
+        QString identityError;
+        const ExportTargetIdentity::CaptureStatus status = ExportTargetIdentity::capture(
+            m_userTargetPath, &currentIdentity, &identityError);
+        if (status == ExportTargetIdentity::CaptureStatus::Missing) {
+            qWarning().noquote() << QStringLiteral("Export target disappeared before commit: %1")
+                                        .arg(m_userTargetPath);
+            if (error) {
+                *error = QStringLiteral("Export finished, but the destination file disappeared while the export was running. The result was not committed.");
+            }
+            return false;
+        }
+        if (status != ExportTargetIdentity::CaptureStatus::Captured
+            || !m_approvedTargetIdentity.matches(currentIdentity)) {
+            qWarning().noquote() << QStringLiteral("Export target changed before commit: %1")
+                                        .arg(m_userTargetPath);
+            if (error) {
+                *error = status == ExportTargetIdentity::CaptureStatus::Error
+                    ? QStringLiteral("Export finished, but the destination file could not be verified immediately before commit. The result was not committed: %1")
+                          .arg(identityError)
+                    : QStringLiteral("Export finished, but the destination file changed while the export was running. To protect the newer file, it was not overwritten.");
+            }
+            return false;
+        }
         if (!replaceExisting(error)) {
             return false;
         }
+        qInfo().noquote() << QStringLiteral("Existing export target identity verified at commit: %1")
+                                 .arg(m_userTargetPath);
     }
     m_ownedPaths.remove(normalizedComparisonPath(m_stagingPath));
     m_stagingPath.clear();
@@ -249,6 +302,7 @@ void ExportOutputTransaction::reset()
     cleanup();
     m_userTargetPath.clear();
     m_transactionId.clear();
+    m_approvedTargetIdentity = {};
     m_targetExistedBeforeExport = false;
     m_overwriteAllowed = false;
     m_committed = false;

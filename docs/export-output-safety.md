@@ -9,7 +9,27 @@ ownership record. Filename shape alone is never treated as proof of ownership.
 For a new target, the staging file is renamed to the target on the same filesystem after final media
 validation. The transaction refuses to commit if another file appeared at the target while encoding.
 
-For an existing target, replacement requires the controller's explicit `overwriteAllowed` flag:
+Existing symbolic links and Windows reparse points are rejected during preparation. The transaction
+does not follow a link to its referent and does not replace a link while describing that action as an
+overwrite of the referent. Existing targets must be explicit regular files.
+
+For an existing regular-file target, replacement requires the controller's explicit
+`overwriteAllowed` flag. At that approved preparation, `ExportTargetIdentity` captures native file
+identity plus size and high-resolution modification state without reading or hashing file contents:
+
+- macOS/Unix uses `lstat(2)` device, inode, size, and native nanosecond modification time;
+- Windows opens the pathname for attributes without following a reparse point and records volume
+  serial, file index, size, and native last-write time.
+
+Immediately before replacement, the transaction captures the pathname again. A different native
+identity detects replacement; changed size or modification state detects in-place modification. A
+missing, linked, non-regular, changed, or unverifiable target refuses commit. Disappearance is not
+reinterpreted as permission for a new-target export. The external pathname is never removed by this
+failure path, and the FlappedEar-owned staging file remains governed by normal transaction/manifest
+cleanup. The resulting controller and persistent-log error explicitly says encoding finished but the
+destination changed and was not overwritten.
+
+For an identity-matched existing target, the existing atomic replacement remains unchanged:
 
 - macOS (and other POSIX builds): `rename(2)` replaces the directory entry atomically. A crash exposes
   either the old complete file or the new complete file; there is no delete-then-rename window.
@@ -20,8 +40,15 @@ For an existing target, replacement requires the controller's explicit `overwrit
   and rolls the backup back if installation fails. This preserves the old file on ordinary operation
   failure, but it does not claim crash atomicity between the two renames.
 
+Portable pathname replacement still has a residual race between the final native identity check and
+`rename(2)` / `ReplaceFileW`. The check is placed directly before that operation, with no logging or
+other work between them, reducing exposure from the complete export duration to this small final
+commit interval. Eliminating it completely would require more invasive platform-specific directory-
+handle or conditional-rename mechanisms and is outside the current transaction design.
+
 Input video, VBO, and known transaction paths are compared using cleaned absolute paths and canonical
-paths where Qt can resolve them, including existing symlinks and canonicalized parent directories.
+paths where Qt can resolve them, including canonicalized parent directories. This collision comparison
+is separate from the explicit rejection of a linked output target.
 
 Free-space checks do not require a staging, temporary, or final artifact to exist. Each intended path
 is resolved upward to its nearest existing filesystem ancestor, while diagnostics retain the original

@@ -8,6 +8,7 @@
 #include "export/RawFrameTransport.h"
 #include "export/ExportProgress.h"
 #include "export/ExportOutputTransaction.h"
+#include "export/ExportTargetIdentity.h"
 #include "export/ExportArtifactManifest.h"
 #include "export/ExportProcessSupervisor.h"
 #include "export/ExportStoragePolicy.h"
@@ -119,6 +120,9 @@ private slots:
     void calculatesEncodedOutputProgress();
     void preservesFrameIdentityThroughCompletedOverlayComposition();
     void rejectsUnsafeExportPaths();
+    void capturesExportTargetIdentity();
+    void rejectsChangedExportTargets();
+    void rejectsSymlinkExportTargets();
     void preservesExistingExportTargetOnFailures_data();
     void preservesExistingExportTargetOnFailures();
     void commitsNewAndReplacementExports();
@@ -201,6 +205,13 @@ bool writeBytes(const QString &path, const QByteArray &bytes)
         && file.write(bytes) == bytes.size();
 }
 
+QByteArray readBytes(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return file.readAll();
+}
+
 QJsonObject testProject(const double offset, const QJsonObject &extra = {})
 {
     WidgetModel widgets;
@@ -275,6 +286,146 @@ void TelemetryTests::rejectsUnsafeExportPaths()
                  QDir(unwritablePath).filePath("out.mp4"), input, {vbo}, false).status,
              ExportOutputTransaction::PreparationStatus::Error);
 #endif
+}
+
+void TelemetryTests::capturesExportTargetIdentity()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString target = directory.filePath(QStringLiteral("target.mp4"));
+    QVERIFY(writeBytes(target, "original"));
+
+    ExportTargetIdentity original;
+    QString error;
+    QCOMPARE(ExportTargetIdentity::capture(target, &original, &error),
+             ExportTargetIdentity::CaptureStatus::Captured);
+    QVERIFY2(original.isValid(), qPrintable(error));
+    ExportTargetIdentity unchanged;
+    QCOMPARE(ExportTargetIdentity::capture(target, &unchanged, &error),
+             ExportTargetIdentity::CaptureStatus::Captured);
+    QVERIFY(original.matches(unchanged));
+
+    QVERIFY(writeBytes(target, "changed!"));
+    QFile modifiedFile(target);
+    QVERIFY(modifiedFile.open(QIODevice::ReadWrite));
+    QVERIFY(modifiedFile.setFileTime(
+        QDateTime::fromMSecsSinceEpoch(946684800000LL), QFileDevice::FileModificationTime));
+    modifiedFile.close();
+    ExportTargetIdentity modified;
+    QCOMPARE(ExportTargetIdentity::capture(target, &modified, &error),
+             ExportTargetIdentity::CaptureStatus::Captured);
+    QVERIFY(!original.matches(modified));
+
+    const QString displaced = directory.filePath(QStringLiteral("displaced.mp4"));
+    QVERIFY(QFile::rename(target, displaced));
+    QVERIFY(writeBytes(target, "other!!!"));
+    ExportTargetIdentity replaced;
+    QCOMPARE(ExportTargetIdentity::capture(target, &replaced, &error),
+             ExportTargetIdentity::CaptureStatus::Captured);
+    QVERIFY(!original.matches(replaced));
+
+    QVERIFY(QFile::remove(target));
+    ExportTargetIdentity missing;
+    QCOMPARE(ExportTargetIdentity::capture(target, &missing, &error),
+             ExportTargetIdentity::CaptureStatus::Missing);
+}
+
+void TelemetryTests::rejectsChangedExportTargets()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString input = directory.filePath(QStringLiteral("input.mp4"));
+    QVERIFY(writeBytes(input, "input"));
+
+    const auto prepareStaged = [&](const QString &target, ExportOutputTransaction &transaction) {
+        QCOMPARE(transaction.prepare(target, input, {}, true).status,
+                 ExportOutputTransaction::PreparationStatus::Ready);
+        QVERIFY(writeBytes(transaction.stagingPath(), "validated staging output"));
+    };
+
+    const QString modifiedTarget = directory.filePath(QStringLiteral("modified.mp4"));
+    QVERIFY(writeBytes(modifiedTarget, "approved target"));
+    {
+        ExportOutputTransaction transaction;
+        prepareStaged(modifiedTarget, transaction);
+        const QByteArray externalBytes("externally modified target with a new size");
+        QVERIFY(writeBytes(modifiedTarget, externalBytes));
+        QString error;
+        QVERIFY(!transaction.commit(&error));
+        QVERIFY2(error.contains(QStringLiteral("changed")), qPrintable(error));
+        QCOMPARE(readBytes(modifiedTarget), externalBytes);
+        QCOMPARE(readBytes(transaction.stagingPath()), QByteArray("validated staging output"));
+    }
+
+    const QString replacedTarget = directory.filePath(QStringLiteral("replaced.mp4"));
+    const QString displacedTarget = directory.filePath(QStringLiteral("approved-original.mp4"));
+    QVERIFY(writeBytes(replacedTarget, "approved target A"));
+    {
+        ExportOutputTransaction transaction;
+        prepareStaged(replacedTarget, transaction);
+        QVERIFY(QFile::rename(replacedTarget, displacedTarget));
+        const QByteArray replacementBytes("external replacement B");
+        QVERIFY(writeBytes(replacedTarget, replacementBytes));
+        QString error;
+        QVERIFY(!transaction.commit(&error));
+        QVERIFY2(error.contains(QStringLiteral("changed")), qPrintable(error));
+        QCOMPARE(readBytes(replacedTarget), replacementBytes);
+        QCOMPARE(readBytes(displacedTarget), QByteArray("approved target A"));
+    }
+
+    const QString disappearedTarget = directory.filePath(QStringLiteral("disappeared.mp4"));
+    QVERIFY(writeBytes(disappearedTarget, "approved target"));
+    {
+        ExportOutputTransaction transaction;
+        prepareStaged(disappearedTarget, transaction);
+        QVERIFY(QFile::remove(disappearedTarget));
+        QString error;
+        QVERIFY(!transaction.commit(&error));
+        QVERIFY2(error.contains(QStringLiteral("disappeared")), qPrintable(error));
+        QVERIFY(!QFileInfo::exists(disappearedTarget));
+        QCOMPARE(readBytes(transaction.stagingPath()), QByteArray("validated staging output"));
+    }
+
+    const QString appearedTarget = directory.filePath(QStringLiteral("appeared.mp4"));
+    {
+        ExportOutputTransaction transaction;
+        QCOMPARE(transaction.prepare(appearedTarget, input, {}, false).status,
+                 ExportOutputTransaction::PreparationStatus::Ready);
+        QVERIFY(writeBytes(transaction.stagingPath(), "validated staging output"));
+        const QByteArray externalBytes("external newly appeared target");
+        QVERIFY(writeBytes(appearedTarget, externalBytes));
+        QString error;
+        QVERIFY(!transaction.commit(&error));
+        QVERIFY2(error.contains(QStringLiteral("appeared")), qPrintable(error));
+        QCOMPARE(readBytes(appearedTarget), externalBytes);
+    }
+}
+
+void TelemetryTests::rejectsSymlinkExportTargets()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString input = directory.filePath(QStringLiteral("input.mp4"));
+    const QString referent = directory.filePath(QStringLiteral("referent.mp4"));
+    const QString link = directory.filePath(QStringLiteral("linked-output.mp4"));
+    QVERIFY(writeBytes(input, "input"));
+    QVERIFY(writeBytes(referent, "referent bytes"));
+    if (!QFile::link(referent, link)) {
+        QSKIP("The test environment does not permit symbolic-link creation.");
+    }
+    ExportTargetIdentity linkedIdentity;
+    if (ExportTargetIdentity::capture(link, &linkedIdentity)
+        != ExportTargetIdentity::CaptureStatus::Link) {
+        QSKIP("The platform link API did not create a native symbolic link/reparse point.");
+    }
+    ExportOutputTransaction transaction;
+    const ExportOutputTransaction::PreparationResult prepared = transaction.prepare(
+        link, input, {}, true);
+    QCOMPARE(prepared.status, ExportOutputTransaction::PreparationStatus::Error);
+    QVERIFY2(prepared.error.contains(QStringLiteral("symbolic link"), Qt::CaseInsensitive)
+                 || prepared.error.contains(QStringLiteral("reparse point"), Qt::CaseInsensitive),
+             qPrintable(prepared.error));
+    QCOMPARE(readBytes(referent), QByteArray("referent bytes"));
 }
 
 void TelemetryTests::preservesExistingExportTargetOnFailures_data()

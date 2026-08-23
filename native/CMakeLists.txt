@@ -30,6 +30,8 @@ qt_add_library(flappedear_core STATIC
     src/export/ExportProcessSupervisor.h
     src/export/ExportStoragePolicy.cpp
     src/export/ExportStoragePolicy.h
+    src/export/ExportTargetIdentity.cpp
+    src/export/ExportTargetIdentity.h
     src/export/FfmpegTools.cpp
     src/export/FfmpegTools.h
     src/export/MediaProbe.cpp
