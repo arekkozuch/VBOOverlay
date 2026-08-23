@@ -116,9 +116,24 @@ AppController::AppController(QObject *parent, QString recoveryPath)
                 return;
             }
             AppLog::error(QStringLiteral("Video load failed: %1: %2").arg(result.path, result.error));
-            m_videoLoadState = QStringLiteral("error");
+            m_videoLoadState = m_videoSource.isEmpty() ? QStringLiteral("error")
+                                                       : QStringLiteral("ready");
             emit sourceLoadStateChanged();
             setStatus(QStringLiteral("Could not open video: %1\n%2").arg(result.path, result.error));
+            return;
+        }
+        if (ProjectSourceReferenceCodec::compareFingerprints(
+                result.expectedFingerprint, result.fingerprint)
+            == SourceFingerprintMatch::Mismatch) {
+            m_videoLoadState = QStringLiteral("mismatch");
+            if (result.relink) {
+                m_pendingMismatchVideo = result;
+                m_pendingMismatchVbo = {};
+                m_sourceMismatchType = QStringLiteral("video");
+                emit sourceMismatchChanged();
+            }
+            emit sourceLoadStateChanged();
+            setStatus(QStringLiteral("Video source does not match the project fingerprint."));
             return;
         }
         commitVideoProbe(result, m_videoLoadMarksDocumentDirty);
@@ -137,9 +152,23 @@ AppController::AppController(QObject *parent, QString recoveryPath)
                 return;
             }
             AppLog::error(QStringLiteral("VBO load failed: %1: %2").arg(result.path, result.error));
-            m_vboLoadState = QStringLiteral("error");
+            m_vboLoadState = m_session ? QStringLiteral("ready") : QStringLiteral("error");
             emit sourceLoadStateChanged();
             setStatus(QStringLiteral("Could not parse VBO: %1\n%2").arg(result.path, result.error));
+            return;
+        }
+        if (ProjectSourceReferenceCodec::compareFingerprints(
+                result.expectedFingerprint, result.fingerprint)
+            == SourceFingerprintMatch::Mismatch) {
+            m_vboLoadState = QStringLiteral("mismatch");
+            if (result.relink) {
+                m_pendingMismatchVbo = result;
+                m_pendingMismatchVideo = {};
+                m_sourceMismatchType = QStringLiteral("telemetry");
+                emit sourceMismatchChanged();
+            }
+            emit sourceLoadStateChanged();
+            setStatus(QStringLiteral("Telemetry source does not match the project fingerprint."));
             return;
         }
         commitVboLoad(result, m_vboLoadMarksDocumentDirty);
@@ -205,8 +234,17 @@ AppController::~AppController()
 }
 
 QUrl AppController::videoSource() const { return m_videoSource; }
-QString AppController::videoName() const { return QFileInfo(m_videoSource.toLocalFile()).fileName(); }
-QString AppController::telemetryName() const { return QFileInfo(m_telemetryPath).fileName(); }
+QString AppController::videoName() const
+{
+    const QString path = m_videoSource.isEmpty() ? m_videoReference.displayPath()
+                                                  : m_videoSource.toLocalFile();
+    return QFileInfo(path).fileName();
+}
+QString AppController::telemetryName() const
+{
+    const QString path = m_telemetryPath.isEmpty() ? m_vboReference.displayPath() : m_telemetryPath;
+    return QFileInfo(path).fileName();
+}
 QString AppController::statusText() const { return m_statusText; }
 QStringList AppController::channelNames() const { return m_session ? m_session->channelNames() : QStringList(); }
 qsizetype AppController::sampleCount() const { return m_session ? m_session->sampleCount : 0; }
@@ -323,6 +361,17 @@ bool AppController::projectLoading() const { return m_projectLoading; }
 QString AppController::projectLoadStage() const { return m_projectLoadStage; }
 QString AppController::projectLoadError() const { return m_projectLoadError; }
 bool AppController::recoveryPending() const { return m_recoveryPending; }
+QString AppController::sourceMismatchType() const { return m_sourceMismatchType; }
+QString AppController::sourceMismatchCandidateName() const
+{
+    if (m_sourceMismatchType == QStringLiteral("video")) {
+        return QFileInfo(m_pendingMismatchVideo.path).fileName();
+    }
+    if (m_sourceMismatchType == QStringLiteral("telemetry")) {
+        return QFileInfo(m_pendingMismatchVbo.path).fileName();
+    }
+    return {};
+}
 
 QString AppController::normalizedSourcePath(const QString &path)
 {
@@ -344,6 +393,12 @@ QVariantList AppController::trackPointsFor(const TrackGeometry &geometry)
 quint64 AppController::beginSourceGeneration()
 {
     ++m_sourceGeneration;
+    if (!m_sourceMismatchType.isEmpty()) {
+        m_sourceMismatchType.clear();
+        m_pendingMismatchVideo = {};
+        m_pendingMismatchVbo = {};
+        emit sourceMismatchChanged();
+    }
     const bool replacing = m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
         || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning();
     cancelSourceJobs();
@@ -370,7 +425,8 @@ void AppController::cancelSourceJobs()
 }
 
 void AppController::startVideoProbe(
-    const QString &path, const quint64 generation, const bool markDocumentDirty)
+    const QString &path, const quint64 generation, const bool markDocumentDirty,
+    QJsonObject expectedFingerprint, const bool relink)
 {
     AppLog::info(QStringLiteral("Video load/probe started: %1").arg(path));
     m_videoProbeCancellation = std::make_shared<std::atomic_bool>(false);
@@ -378,13 +434,18 @@ void AppController::startVideoProbe(
     m_videoLoadMarksDocumentDirty = markDocumentDirty;
     m_videoLoadState = QStringLiteral("loading");
     emit sourceLoadStateChanged();
-    m_videoProbeWatcher.setFuture(QtConcurrent::run([path, generation, cancellation] {
+    m_videoProbeWatcher.setFuture(QtConcurrent::run(
+        [path, generation, cancellation, expectedFingerprint = std::move(expectedFingerprint), relink] {
         VideoProbeResult result;
         result.path = path;
         result.generation = generation;
+        result.expectedFingerprint = expectedFingerprint;
+        result.relink = relink;
         try {
             result.mediaInfo = MediaProbe::probe(
                 path, {}, false, -1, {}, [cancellation] { return cancellation->load(); });
+            result.fingerprint = ProjectSourceReferenceCodec::videoFingerprint(
+                path, result.mediaInfo);
             result.success = !cancellation->load();
             if (!result.success) {
                 result.cancelled = true;
@@ -401,7 +462,8 @@ void AppController::startVideoProbe(
 }
 
 void AppController::startVboLoad(
-    const QString &path, const quint64 generation, const bool markDocumentDirty)
+    const QString &path, const quint64 generation, const bool markDocumentDirty,
+    QJsonObject expectedFingerprint, const bool relink)
 {
     AppLog::info(QStringLiteral("VBO load started: %1").arg(path));
     m_vboLoadCancellation = std::make_shared<std::atomic_bool>(false);
@@ -409,10 +471,13 @@ void AppController::startVboLoad(
     m_vboLoadMarksDocumentDirty = markDocumentDirty;
     m_vboLoadState = QStringLiteral("loading");
     emit sourceLoadStateChanged();
-    m_vboLoadWatcher.setFuture(QtConcurrent::run([path, generation, cancellation] {
+    m_vboLoadWatcher.setFuture(QtConcurrent::run(
+        [path, generation, cancellation, expectedFingerprint = std::move(expectedFingerprint), relink] {
         VboLoadResult result;
         result.path = path;
         result.generation = generation;
+        result.expectedFingerprint = expectedFingerprint;
+        result.relink = relink;
         try {
             result.session = VboParser::parseFile(
                 path, [cancellation] { return cancellation->load(); });
@@ -422,6 +487,8 @@ void AppController::startVboLoad(
                 return result;
             }
             result.geometry = buildTrackGeometry(result.session);
+            result.fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(
+                path, result.session);
             result.success = !cancellation->load();
             if (!result.success) {
                 result.cancelled = true;
@@ -442,6 +509,8 @@ void AppController::commitVideoProbe(const VideoProbeResult &result, const bool 
     AppLog::info(QStringLiteral("Video load succeeded: %1").arg(result.path));
     m_videoSource = QUrl::fromLocalFile(result.path);
     m_exportSourceInfo = result.mediaInfo;
+    m_videoReference = ProjectSourceReferenceCodec::forLoadedSource(
+        result.path, result.fingerprint);
     m_videoLoadState = QStringLiteral("ready");
     m_pendingVideoPath.clear();
     m_syncCandidate.clear();
@@ -457,11 +526,15 @@ void AppController::commitVideoProbe(const VideoProbeResult &result, const bool 
 
 void AppController::commitVboLoad(const VboLoadResult &result, const bool markDocumentDirty)
 {
+    const QScopedValueRollback suppressDirty(
+        m_suppressDirtyTracking, m_suppressDirtyTracking || !markDocumentDirty);
     AppLog::info(QStringLiteral("VBO load succeeded: %1").arg(result.path));
     m_session = std::make_unique<TelemetrySession>(result.session);
     m_trackGeometry = result.geometry;
     m_trackPoints = trackPointsFor(m_trackGeometry);
     m_telemetryPath = result.path;
+    m_vboReference = ProjectSourceReferenceCodec::forLoadedSource(
+        result.path, result.fingerprint);
     m_vboLoadState = QStringLiteral("ready");
     m_pendingVboPath.clear();
     m_syncCandidate.clear();
@@ -529,6 +602,56 @@ void AppController::loadVbo(const QUrl &url)
     setStatus(QStringLiteral("Loading telemetry: %1").arg(info.fileName()));
 }
 
+void AppController::relinkVideo(const QUrl &url)
+{
+    const QFileInfo info(url.toLocalFile());
+    const QString extension = info.suffix().toLower();
+    if (!info.isFile() || (extension != QStringLiteral("mp4")
+                           && extension != QStringLiteral("mov"))) {
+        setStatus(QStringLiteral("Choose an existing MP4 or MOV video."));
+        return;
+    }
+    const quint64 generation = beginSourceGeneration();
+    const QString path = normalizedSourcePath(info.absoluteFilePath());
+    m_pendingVideoPath = path;
+    startVideoProbe(path, generation, true, m_videoReference.fingerprint, true);
+}
+
+void AppController::relinkVbo(const QUrl &url)
+{
+    const QFileInfo info(url.toLocalFile());
+    if (!info.isFile() || info.suffix().compare(QStringLiteral("vbo"), Qt::CaseInsensitive) != 0) {
+        setStatus(QStringLiteral("Choose an existing VBOX .vbo telemetry file."));
+        return;
+    }
+    const quint64 generation = beginSourceGeneration();
+    const QString path = normalizedSourcePath(info.absoluteFilePath());
+    m_pendingVboPath = path;
+    startVboLoad(path, generation, true, m_vboReference.fingerprint, true);
+}
+
+void AppController::resolveSourceMismatch(const bool acceptReplacement)
+{
+    const QString type = m_sourceMismatchType;
+    m_sourceMismatchType.clear();
+    emit sourceMismatchChanged();
+    if (!acceptReplacement) {
+        m_pendingMismatchVideo = {};
+        m_pendingMismatchVbo = {};
+        setStatus(QStringLiteral("Source replacement cancelled."));
+        return;
+    }
+    if (type == QStringLiteral("video") && m_pendingMismatchVideo.success
+        && m_pendingMismatchVideo.generation == m_sourceGeneration) {
+        commitVideoProbe(m_pendingMismatchVideo, true);
+    } else if (type == QStringLiteral("telemetry") && m_pendingMismatchVbo.success
+               && m_pendingMismatchVbo.generation == m_sourceGeneration) {
+        commitVboLoad(m_pendingMismatchVbo, true);
+    }
+    m_pendingMismatchVideo = {};
+    m_pendingMismatchVbo = {};
+}
+
 void AppController::performClearProject()
 {
     const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
@@ -539,12 +662,14 @@ void AppController::performClearProject()
     m_pendingVboPath.clear();
     setProjectLoadState(false);
     m_videoSource = QUrl();
+    m_videoReference = {};
     m_exportSourceInfo = {};
     m_exportMetrics.clear();
     m_exportDiagnosticLog.clear();
     m_exportProgressInfo.clear();
     m_exportProgressVisible = false;
     m_telemetryPath.clear();
+    m_vboReference = {};
     m_session.reset();
     m_trackGeometry = {};
     m_previewRenderContext.setSession(nullptr);
@@ -798,90 +923,40 @@ bool AppController::beginProjectLoad(
         }
     }
     const quint64 generation = beginSourceGeneration();
-    m_projectLoadCancellation = std::make_shared<std::atomic_bool>(false);
-    const std::shared_ptr<std::atomic_bool> cancellation = m_projectLoadCancellation;
-    const quint64 documentRevisionAtStart = m_documentState.revision();
-    const QString videoPath = project.value("videoPath").toString();
-    const QString vboPath = project.value("vboPath").toString();
-    const QString normalizedVideoPath = videoPath.isEmpty() ? QString() : normalizedSourcePath(videoPath);
-    const QString normalizedVboPath = vboPath.isEmpty() ? QString() : normalizedSourcePath(vboPath);
-    m_pendingVideoPath.clear();
-    m_pendingVboPath.clear();
-    setProjectLoadState(true, normalizedVideoPath.isEmpty()
-                                  ? QStringLiteral("Loading telemetry")
-                                  : QStringLiteral("Loading video metadata"));
-    m_projectLoadWatcher.setFuture(QtConcurrent::run(
-        [projectPath, project, widgets = scene.value("widgets").toArray(), channels,
-         analysisVisible = analysis.value("visible").toBool(true),
-         syncTransform = SyncTransform{offset, timeScale}, normalizedVideoPath, normalizedVboPath,
-         generation, cancellation, documentRevisionAtStart, recovered, recoveredRevision,
-         recoveredLastSavedRevision] {
-            ProjectLoadResult result;
-            result.projectPath = projectPath;
-            result.project = project;
-            result.widgets = widgets;
-            result.analysisChannels = channels;
-            result.analysisVisible = analysisVisible;
-            result.sync = syncTransform;
-            result.generation = generation;
-            result.documentRevisionAtStart = documentRevisionAtStart;
-            result.recovered = recovered;
-            result.recoveredRevision = recoveredRevision;
-            result.recoveredLastSavedRevision = recoveredLastSavedRevision;
-            if (!normalizedVideoPath.isEmpty()) {
-                result.video.path = normalizedVideoPath;
-                result.video.generation = generation;
-                try {
-                    result.video.mediaInfo = MediaProbe::probe(
-                        normalizedVideoPath, {}, false, -1, {},
-                        [cancellation] { return cancellation->load(); });
-                    result.video.success = !cancellation->load();
-                } catch (const OperationCancelled &) {
-                    result.cancelled = true;
-                    result.error = QStringLiteral("video source loading was cancelled.");
-                    return result;
-                } catch (const std::exception &error) {
-                    result.error = QStringLiteral("video source %1: %2")
-                                       .arg(normalizedVideoPath, QString::fromUtf8(error.what()));
-                    return result;
-                }
-                if (!result.video.success) {
-                    result.cancelled = true;
-                    result.error = QStringLiteral("video source loading was cancelled.");
-                    return result;
-                }
-            }
-            if (!normalizedVboPath.isEmpty()) {
-                result.vbo.path = normalizedVboPath;
-                result.vbo.generation = generation;
-                try {
-                    result.vbo.session = VboParser::parseFile(
-                        normalizedVboPath, [cancellation] { return cancellation->load(); });
-                    if (cancellation->load()) {
-                        result.cancelled = true;
-                        result.error = QStringLiteral("telemetry source loading was cancelled.");
-                        return result;
-                    }
-                    result.vbo.geometry = buildTrackGeometry(result.vbo.session);
-                    result.vbo.success = !cancellation->load();
-                } catch (const OperationCancelled &) {
-                    result.cancelled = true;
-                    result.error = QStringLiteral("telemetry source loading was cancelled.");
-                    return result;
-                } catch (const std::exception &error) {
-                    result.error = QStringLiteral("telemetry source %1: %2")
-                                       .arg(normalizedVboPath, QString::fromUtf8(error.what()));
-                    return result;
-                }
-                if (!result.vbo.success) {
-                    result.cancelled = true;
-                    result.error = QStringLiteral("telemetry source loading was cancelled.");
-                    return result;
-                }
-            }
-            result.success = true;
-            return result;
-        }));
+    ProjectLoadResult result;
+    result.success = true;
+    result.projectPath = std::move(projectPath);
+    result.project = project;
+    result.widgets = scene.value(QStringLiteral("widgets")).toArray();
+    result.analysisChannels = channels;
+    result.analysisVisible = analysis.value(QStringLiteral("visible")).toBool(true);
+    result.sync = {offset, timeScale};
+    result.generation = generation;
+    result.recovered = recovered;
+    result.recoveredRevision = recoveredRevision;
+    result.recoveredLastSavedRevision = recoveredLastSavedRevision;
+    result.videoReference = ProjectSourceReferenceCodec::fromProject(
+        project, QStringLiteral("video"), QStringLiteral("videoPath"));
+    result.vboReference = ProjectSourceReferenceCodec::fromProject(
+        project, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
+    result.resolvedVideoPath = ProjectSourceReferenceCodec::resolve(
+        result.videoReference, result.projectPath);
+    result.resolvedVboPath = ProjectSourceReferenceCodec::resolve(
+        result.vboReference, result.projectPath);
+
+    setProjectLoadState(true, QStringLiteral("Applying project"));
+    commitProjectLoad(result);
+
+    m_pendingVideoPath = result.resolvedVideoPath;
+    m_pendingVboPath = result.resolvedVboPath;
+    if (!result.resolvedVideoPath.isEmpty()) {
+        startVideoProbe(result.resolvedVideoPath, generation, false,
+                        result.videoReference.fingerprint, false);
+    }
+    if (!result.resolvedVboPath.isEmpty()) {
+        startVboLoad(result.resolvedVboPath, generation, false,
+                     result.vboReference.fingerprint, false);
+    }
     return true;
 }
 
@@ -908,17 +983,22 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
         return;
     }
     m_projectTemplate = result.project;
-    m_videoSource = result.video.path.isEmpty() ? QUrl() : QUrl::fromLocalFile(result.video.path);
-    m_exportSourceInfo = result.video.mediaInfo;
-    m_videoLoadState = result.video.path.isEmpty() ? QStringLiteral("idle") : QStringLiteral("ready");
-    m_telemetryPath = result.vbo.path;
-    m_session = result.vbo.path.isEmpty()
-        ? nullptr : std::make_unique<TelemetrySession>(result.vbo.session);
-    m_trackGeometry = result.vbo.geometry;
+    m_videoReference = result.videoReference;
+    m_vboReference = result.vboReference;
+    m_videoSource = QUrl();
+    m_exportSourceInfo = {};
+    m_videoLoadState = result.videoReference.isEmpty() ? QStringLiteral("idle")
+        : result.resolvedVideoPath.isEmpty() ? QStringLiteral("missing")
+                                             : QStringLiteral("loading");
+    m_telemetryPath.clear();
+    m_session.reset();
+    m_trackGeometry = {};
     m_trackPoints = trackPointsFor(m_trackGeometry);
-    m_vboLoadState = result.vbo.path.isEmpty() ? QStringLiteral("idle") : QStringLiteral("ready");
-    m_previewRenderContext.setSession(m_session.get());
-    m_previewRenderContext.setTrackGeometry(m_session ? &m_trackGeometry : nullptr);
+    m_vboLoadState = result.vboReference.isEmpty() ? QStringLiteral("idle")
+        : result.resolvedVboPath.isEmpty() ? QStringLiteral("missing")
+                                           : QStringLiteral("loading");
+    m_previewRenderContext.setSession(nullptr);
+    m_previewRenderContext.setTrackGeometry(nullptr);
     m_sync = result.sync;
     m_previewRenderContext.setSyncTransform(m_sync);
     m_playbackTime = 0.0;
@@ -956,12 +1036,31 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     }
 }
 
-QJsonObject AppController::currentProjectObject() const
+QJsonObject AppController::currentProjectObject(const QString &projectPath) const
 {
     QJsonObject project = m_projectTemplate;
     project.insert("version", 2);
-    project.insert("videoPath", m_videoSource.toLocalFile());
-    project.insert("vboPath", m_telemetryPath);
+    project.remove(QStringLiteral("videoPath"));
+    project.remove(QStringLiteral("vboPath"));
+    const QString targetProjectPath = projectPath.isEmpty()
+        ? m_documentState.projectPath() : projectPath;
+    QJsonObject sources = project.value(QStringLiteral("sources")).toObject();
+    const QJsonObject video = ProjectSourceReferenceCodec::toJson(
+        m_videoReference, targetProjectPath);
+    const QJsonObject telemetry = ProjectSourceReferenceCodec::toJson(
+        m_vboReference, targetProjectPath);
+    const auto overlaySource = [&sources](const QString &key, const QJsonObject &known) {
+        QJsonObject source = sources.value(key).toObject();
+        source.remove(QStringLiteral("relativePath"));
+        source.remove(QStringLiteral("absolutePath"));
+        source.remove(QStringLiteral("fingerprint"));
+        for (auto it = known.begin(); it != known.end(); ++it) source.insert(it.key(), it.value());
+        if (source.isEmpty()) sources.remove(key);
+        else sources.insert(key, source);
+    };
+    overlaySource(QStringLiteral("video"), video);
+    overlaySource(QStringLiteral("telemetry"), telemetry);
+    project.insert(QStringLiteral("sources"), sources);
     QJsonObject sync = project.value("sync").toObject();
     sync.insert("offset", m_sync.offset);
     sync.insert("timeScale", m_sync.timeScale);
@@ -989,7 +1088,7 @@ bool AppController::saveProject(const QUrl &url)
         path.append(".fetproject");
     }
     AppLog::info(QStringLiteral("Project save requested: %1").arg(path));
-    const QJsonObject project = currentProjectObject();
+    const QJsonObject project = currentProjectObject(path);
     const QByteArray payload = QJsonDocument(project).toJson(QJsonDocument::Indented);
     const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
     if (!writeResult.success) {

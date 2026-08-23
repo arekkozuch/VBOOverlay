@@ -11,7 +11,8 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Export output transactions, including explicit state-bound overwrite consent, changed-target refusal, and protected user targets.
 - [x] Atomic project saving and dirty-state safeguards for destructive project actions.
 - [x] Separate atomic unsaved-document recovery from authoritative saved projects, including explicit startup recovery/discard and unknown-field preservation.
-- [x] Asynchronous video/VBO loading, transactional project loading, and stale-result rejection.
+- [x] Portable project-relative video/VBO references, bounded source fingerprints, document-first opening with missing assets, explicit relinking, and mismatch confirmation.
+- [x] Asynchronous video/VBO loading, transactional document commit, and stale-result rejection.
 - [x] Cooperative cancellation and defensive resource bounds for VBO parsing, GoPro probing/GPMF decoding, auto-sync, source replacement, and shutdown.
 - [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
 - [x] Stable no-data-aware overlay presentation and gap/extrema-preserving analysis decimation.

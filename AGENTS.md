@@ -32,7 +32,10 @@
 - Never write FFmpeg directly to a user-selected export target. Only transaction-owned temporary paths
   may be deleted automatically, and an existing target requires explicit overwrite consent.
 - Project saves remain atomic. New, open, and quit actions must respect dirty state, and project open
-  must remain transactional.
+  document validation/commit must remain transactional even though external sources resolve afterward.
+- A project document and its external assets are separate. Missing or moved media must not prevent a
+  valid project document from opening. Relative source references are preferred where portable, and a
+  source must not be silently accepted solely because a pathname matches.
 - The saved `.fetproject` is the authoritative clean document state. Recovery data is separate,
   represents unsaved changes, and must never be silently marked clean. Discard removes unsaved
   recovery state rather than persisting it as the next clean session.

@@ -25,7 +25,7 @@ ApplicationWindow {
     property bool fullScreenPreview: false
     property bool closeApproved: false
     property int editorVisibility: Window.Windowed
-    property bool welcomeVisible: !appController.videoName
+    property bool welcomeVisible: !appController.projectPath && !appController.videoName
     property int selectedWidgetIndex: -1
     property var selectedWidgetIndices: []
     property var widgetCatalog: [
@@ -188,6 +188,41 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: sourceMismatchDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 470
+        title: qsTr("Source does not match project")
+        contentItem: Label {
+            width: 410
+            text: qsTr("The selected file “%1” does not match the source originally stored with this project. Use it as an intentional replacement?")
+                .arg(appController.sourceMismatchCandidateName)
+            wrapMode: Text.WordWrap
+            color: "#e8edf4"
+        }
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Yes | DialogButtonBox.Cancel
+            onAccepted: {
+                sourceMismatchDialog.close()
+                appController.resolveSourceMismatch(true)
+            }
+            onRejected: {
+                sourceMismatchDialog.close()
+                appController.resolveSourceMismatch(false)
+            }
+        }
+    }
+
+    Connections {
+        target: appController
+        function onSourceMismatchChanged() {
+            if (appController.sourceMismatchType.length > 0)
+                sourceMismatchDialog.open()
+        }
+    }
+
+    Dialog {
         id: recoveryDialog
         parent: Overlay.overlay
         anchors.centerIn: parent
@@ -292,7 +327,8 @@ ApplicationWindow {
             }
             Action {
                 text: qsTr("Export…")
-                enabled: appController.videoName.length > 0 && appController.telemetryName.length > 0
+                enabled: appController.videoLoadState === "ready"
+                         && appController.vboLoadState === "ready"
                 onTriggered: exportDialog.open()
             }
             MenuSeparator {}
@@ -480,6 +516,18 @@ ApplicationWindow {
         title: qsTr("Open VBOX telemetry")
         nameFilters: [qsTr("VBOX telemetry (*.vbo)")]
         onAccepted: appController.loadVbo(selectedFile)
+    }
+    FileDialog {
+        id: videoRelinkDialog
+        title: qsTr("Locate project video")
+        nameFilters: [qsTr("Video files (*.mp4 *.mov)")]
+        onAccepted: appController.relinkVideo(selectedFile)
+    }
+    FileDialog {
+        id: vboRelinkDialog
+        title: qsTr("Locate project telemetry")
+        nameFilters: [qsTr("VBOX telemetry (*.vbo)")]
+        onAccepted: appController.relinkVbo(selectedFile)
     }
     FileDialog {
         id: projectOpenDialog
@@ -1244,9 +1292,28 @@ ApplicationWindow {
                 }
                 FeButton {
                     compact: true
+                    visible: appController.videoLoadState === "missing"
+                             || appController.videoLoadState === "mismatch"
+                             || appController.videoLoadState === "error"
+                    text: appController.videoLoadState === "mismatch"
+                        ? qsTr("Video mismatch · Locate…") : qsTr("Video missing · Locate…")
+                    onClicked: videoRelinkDialog.open()
+                }
+                FeButton {
+                    compact: true
+                    visible: appController.vboLoadState === "missing"
+                             || appController.vboLoadState === "mismatch"
+                             || appController.vboLoadState === "error"
+                    text: appController.vboLoadState === "mismatch"
+                        ? qsTr("Telemetry mismatch · Locate…") : qsTr("Telemetry missing · Locate…")
+                    onClicked: vboRelinkDialog.open()
+                }
+                FeButton {
+                    compact: true
                     accent: true
                     text: qsTr("Export")
-                    enabled: appController.videoName.length > 0 && appController.telemetryName.length > 0
+                    enabled: appController.videoLoadState === "ready"
+                             && appController.vboLoadState === "ready"
                     onClicked: exportDialog.open()
                 }
             }
@@ -1697,7 +1764,8 @@ ApplicationWindow {
                     width: 4
                     height: 4
                     radius: 2
-                    color: appController.videoName && appController.telemetryName ? "#55e6a5" : "#485565"
+                    color: appController.videoLoadState === "ready"
+                           && appController.vboLoadState === "ready" ? "#55e6a5" : "#485565"
                 }
             }
         }

@@ -14,7 +14,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - A visual widget editor, projects, built-in layouts, and shareable templates.
 - Synchronized telemetry analysis, including charts and a track view.
 - CFR HEVC/AAC MP4 export at the effective rational export rate, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
-- Bounded, cooperatively cancellable video/VBO/GoPro loading and synchronization, transactional project loading, and stale asynchronous-result rejection.
+- Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
 
 ## Requirements
@@ -43,7 +43,7 @@ open "build-native/native/FlappedEar Telemetry.app"
 
 The application keeps telemetry parsing, synchronization, video/media handling, widgets, and QML presentation separate. Preview and export mount the same `TelemetryScene.qml` with independent render contexts. Track geometry is converted and painted as a static layer when its source or appearance changes; playback updates move only the independent position marker.
 
-A saved `.fetproject` is the authoritative clean document. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup; QSettings stores only application preferences and the last project path.
+A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup; QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
 
 Module details are in [docs/architecture.md](docs/architecture.md). The project source lives in [`native/src/project`](native/src/project).
 

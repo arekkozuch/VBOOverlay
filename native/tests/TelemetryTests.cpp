@@ -24,6 +24,7 @@
 #include "project/ProjectWriter.h"
 #include "project/ProjectDocumentState.h"
 #include "project/ProjectRecoveryStore.h"
+#include "project/ProjectSourceReference.h"
 
 #include <QFile>
 #include <QDateTime>
@@ -139,12 +140,17 @@ private slots:
     void replacesInFlightSourceLoad();
     void shutsDownWithInFlightSourceLoad();
     void opensProjectsTransactionally();
+    void serializesPortableProjectSourcesAndMovesFolder();
+    void opensProjectsWithMissingSources();
+    void fingerprintsSourcesDeterministically();
+    void relinksTelemetryWithMismatchPolicy();
+    void rejectsStaleRelinkResults();
     void restoresSavedProjectsAndPreservesUnknownFields();
     void recoversAndDiscardsSavedChanges();
     void recoversAndDiscardsUnsavedDocuments();
     void discardsUnsavedStateForQuitNewAndOpen();
     void preservesRecoveryAcrossFailedSave();
-    void rejectsProjectLoadAfterInterveningEdit();
+    void preservesEditsAfterDocumentFirstProjectOpen();
     void syncsOptionalRealRecording();
 };
 
@@ -1811,7 +1817,7 @@ void TelemetryTests::retainsTelemetryAfterFailedAsyncLoad()
     const QString malformedPath = directory.filePath("malformed.vbo");
     QVERIFY(writeBytes(malformedPath, "not a VBOX file"));
     controller.loadVbo(QUrl::fromLocalFile(malformedPath));
-    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("error"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
     QCOMPARE(controller.telemetryName(), loadedName);
     QCOMPARE(controller.channelNames(), loadedChannels);
 }
@@ -1866,12 +1872,6 @@ void TelemetryTests::opensProjectsTransactionally()
     AppController controller;
     controller.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
     QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
-    const QString oldTelemetryName = controller.telemetryName();
-    const QStringList oldChannels = controller.channelNames();
-    const QStringList oldAnalysisChannels = controller.analysisChannels();
-    const QJsonArray oldWidgets = controller.widgetModel()->toJson();
-    const double oldOffset = controller.syncOffset();
-    const double oldScale = controller.timeScale();
     QVERIFY(controller.dirty());
 
     QTemporaryDir directory;
@@ -1886,15 +1886,14 @@ void TelemetryTests::opensProjectsTransactionally()
     controller.requestOpenProject(QUrl::fromLocalFile(failedPath));
     controller.resolveDestructiveAction("discard");
     QTRY_VERIFY(!controller.projectLoading());
-    QVERIFY(!controller.projectLoadError().isEmpty());
-    QCOMPARE(controller.telemetryName(), oldTelemetryName);
-    QCOMPARE(controller.channelNames(), oldChannels);
-    QCOMPARE(controller.analysisChannels(), oldAnalysisChannels);
-    QCOMPARE(controller.widgetModel()->toJson(), oldWidgets);
-    QCOMPARE(controller.syncOffset(), oldOffset);
-    QCOMPARE(controller.timeScale(), oldScale);
-    QVERIFY(controller.projectPath().isEmpty());
-    QVERIFY(controller.dirty());
+    QVERIFY(controller.projectLoadError().isEmpty());
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    QCOMPARE(controller.telemetryName(), QStringLiteral("missing.vbo"));
+    QVERIFY(controller.channelNames().isEmpty());
+    QCOMPARE(controller.widgetModel()->toJson(), scene.value(QStringLiteral("widgets")).toArray());
+    QCOMPARE(controller.syncOffset(), 4.0);
+    QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(failedPath).canonicalFilePath());
+    QVERIFY(!controller.dirty());
 
     const QJsonObject successProject{{"version", 2},
                                      {"scene", scene},
@@ -1905,11 +1904,222 @@ void TelemetryTests::opensProjectsTransactionally()
     QVERIFY(writeBytes(successPath, QJsonDocument(successProject).toJson()));
     controller.requestOpenProject(QUrl::fromLocalFile(successPath));
     controller.resolveDestructiveAction("discard");
-    QTRY_VERIFY(!controller.projectLoading());
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
     QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(successPath).canonicalFilePath());
     QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
     QCOMPARE(controller.syncOffset(), 2.5);
     QVERIFY(!controller.dirty());
+    QVERIFY(controller.saveCurrentProject());
+    const QJsonObject migrated = QJsonDocument::fromJson(readBytes(successPath)).object();
+    QVERIFY(!migrated.contains(QStringLiteral("vboPath")));
+    QVERIFY(!migrated.value(QStringLiteral("sources")).toObject()
+                 .value(QStringLiteral("telemetry")).toObject()
+                 .value(QStringLiteral("fingerprint")).toObject().isEmpty());
+}
+
+void TelemetryTests::serializesPortableProjectSourcesAndMovesFolder()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString original = directory.filePath(QStringLiteral("TrackDay"));
+    QVERIFY(QDir().mkpath(QDir(original).filePath(QStringLiteral("media"))));
+    const QString videoPath = QDir(original).filePath(QStringLiteral("media/camera.mp4"));
+    QVERIFY(writeBytes(videoPath, QByteArrayLiteral("path-resolution fixture")));
+    const QString vboPath = QDir(original).filePath(QStringLiteral("media/session.vbo"));
+    QVERIFY(QFile::copy(QStringLiteral(TEST_FIXTURE_PATH), vboPath));
+    const QString projectPath = QDir(original).filePath(QStringLiteral("Project.fetproject"));
+    const ProjectSourceReference videoReference =
+        ProjectSourceReferenceCodec::forLoadedSource(
+            videoPath, QJsonObject{{QStringLiteral("kind"), QStringLiteral("video-v1")}});
+    const QJsonObject serializedVideo = ProjectSourceReferenceCodec::toJson(
+        videoReference, projectPath);
+    QCOMPARE(serializedVideo.value(QStringLiteral("relativePath")).toString(),
+             QStringLiteral("media/camera.mp4"));
+
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    AppController writer(nullptr, directory.filePath(QStringLiteral("recovery-a.json")));
+    writer.loadVbo(QUrl::fromLocalFile(vboPath));
+    QTRY_COMPARE(writer.vboLoadState(), QStringLiteral("ready"));
+    QVERIFY(writer.saveProject(QUrl::fromLocalFile(projectPath)));
+
+    const QJsonObject saved = QJsonDocument::fromJson(readBytes(projectPath)).object();
+    QVERIFY(!saved.contains(QStringLiteral("vboPath")));
+    const QJsonObject telemetry = saved.value(QStringLiteral("sources")).toObject()
+                                      .value(QStringLiteral("telemetry")).toObject();
+    QCOMPARE(telemetry.value(QStringLiteral("relativePath")).toString(),
+             QStringLiteral("media/session.vbo"));
+    QVERIFY(!telemetry.value(QStringLiteral("fingerprint")).toObject().isEmpty());
+
+    const QString moved = directory.filePath(QStringLiteral("MovedTrackDay"));
+    QVERIFY(QDir().rename(original, moved));
+    const QString movedProjectPath = QDir(moved).filePath(QStringLiteral("Project.fetproject"));
+    const QJsonObject portableVideoProject{{QStringLiteral("sources"), QJsonObject{
+        {QStringLiteral("video"), serializedVideo}}}};
+    const ProjectSourceReference movedVideo = ProjectSourceReferenceCodec::fromProject(
+        portableVideoProject, QStringLiteral("video"), QStringLiteral("videoPath"));
+    QCOMPARE(ProjectSourceReferenceCodec::resolve(movedVideo, movedProjectPath),
+             QFileInfo(QDir(moved).filePath(QStringLiteral("media/camera.mp4"))).canonicalFilePath());
+    settings.clear();
+    settings.sync();
+    AppController reader(nullptr, directory.filePath(QStringLiteral("recovery-b.json")));
+    reader.requestOpenProject(QUrl::fromLocalFile(
+        movedProjectPath));
+    QTRY_COMPARE(reader.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(reader.telemetryName(), QStringLiteral("session.vbo"));
+    QVERIFY(!reader.dirty());
+}
+
+void TelemetryTests::opensProjectsWithMissingSources()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QJsonObject project = testProject(3.25, {{QStringLiteral("future"), 42}});
+    project.insert(QStringLiteral("sources"), QJsonObject{
+        {QStringLiteral("video"), QJsonObject{{QStringLiteral("relativePath"), QStringLiteral("media/missing.mp4")},
+                                                {QStringLiteral("futureSourceField"), 17}}},
+        {QStringLiteral("telemetry"), QJsonObject{{QStringLiteral("relativePath"), QStringLiteral("media/missing.vbo")}}},
+    });
+    const QString path = directory.filePath(QStringLiteral("missing.fetproject"));
+    QVERIFY(writeBytes(path, QJsonDocument(project).toJson()));
+
+    AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
+    controller.requestOpenProject(QUrl::fromLocalFile(path));
+    QVERIFY(!controller.projectLoading());
+    QCOMPARE(controller.videoLoadState(), QStringLiteral("missing"));
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    QCOMPARE(controller.syncOffset(), 3.25);
+    QVERIFY(!controller.dirty());
+    controller.setSyncOffset(4.0);
+    QTRY_VERIFY(QFileInfo(directory.filePath(QStringLiteral("recovery.json"))).isFile());
+    ProjectRecoveryStore recovery(directory.filePath(QStringLiteral("recovery.json")));
+    ProjectRecoverySnapshot snapshot;
+    QString recoveryError;
+    QVERIFY2(recovery.load(&snapshot, &recoveryError), qPrintable(recoveryError));
+    QCOMPARE(snapshot.project.value(QStringLiteral("sources")).toObject()
+                 .value(QStringLiteral("telemetry")).toObject()
+                 .value(QStringLiteral("relativePath")).toString(),
+             QStringLiteral("media/missing.vbo"));
+    QVERIFY(controller.saveCurrentProject());
+    const QJsonObject reloaded = QJsonDocument::fromJson(readBytes(path)).object();
+    QCOMPARE(reloaded.value(QStringLiteral("future")).toInt(), 42);
+    QCOMPARE(reloaded.value(QStringLiteral("sources")).toObject()
+                 .value(QStringLiteral("video")).toObject()
+                 .value(QStringLiteral("relativePath")).toString(),
+             QStringLiteral("media/missing.mp4"));
+    QCOMPARE(reloaded.value(QStringLiteral("sources")).toObject()
+                 .value(QStringLiteral("video")).toObject()
+                 .value(QStringLiteral("futureSourceField")).toInt(), 17);
+}
+
+void TelemetryTests::fingerprintsSourcesDeterministically()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString first = directory.filePath(QStringLiteral("first.bin"));
+    const QString second = directory.filePath(QStringLiteral("second.bin"));
+    QByteArray bytes(256 * 1024, 'a');
+    QVERIFY(writeBytes(first, bytes));
+    QVERIFY(writeBytes(second, bytes));
+    MediaInfo info;
+    info.duration = 10.0;
+    info.videoSize = QSize(1920, 1080);
+    info.averageFrameRate = {30000, 1001};
+    info.videoCodec = QStringLiteral("h264");
+    const QJsonObject expected = ProjectSourceReferenceCodec::videoFingerprint(first, info);
+    QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
+                 expected, ProjectSourceReferenceCodec::videoFingerprint(second, info)),
+             SourceFingerprintMatch::Match);
+    bytes[bytes.size() / 2] = 'b';
+    QVERIFY(writeBytes(second, bytes));
+    QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
+                 expected, ProjectSourceReferenceCodec::videoFingerprint(second, info)),
+             SourceFingerprintMatch::Mismatch);
+    info.videoSize = QSize(1280, 720);
+    QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
+                 expected, ProjectSourceReferenceCodec::videoFingerprint(first, info)),
+             SourceFingerprintMatch::Mismatch);
+    QVERIFY(writeBytes(second, QByteArrayLiteral("different size")));
+    info.videoSize = QSize(1920, 1080);
+    QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
+                 expected, ProjectSourceReferenceCodec::videoFingerprint(second, info)),
+             SourceFingerprintMatch::Mismatch);
+
+    TelemetrySession sessionA;
+    sessionA.duration = 1.0;
+    sessionA.sampleCount = 2;
+    TelemetryChannel speed;
+    speed.name = QStringLiteral("speed");
+    speed.unit = QStringLiteral("km/h");
+    speed.values = {1.0F, 2.0F};
+    sessionA.channels.insert(speed.name, speed);
+    TelemetrySession sessionB = sessionA;
+    TelemetryChannel rpm;
+    rpm.name = QStringLiteral("rpm");
+    rpm.unit = QStringLiteral("rpm");
+    rpm.values = {1000.0F, 2000.0F};
+    sessionB.channels.insert(rpm.name, rpm);
+    const QJsonObject telemetryA = ProjectSourceReferenceCodec::telemetryFingerprint(first, sessionA);
+    QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
+                 telemetryA, ProjectSourceReferenceCodec::telemetryFingerprint(first, sessionB)),
+             SourceFingerprintMatch::Mismatch);
+}
+
+void TelemetryTests::relinksTelemetryWithMismatchPolicy()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QJsonObject project = testProject(0.0);
+    project.insert(QStringLiteral("sources"), QJsonObject{{QStringLiteral("telemetry"),
+        QJsonObject{{QStringLiteral("relativePath"), QStringLiteral("missing.vbo")},
+                    {QStringLiteral("fingerprint"), QJsonObject{{QStringLiteral("kind"), QStringLiteral("telemetry-v1")},
+                                                                  {QStringLiteral("size"), 1}}}}}});
+    const QString projectPath = directory.filePath(QStringLiteral("relink.fetproject"));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(project).toJson()));
+    AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
+    controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    controller.relinkVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("mismatch"));
+    QCOMPARE(controller.sourceMismatchType(), QStringLiteral("telemetry"));
+    QVERIFY(controller.telemetryDuration() == 0.0);
+    controller.resolveSourceMismatch(true);
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QVERIFY(controller.dirty());
+
+    const QString invalid = directory.filePath(QStringLiteral("invalid.vbo"));
+    QVERIFY(writeBytes(invalid, QByteArrayLiteral("invalid")));
+    controller.relinkVbo(QUrl::fromLocalFile(invalid));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
+}
+
+void TelemetryTests::rejectsStaleRelinkResults()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QString large = QStringLiteral("[column names]\ntime speed\n[data]\n");
+    for (int row = 0; row < 200'000; ++row) {
+        large += QStringLiteral("%1 %2\n").arg(row).arg(row % 200);
+    }
+    const QString slow = directory.filePath(QStringLiteral("slow.vbo"));
+    QVERIFY(writeBytes(slow, large.toUtf8()));
+    AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
+    controller.relinkVbo(QUrl::fromLocalFile(slow));
+    controller.relinkVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.vboLoadState(), QStringLiteral("ready"), 10'000);
+    QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
+    QCOMPARE(controller.sampleCount(), 3);
 }
 
 void TelemetryTests::restoresSavedProjectsAndPreservesUnknownFields()
@@ -2119,7 +2329,7 @@ void TelemetryTests::preservesRecoveryAcrossFailedSave()
     QVERIFY(!QFileInfo(recoveryPath).exists());
 }
 
-void TelemetryTests::rejectsProjectLoadAfterInterveningEdit()
+void TelemetryTests::preservesEditsAfterDocumentFirstProjectOpen()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -2132,13 +2342,13 @@ void TelemetryTests::rejectsProjectLoadAfterInterveningEdit()
 
     AppController controller(nullptr, recoveryPath);
     controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
-    QVERIFY(controller.projectLoading());
+    QVERIFY(!controller.projectLoading());
+    QCOMPARE(controller.syncOffset(), 2.0);
+    QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(projectPath).canonicalFilePath());
     controller.setSyncOffset(9.0);
-    QTRY_VERIFY(!controller.projectLoading());
     QCOMPARE(controller.syncOffset(), 9.0);
-    QVERIFY(controller.projectPath().isEmpty());
     QVERIFY(controller.dirty());
-    QVERIFY(controller.projectLoadError().contains(QStringLiteral("document changed")));
+    QVERIFY(controller.projectLoadError().isEmpty());
 }
 
 void TelemetryTests::tracksExportStageElapsedTime()

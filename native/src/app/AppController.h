@@ -13,6 +13,7 @@
 #include "project/ProjectWriter.h"
 #include "project/ProjectDocumentState.h"
 #include "project/ProjectRecoveryStore.h"
+#include "project/ProjectSourceReference.h"
 
 #include <QFutureWatcher>
 #include <QProcess>
@@ -81,6 +82,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QString projectLoadStage READ projectLoadStage NOTIFY projectLoadChanged)
     Q_PROPERTY(QString projectLoadError READ projectLoadError NOTIFY projectLoadChanged)
     Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY recoveryChanged)
+    Q_PROPERTY(QString sourceMismatchType READ sourceMismatchType NOTIFY sourceMismatchChanged)
+    Q_PROPERTY(QString sourceMismatchCandidateName READ sourceMismatchCandidateName NOTIFY sourceMismatchChanged)
 
 public:
     explicit AppController(QObject *parent = nullptr, QString recoveryPath = {});
@@ -137,9 +140,14 @@ public:
     [[nodiscard]] QString projectLoadStage() const;
     [[nodiscard]] QString projectLoadError() const;
     [[nodiscard]] bool recoveryPending() const;
+    [[nodiscard]] QString sourceMismatchType() const;
+    [[nodiscard]] QString sourceMismatchCandidateName() const;
 
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
+    Q_INVOKABLE void relinkVideo(const QUrl &url);
+    Q_INVOKABLE void relinkVbo(const QUrl &url);
+    Q_INVOKABLE void resolveSourceMismatch(bool acceptReplacement);
     Q_INVOKABLE QString valueText(const QString &channelName, int decimals = 2) const;
     Q_INVOKABLE QVariant telemetryValue(const QString &channelName) const;
     Q_INVOKABLE QVariantMap telemetrySeries(
@@ -200,6 +208,7 @@ signals:
     void sourceLoadStateChanged();
     void projectLoadChanged();
     void recoveryChanged();
+    void sourceMismatchChanged();
     void saveAsRequested();
     void quitApproved();
 
@@ -224,6 +233,9 @@ private:
         MediaInfo mediaInfo;
         QString error;
         quint64 generation = 0;
+        QJsonObject fingerprint;
+        QJsonObject expectedFingerprint;
+        bool relink = false;
     };
 
     struct VboLoadResult {
@@ -234,6 +246,9 @@ private:
         TrackGeometry geometry;
         QString error;
         quint64 generation = 0;
+        QJsonObject fingerprint;
+        QJsonObject expectedFingerprint;
+        bool relink = false;
     };
 
     struct ProjectLoadResult {
@@ -245,8 +260,10 @@ private:
         QStringList analysisChannels;
         bool analysisVisible = true;
         SyncTransform sync;
-        VideoProbeResult video;
-        VboLoadResult vbo;
+        ProjectSourceReference videoReference;
+        ProjectSourceReference vboReference;
+        QString resolvedVideoPath;
+        QString resolvedVboPath;
         QString error;
         quint64 generation = 0;
         quint64 documentRevisionAtStart = 0;
@@ -259,8 +276,10 @@ private:
     void setStatus(QString status);
     [[nodiscard]] quint64 beginSourceGeneration();
     void cancelSourceJobs();
-    void startVideoProbe(const QString &path, quint64 generation, bool markDocumentDirty);
-    void startVboLoad(const QString &path, quint64 generation, bool markDocumentDirty);
+    void startVideoProbe(const QString &path, quint64 generation, bool markDocumentDirty,
+                         QJsonObject expectedFingerprint = {}, bool relink = false);
+    void startVboLoad(const QString &path, quint64 generation, bool markDocumentDirty,
+                      QJsonObject expectedFingerprint = {}, bool relink = false);
     void commitProjectLoad(const ProjectLoadResult &result);
     void commitVideoProbe(const VideoProbeResult &result, bool markDocumentDirty);
     void commitVboLoad(const VboLoadResult &result, bool markDocumentDirty);
@@ -268,7 +287,7 @@ private:
     [[nodiscard]] static QString normalizedSourcePath(const QString &path);
     [[nodiscard]] static QVariantList trackPointsFor(const TrackGeometry &geometry);
     void markPersistentChange();
-    [[nodiscard]] QJsonObject currentProjectObject() const;
+    [[nodiscard]] QJsonObject currentProjectObject(const QString &projectPath = {}) const;
     bool beginProjectLoad(QString projectPath, const QJsonObject &project,
                           bool recovered = false, quint64 recoveredRevision = 0,
                           quint64 recoveredLastSavedRevision = 0);
@@ -292,6 +311,8 @@ private:
     QSettings m_settings;
     QUrl m_videoSource;
     QString m_telemetryPath;
+    ProjectSourceReference m_videoReference;
+    ProjectSourceReference m_vboReference;
     QString m_statusText = QStringLiteral("Open a video and VBO to begin.");
     std::unique_ptr<TelemetrySession> m_session;
     WidgetModel m_widgetModel;
@@ -324,6 +345,9 @@ private:
     QString m_vboLoadState = QStringLiteral("idle");
     QString m_pendingVideoPath;
     QString m_pendingVboPath;
+    VideoProbeResult m_pendingMismatchVideo;
+    VboLoadResult m_pendingMismatchVbo;
+    QString m_sourceMismatchType;
     bool m_projectLoading = false;
     QString m_projectLoadStage;
     QString m_projectLoadError;
