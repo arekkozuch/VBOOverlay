@@ -1,6 +1,7 @@
 #pragma once
 
 #include "export/MediaProbe.h"
+#include "export/ExportMediaProfile.h"
 
 #include <QSize>
 #include <QVariantMap>
@@ -65,6 +66,7 @@ struct ExportResult {
     QString error;
     QString validationWarning;
     MediaInfo mediaInfo;
+    ExportMediaProfile mediaProfile;
     MediaRational exportFrameRate;
     qsizetype expectedFrames = 0;
     qsizetype generatedFrames = 0;

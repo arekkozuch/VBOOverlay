@@ -13,7 +13,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates.
 - Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.
-- CFR HEVC/AAC MP4 export at the effective rational export rate, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
+- Source-driven CFR HEVC/AAC MP4 export at the effective rational export rate, including runtime raster/profile checks, validated 8-bit and 10-bit SDR preservation, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
 - Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
 
@@ -53,7 +53,7 @@ Telemetry has strict no-data semantics: missing is distinct from a measured nume
 
 ## Export
 
-Export stages a frame-cadenced telemetry overlay, converts the source onto that same CFR cadence before composition, and validates the staged overlay and final MP4 before committing the target file. Each prepared export writes a separate support log in the app-data `exports` directory; failures and cancellations keep their logs. See [docs/export-pipeline.md](docs/export-pipeline.md) and [docs/export-output-safety.md](docs/export-output-safety.md).
+Export stages a frame-cadenced telemetry overlay, converts the source onto that same CFR cadence before composition, and validates the staged overlay and final MP4 before committing the target file. Source raster and bit depth remain authoritative rather than being reduced to presets; HDR/Log is explicitly rejected until a color-managed compositor is validated. Each prepared export writes a separate support log in the app-data `exports` directory; failures and cancellations keep their logs. See [docs/export-pipeline.md](docs/export-pipeline.md), [docs/media-color-policy.md](docs/media-color-policy.md), and [docs/export-output-safety.md](docs/export-output-safety.md).
 
 ## Private integration tests
 
@@ -73,7 +73,7 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 - Packaging and signing are pending.
 - A source currently contains one video file; multi-chapter timelines are not implemented.
 - Export requires external FFmpeg at runtime.
-- Rotation, sample-aspect-ratio, color, HDR, and 10-bit media handling have not been fully validated.
+- Rotation and sample-aspect-ratio display-transform preservation, real HERO11 5.3K/10-bit validation, HDR/Log color-managed preservation, and production 8K validation remain pending. Deterministic 10-bit SDR composition is validated.
 - Real-media coverage remains limited.
 - Interactive map tiles are pending; the local GPS track view works without map tiles.
 

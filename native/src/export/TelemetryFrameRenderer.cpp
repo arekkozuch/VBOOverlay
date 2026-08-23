@@ -1,6 +1,7 @@
 #include "export/TelemetryFrameRenderer.h"
 
 #include "widgets/WidgetModel.h"
+#include "export/ExportFormat.h"
 
 #include <QElapsedTimer>
 #include <QQmlComponent>
@@ -39,6 +40,7 @@ public:
     std::unique_ptr<QRhiRenderPassDescriptor> renderPassDescriptor;
     std::unique_ptr<QRhiTextureRenderTarget> renderTarget;
     QString graphicsApi;
+    RendererCapabilityResult capability;
     TimingMetrics timings;
 };
 
@@ -133,6 +135,14 @@ bool TelemetryFrameRenderer::initialize(
         return false;
     }
     m_impl->graphicsApi = friendlyGraphicsApiName(m_impl->window->rendererInterface()->graphicsApi());
+    m_impl->capability = evaluateCapability(
+        outputSize, rhi->resourceLimit(QRhi::TextureSizeMax), m_impl->graphicsApi);
+    if (!m_impl->capability.supported) {
+        m_error = m_impl->capability.error;
+        m_rootItem = nullptr;
+        m_impl.reset();
+        return false;
+    }
     m_impl->colorTexture.reset(rhi->newTexture(
         QRhiTexture::RGBA8, outputSize, 1,
         QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
@@ -194,8 +204,9 @@ QImage TelemetryFrameRenderer::renderFrame(const double sourceVideoTime)
     m_impl->renderControl->endFrame();
     m_impl->timings.readbackNanoseconds += timer.nsecsElapsed();
     ++m_impl->timings.frames;
-    if (readback.pixelSize != m_outputSize || readback.data.size()
-            < m_outputSize.width() * m_outputSize.height() * 4) {
+    const auto expectedBytes = ExportFormat::rgbaFrameBytes(m_outputSize);
+    if (!expectedBytes || readback.pixelSize != m_outputSize
+        || readback.data.size() < *expectedBytes) {
         m_error = QStringLiteral("Qt Quick offscreen texture readback returned an invalid frame.");
         return {};
     }
@@ -212,6 +223,42 @@ QString TelemetryFrameRenderer::errorString() const { return m_error; }
 QString TelemetryFrameRenderer::graphicsApiName() const
 {
     return m_impl ? m_impl->graphicsApi : QString{};
+}
+RendererCapabilityResult TelemetryFrameRenderer::capability() const
+{
+    return m_impl ? m_impl->capability : RendererCapabilityResult{};
+}
+
+RendererCapabilityResult TelemetryFrameRenderer::evaluateCapability(
+    const QSize &size, const int maximumTextureSize, const QString &backend)
+{
+    RendererCapabilityResult result;
+    result.requestedSize = size;
+    result.maximumTextureSize = maximumTextureSize;
+    result.backend = backend;
+    const auto frameBytes = ExportFormat::rgbaFrameBytes(size);
+    if (!frameBytes) {
+        result.error = QStringLiteral("Requested render raster %1×%2 has an invalid or overflowing RGBA frame size.")
+                           .arg(size.width()).arg(size.height());
+        return result;
+    }
+    result.frameBytes = *frameBytes;
+    result.pixelCount = *frameBytes / 4;
+    if (maximumTextureSize <= 0) {
+        result.error = QStringLiteral("The %1 renderer did not report a usable maximum texture size.")
+                           .arg(backend.isEmpty() ? QStringLiteral("active") : backend);
+        return result;
+    }
+    if (size.width() > maximumTextureSize || size.height() > maximumTextureSize) {
+        result.error = QStringLiteral(
+            "Requested render raster %1×%2 exceeds the %3 backend texture limit of %4 pixels per dimension.")
+                           .arg(size.width()).arg(size.height())
+                           .arg(backend.isEmpty() ? QStringLiteral("active") : backend)
+                           .arg(maximumTextureSize);
+        return result;
+    }
+    result.supported = true;
+    return result;
 }
 TelemetryFrameRenderer::TimingMetrics TelemetryFrameRenderer::timingMetrics() const
 {

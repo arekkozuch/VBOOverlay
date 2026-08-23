@@ -61,6 +61,10 @@
   validation must be reported separately from synthetic tests.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke
   validation.
+- Source raster, bit depth, and color characteristics are data, not presets. Never impose a product-level
+  4K ceiling; runtime renderer, encoder, and resource capability determine native-export support.
+- Ten-bit is not synonymous with HDR. Unsupported HDR/Log material must never be silently converted to
+  8-bit SDR or declared preserved by metadata copying alone.
 
 ## Required validation
 

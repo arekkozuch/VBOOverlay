@@ -112,6 +112,8 @@ int exportTest(const QString &inputPath, const QString &outputPath)
     settings.outputPath = outputTransaction.stagingPath();
     settings.outputSize = input.videoSize;
     settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
+    settings.videoBitrate = FlappedEar::ExportFormat::recommendedVideoBitrate(
+        settings.outputSize, settings.frameRate, input.bitDepth.value_or(8));
     settings.endTime = input.duration;
     const FlappedEar::ExportResult result = FlappedEar::ExportEngine::exportVideo(settings, renderer);
     if (!result.success) {
@@ -317,7 +319,10 @@ int exportWorker(const QString &configPath)
         settings.startTime = config.value("startTime").toDouble();
         settings.endTime = config.value("endTime").toDouble(input.duration);
         settings.videoBitrate = config.value("videoBitrate").toInteger();
-        if (settings.videoBitrate <= 0) settings.videoBitrate = FlappedEar::ExportFormat::recommendedVideoBitrate(outputSize, settings.frameRate);
+        if (settings.videoBitrate <= 0) {
+            settings.videoBitrate = FlappedEar::ExportFormat::recommendedVideoBitrate(
+                outputSize, settings.frameRate, input.bitDepth.value_or(8));
+        }
         settings.audioEnabled = config.value("audioEnabled").toBool(true);
         settings.cancellationFilePath = config.value("cancelPath").toString();
         settings.temporaryOverlayPath = config.value("temporaryOverlayPath").toString();
@@ -457,6 +462,14 @@ int exportWorker(const QString &configPath)
                           {"exportFrameRateDenominator", result.exportFrameRate.denominator},
                           {"exportFrameRate", result.exportFrameRate.value()},
                           {"outputVideoCodec", result.mediaInfo.videoCodec},
+                          {"outputVideoProfile", result.mediaInfo.videoCodecProfile},
+                          {"outputPixelFormat", result.mediaInfo.pixelFormat},
+                          {"outputBitDepth", result.mediaInfo.bitDepth
+                              ? QJsonValue(*result.mediaInfo.bitDepth) : QJsonValue(QJsonValue::Null)},
+                          {"outputColorRange", result.mediaInfo.colorRange},
+                          {"outputColorSpace", result.mediaInfo.colorSpace},
+                          {"outputColorTransfer", result.mediaInfo.colorTransfer},
+                          {"outputColorPrimaries", result.mediaInfo.colorPrimaries},
                           {"outputWidth", result.mediaInfo.videoSize.width()},
                           {"outputHeight", result.mediaInfo.videoSize.height()},
                           {"outputDuration", result.mediaInfo.duration},

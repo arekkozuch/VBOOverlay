@@ -3,6 +3,7 @@
 #include "export/EncoderDetector.h"
 #include "export/ExportEngine.h"
 #include "export/ExportFormat.h"
+#include "export/ExportMediaProfile.h"
 #include "export/ExportDiagnostics.h"
 #include "export/PersistentExportLog.h"
 #include "export/RawFrameTransport.h"
@@ -14,6 +15,7 @@
 #include "export/ExportStoragePolicy.h"
 #include "export/FfmpegTools.h"
 #include "export/MediaProbe.h"
+#include "export/TelemetryFrameRenderer.h"
 #include "export/TemporaryOverlayValidation.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
@@ -88,6 +90,7 @@ private slots:
     void rendersTelemetryAtExplicitTime();
     void probesMediaInfoJson();
     void parsesMediaSummaryJson();
+    void modelsExtendedMediaCharacteristics();
     void rejectsInvalidMediaProbeJson();
     void classifiesMediaProbeProcessFailures();
     void reportsMediaProbeLifecycleHeartbeat();
@@ -106,6 +109,9 @@ private slots:
     void cancelsEncoderDiscovery();
     void calculatesTimestampDrivenExportFrames();
     void resolvesExplicitExportFormats();
+    void derivesSourceDrivenExportProfiles();
+    void validatesHighResolutionCapabilitiesAndCache();
+    void preservesTenBitSdrThroughComposition();
     void preservesExactExportRateRationals();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
@@ -1427,6 +1433,51 @@ void TelemetryTests::parsesMediaSummaryJson()
     QVERIFY(silentInfo.audioCodecs.isEmpty());
 }
 
+void TelemetryTests::modelsExtendedMediaCharacteristics()
+{
+    const QByteArray tenBitJson = R"({"format":{"duration":"1.0","bit_rate":"91000000"},"streams":[{"codec_type":"video","codec_name":"hevc","profile":"Main 10","width":5312,"height":2988,"coded_width":5312,"coded_height":3008,"r_frame_rate":"60000/1001","avg_frame_rate":"60000/1001","pix_fmt":"yuv420p10le","bits_per_raw_sample":"10","bit_rate":"90000000","sample_aspect_ratio":"1:1","color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709"}]})";
+    const MediaInfo tenBit = MediaProbe::parseJson(tenBitJson, QStringLiteral("/5k.mp4"));
+    QCOMPARE(tenBit.videoSize, QSize(5312, 2988));
+    QCOMPARE(tenBit.codedVideoSize, QSize(5312, 3008));
+    QCOMPARE(tenBit.displayVideoSize, QSize(5312, 2988));
+    QCOMPARE(tenBit.videoCodecProfile, QStringLiteral("Main 10"));
+    QCOMPARE(tenBit.pixelFormat, QStringLiteral("yuv420p10le"));
+    QCOMPARE(tenBit.bitDepth, std::optional<int>(10));
+    QCOMPARE(tenBit.sourceVideoBitrate, std::optional<qint64>(90'000'000));
+    QVERIFY(tenBit.sampleAspectRatio.isEquivalentTo({1, 1}));
+    QCOMPARE(tenBit.sourceColorClass, SourceColorClass::Sdr);
+    QCOMPARE(tenBit.colorRange, QStringLiteral("tv"));
+    QCOMPARE(tenBit.colorSpace, QStringLiteral("bt709"));
+    QCOMPARE(tenBit.colorTransfer, QStringLiteral("bt709"));
+    QCOMPARE(tenBit.colorPrimaries, QStringLiteral("bt709"));
+
+    const QByteArray rotatedHlgJson = R"({"format":{"duration":"1.0"},"streams":[{"codec_type":"video","codec_name":"hevc","width":5312,"height":4648,"r_frame_rate":"30/1","avg_frame_rate":"30/1","pix_fmt":"p010le","color_space":"bt2020nc","color_transfer":"arib-std-b67","color_primaries":"bt2020","side_data_list":[{"side_data_type":"Display Matrix","rotation":90},{"side_data_type":"Mastering display metadata","red_x":"1/2"},{"side_data_type":"Content light level metadata","max_content":1000}]}]})";
+    const MediaInfo hlg = MediaProbe::parseJson(rotatedHlgJson, QStringLiteral("/8-7.mp4"));
+    QCOMPARE(hlg.videoSize, QSize(5312, 4648));
+    QCOMPARE(hlg.displayVideoSize, QSize(4648, 5312));
+    QCOMPARE(hlg.rotationDegrees, std::optional<int>(90));
+    QCOMPARE(hlg.bitDepth, std::optional<int>(10));
+    QCOMPARE(hlg.sourceColorClass, SourceColorClass::HdrHlg);
+    QVERIFY(!hlg.masteringDisplayMetadata.isEmpty());
+    QVERIFY(!hlg.contentLightMetadata.isEmpty());
+
+    QCOMPARE(MediaProbe::classifyColor(QStringLiteral("smpte2084"), {}, {}),
+             SourceColorClass::HdrPq);
+    QCOMPARE(MediaProbe::classifyColor(QStringLiteral("log316"), {}, {}),
+             SourceColorClass::LogOrExtended);
+    QCOMPARE(MediaProbe::bitDepthForPixelFormat(QStringLiteral("yuv420p")),
+             std::optional<int>(8));
+    QCOMPARE(MediaProbe::bitDepthForPixelFormat(QStringLiteral("p010le")),
+             std::optional<int>(10));
+    QVERIFY(!MediaProbe::bitDepthForPixelFormat(QStringLiteral("mystery444")).has_value());
+
+    const QByteArray unknownJson = R"({"format":{"duration":"1.0"},"streams":[{"codec_type":"video","codec_name":"hevc","width":7680,"height":4320,"r_frame_rate":"30/1","avg_frame_rate":"30/1","pix_fmt":"mystery444"}]})";
+    const MediaInfo unknown = MediaProbe::parseJson(unknownJson, QStringLiteral("/8k.mp4"));
+    QCOMPARE(unknown.videoSize, QSize(7680, 4320));
+    QVERIFY(!unknown.bitDepth.has_value());
+    QCOMPARE(unknown.sourceColorClass, SourceColorClass::Unknown);
+}
+
 void TelemetryTests::rejectsInvalidMediaProbeJson()
 {
     try {
@@ -2036,6 +2087,13 @@ void TelemetryTests::fingerprintsSourcesDeterministically()
     info.averageFrameRate = {30000, 1001};
     info.videoCodec = QStringLiteral("h264");
     const QJsonObject expected = ProjectSourceReferenceCodec::videoFingerprint(first, info);
+    MediaInfo enriched = info;
+    enriched.bitDepth = 10;
+    enriched.pixelFormat = QStringLiteral("yuv420p10le");
+    enriched.colorTransfer = QStringLiteral("bt709");
+    enriched.colorPrimaries = QStringLiteral("bt709");
+    enriched.sourceColorClass = SourceColorClass::Sdr;
+    QCOMPARE(ProjectSourceReferenceCodec::videoFingerprint(first, enriched), expected);
     QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
                  expected, ProjectSourceReferenceCodec::videoFingerprint(second, info)),
              SourceFingerprintMatch::Match);
@@ -2594,12 +2652,200 @@ void TelemetryTests::resolvesExplicitExportFormats()
     const qint64 high = ExportFormat::bitrateForQuality("high", {3840, 2160}, {60'000, 1'001});
     QVERIFY(ExportFormat::bitrateForQuality("smaller", {3840, 2160}, {60'000, 1'001}) < fourK60);
     QVERIFY(fourK60 < high); QVERIFY(ExportFormat::validCustomBitrate(high));
-    QVERIFY(!ExportFormat::validCustomBitrate(0)); QVERIFY(!ExportFormat::validCustomBitrate(121'000'000));
+    QVERIFY(!ExportFormat::validCustomBitrate(0));
+    QVERIFY(ExportFormat::validCustomBitrate(121'000'000));
+    QVERIFY(!ExportFormat::validCustomBitrate(501'000'000));
     QVERIFY(ExportFormat::validCustomBitrate(10'000'000));
     QVERIFY(ExportFormat::estimatedBytes(10'000'000, true, 60) > 75'000'000);
     QCOMPARE(ExportFormat::formatEstimatedSize(qint64(850) * 1024 * 1024), QStringLiteral("~850 MiB"));
     QCOMPARE(ExportFormat::formatEstimatedSize(qint64(46) * 1024 * 1024 * 1024 / 10), QStringLiteral("~4.60 GiB"));
     QCOMPARE(ExportEngine::frameCount(0, 10, rates.at(1)), qsizetype(300));
+
+    const QList<QSize> fiveK = ExportFormat::resolutionOptions({5312, 2988});
+    QCOMPARE(fiveK.first(), QSize(5312, 2988));
+    const QList<QSize> eightSeven = ExportFormat::resolutionOptions({5312, 4648});
+    QCOMPARE(eightSeven.first(), QSize(5312, 4648));
+    QVERIFY(eightSeven.contains(QSize(3840, 3360)));
+    QVERIFY(eightSeven.contains(QSize(2560, 2240)));
+    const QList<QSize> eightK = ExportFormat::resolutionOptions({7680, 4320});
+    QCOMPARE(eightK.first(), QSize(7680, 4320));
+
+    const QList<QPair<QSize, MediaRational>> bitrateCases{
+        {{1280, 720}, {30, 1}}, {{1920, 1080}, {30, 1}},
+        {{3840, 2160}, {30, 1}}, {{3840, 2160}, {60, 1}},
+        {{5312, 2988}, {60, 1}}, {{5312, 4648}, {30, 1}},
+        {{7680, 4320}, {30, 1}}, {{7680, 4320}, {60, 1}},
+    };
+    long double previousPixelRate = 0;
+    qint64 previousBitrate = 0;
+    for (const auto &[size, rate] : bitrateCases) {
+        const long double pixelRate = static_cast<long double>(size.width()) * size.height()
+            * rate.value();
+        const qint64 bitrate = ExportFormat::recommendedVideoBitrate(size, rate);
+        QVERIFY(bitrate > 0 && bitrate <= ExportFormat::maximumCustomVideoBitrate);
+        if (pixelRate > previousPixelRate) QVERIFY(bitrate > previousBitrate);
+        previousPixelRate = pixelRate;
+        previousBitrate = bitrate;
+    }
+    QVERIFY(ExportFormat::recommendedVideoBitrate({5312, 2988}, {60, 1}) > fourK60);
+    QVERIFY(ExportFormat::recommendedVideoBitrate({7680, 4320}, {60, 1})
+            > ExportFormat::recommendedVideoBitrate({7680, 4320}, {30, 1}));
+    QVERIFY(ExportFormat::recommendedVideoBitrate({3840, 2160}, {30, 1}, 10)
+            > ExportFormat::recommendedVideoBitrate({3840, 2160}, {30, 1}, 8));
+    QCOMPARE(ExportFormat::rgbaFrameBytes({3840, 2160}), std::optional<qint64>(33'177'600));
+    QCOMPARE(ExportFormat::rgbaFrameBytes({7680, 4320}), std::optional<qint64>(132'710'400));
+    QVERIFY(!ExportFormat::rgbaFrameBytes(
+        {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()}).has_value());
+}
+
+void TelemetryTests::derivesSourceDrivenExportProfiles()
+{
+    MediaInfo source;
+    source.bitDepth = 8;
+    source.pixelFormat = QStringLiteral("yuv420p");
+    source.sourceColorClass = SourceColorClass::Sdr;
+    source.colorRange = QStringLiteral("tv");
+    source.colorSpace = QStringLiteral("bt709");
+    source.colorTransfer = QStringLiteral("bt709");
+    source.colorPrimaries = QStringLiteral("bt709");
+    const ExportMediaProfile eightBit = ExportMediaProfile::derive(
+        source, {5312, 2988}, {60'000, 1001}, 80'000'000, QStringLiteral("libx265"));
+    QVERIFY(eightBit.supported);
+    QCOMPARE(eightBit.outputPixelFormat, QStringLiteral("yuv420p"));
+    QCOMPARE(eightBit.outputBitDepth, 8);
+    QCOMPARE(eightBit.encoderProfile, QStringLiteral("main"));
+    QCOMPARE(eightBit.outputSize, QSize(5312, 2988));
+    QVERIFY(eightBit.acceptsOutputPixelFormat(QStringLiteral("yuv420p")));
+    QVERIFY(!eightBit.acceptsOutputPixelFormat(QStringLiteral("yuvj420p")));
+    MediaInfo fullRangeSource = source;
+    fullRangeSource.colorRange = QStringLiteral("pc");
+    const ExportMediaProfile fullRange = ExportMediaProfile::derive(
+        fullRangeSource, {3840, 2160}, {60'000, 1001}, 50'000'000,
+        QStringLiteral("hevc_videotoolbox"));
+    QVERIFY(fullRange.acceptsOutputPixelFormat(QStringLiteral("yuvj420p")));
+
+    source.bitDepth = 10;
+    source.pixelFormat = QStringLiteral("yuv420p10le");
+    const ExportMediaProfile tenBit = ExportMediaProfile::derive(
+        source, {7680, 4320}, {30, 1}, 120'000'000, QStringLiteral("libx265"));
+    QVERIFY(tenBit.supported);
+    QCOMPARE(tenBit.outputBitDepth, 10);
+    QCOMPARE(tenBit.outputPixelFormat, QStringLiteral("yuv420p10le"));
+    QCOMPARE(tenBit.encoderProfile, QStringLiteral("main10"));
+    QCOMPARE(tenBit.colorTransfer, QStringLiteral("bt709"));
+    QVERIFY(tenBit.acceptsOutputPixelFormat(QStringLiteral("yuv420p10le")));
+    const ExportMediaProfile videoToolbox = ExportMediaProfile::derive(
+        source, {3840, 2160}, {30, 1}, 40'000'000,
+        QStringLiteral("hevc_videotoolbox"));
+    QCOMPARE(videoToolbox.outputPixelFormat, QStringLiteral("p010le"));
+
+    source.sourceColorClass = SourceColorClass::HdrHlg;
+    const ExportMediaProfile hdr = ExportMediaProfile::derive(
+        source, {3840, 2160}, {30, 1}, 40'000'000, QStringLiteral("libx265"));
+    QVERIFY(!hdr.supported);
+    QVERIFY(hdr.error.contains(QStringLiteral("not yet supported")));
+    source.sourceColorClass = SourceColorClass::Sdr;
+    source.bitDepth.reset();
+    const ExportMediaProfile unknown = ExportMediaProfile::derive(
+        source, {3840, 2160}, {30, 1}, 40'000'000, QStringLiteral("libx265"));
+    QVERIFY(!unknown.supported);
+    QVERIFY(unknown.error.contains(QStringLiteral("unknown")));
+}
+
+void TelemetryTests::validatesHighResolutionCapabilitiesAndCache()
+{
+    const RendererCapabilityResult supported = TelemetryFrameRenderer::evaluateCapability(
+        {7680, 4320}, 8192, QStringLiteral("Synthetic RHI"));
+    QVERIFY(supported.supported);
+    QCOMPARE(supported.frameBytes, qint64(132'710'400));
+    QCOMPARE(supported.pixelCount, qint64(33'177'600));
+    const RendererCapabilityResult rejected = TelemetryFrameRenderer::evaluateCapability(
+        {7680, 4320}, 4096, QStringLiteral("Synthetic RHI"));
+    QVERIFY(!rejected.supported);
+    QVERIFY(rejected.error.contains(QStringLiteral("7680")));
+    QVERIFY(rejected.error.contains(QStringLiteral("4096")));
+    const RendererCapabilityResult overflow = TelemetryFrameRenderer::evaluateCapability(
+        {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()},
+        std::numeric_limits<int>::max(), QStringLiteral("Synthetic RHI"));
+    QVERIFY(!overflow.supported);
+
+    EncoderCapabilityCache cache;
+    EncoderProfileRequest request{
+        QStringLiteral("/ffmpeg"), QStringLiteral("libx265"), {5312, 2988},
+        {60'000, 1001}, QStringLiteral("yuv420p10le"), 10, QStringLiteral("main10")};
+    int probes = 0;
+    const auto probe = [&probes](const EncoderProfileRequest &) {
+        ++probes;
+        return EncoderProfileSupport{true, false, {}};
+    };
+    const EncoderProfileSupport first = cache.verify(request, probe);
+    const EncoderProfileSupport second = cache.verify(request, probe);
+    QVERIFY(first.supported && !first.cacheHit);
+    QVERIFY(second.supported && second.cacheHit);
+    QCOMPARE(probes, 1);
+    request.size = {7680, 4320};
+    static_cast<void>(cache.verify(request, probe));
+    QCOMPARE(probes, 2);
+    QCOMPARE(cache.size(), qsizetype(2));
+}
+
+void TelemetryTests::preservesTenBitSdrThroughComposition()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the 10-bit SDR composition test.");
+    QProcess encoderQuery;
+    encoderQuery.start(ffmpeg, {QStringLiteral("-hide_banner"), QStringLiteral("-h"),
+                                QStringLiteral("encoder=libx265")});
+    if (!encoderQuery.waitForStarted() || !encoderQuery.waitForFinished(10'000)
+        || encoderQuery.exitCode() != 0) {
+        QSKIP("This FFmpeg build does not provide libx265 Main10.");
+    }
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString source = directory.filePath(QStringLiteral("source-10bit.mp4"));
+    const QString overlay = directory.filePath(QStringLiteral("overlay.mkv"));
+    const QString output = directory.filePath(QStringLiteral("composed-10bit.mp4"));
+    const auto runFfmpeg = [&ffmpeg](const QStringList &arguments) {
+        QProcess process;
+        process.start(ffmpeg, arguments);
+        QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+        QVERIFY2(process.waitForFinished(120'000), qPrintable(process.errorString()));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    };
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+               "color=c=blue:s=64x64:r=30:d=0.1", "-f", "lavfi", "-i",
+               "sine=frequency=440:sample_rate=48000:duration=0.1", "-vf",
+               "format=pix_fmts=yuv420p10le", "-frames:v", "3", "-c:v", "libx265",
+               "-preset", "ultrafast", "-profile:v", "main10", "-pix_fmt", "yuv420p10le",
+               "-color_range", "tv", "-colorspace", "bt709", "-color_trc", "bt709",
+               "-color_primaries", "bt709", "-x265-params",
+               "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+               "-c:a", "aac", source});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+               "color=c=red@0.25:s=64x64:r=30:d=0.1,format=rgba", "-frames:v", "3",
+               "-c:v", "ffv1", "-pix_fmt", "bgra", overlay});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", source, "-i", overlay,
+               "-filter_complex",
+               "[0:v][1:v]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=yuv420p10[composited];[composited]format=pix_fmts=yuv420p10le[video]",
+               "-map", "[video]", "-map", "0:a", "-c:v", "libx265", "-preset", "ultrafast",
+               "-profile:v", "main10", "-pix_fmt", "yuv420p10le", "-color_range", "tv",
+               "-colorspace", "bt709", "-color_trc", "bt709", "-color_primaries", "bt709",
+               "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+               "-c:a", "copy", output});
+    const MediaInfo info = MediaProbe::probe(output, {}, true, -1, {}, {}, true);
+    QCOMPARE(info.videoCodec, QStringLiteral("hevc"));
+    QCOMPARE(info.videoSize, QSize(64, 64));
+    QCOMPARE(info.bitDepth, std::optional<int>(10));
+    QCOMPARE(info.pixelFormat, QStringLiteral("yuv420p10le"));
+    QVERIFY(info.videoCodecProfile.contains(QStringLiteral("10")));
+    QCOMPARE(info.colorRange, QStringLiteral("tv"));
+    QCOMPARE(info.colorSpace, QStringLiteral("bt709"));
+    QCOMPARE(info.colorTransfer, QStringLiteral("bt709"));
+    QCOMPARE(info.colorPrimaries, QStringLiteral("bt709"));
+    QCOMPARE(info.sourceColorClass, SourceColorClass::Sdr);
+    QVERIFY(info.averageFrameRate.isEquivalentTo({30, 1}));
+    QVERIFY(!info.audioCodecs.isEmpty());
 }
 
 void TelemetryTests::preservesExactExportRateRationals()

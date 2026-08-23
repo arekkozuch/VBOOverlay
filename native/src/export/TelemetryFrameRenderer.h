@@ -16,6 +16,16 @@ namespace FlappedEar {
 
 class WidgetModel;
 
+struct RendererCapabilityResult {
+    bool supported = false;
+    QSize requestedSize;
+    int maximumTextureSize = 0;
+    qint64 pixelCount = 0;
+    qint64 frameBytes = 0;
+    QString backend;
+    QString error;
+};
+
 // Owns a private Qt Quick scene. All methods must be called on its owning GUI
 // thread; export workers may consume the returned QImage, but never move the
 // QML/scene-graph objects themselves.
@@ -43,7 +53,10 @@ public:
     [[nodiscard]] QImage renderFrame(double sourceVideoTime);
     [[nodiscard]] QString errorString() const;
     [[nodiscard]] QString graphicsApiName() const;
+    [[nodiscard]] RendererCapabilityResult capability() const;
     [[nodiscard]] TimingMetrics timingMetrics() const;
+    [[nodiscard]] static RendererCapabilityResult evaluateCapability(
+        const QSize &size, int maximumTextureSize, const QString &backend);
 
 private:
     class Impl;

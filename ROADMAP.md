@@ -24,7 +24,12 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 
 - [x] Enforce final CFR at the effective rational export rate, including deterministic VFR-to-CFR, non-zero range, and audio-timeline coverage.
 - [ ] Expand final-media validation across a broader real-media matrix.
-- [ ] Validate rotation, sample aspect ratio, color, HDR, and 10-bit media policy.
+- [x] Make source/native raster characteristics authoritative, with no product-level 4K ceiling, continuous bitrate scaling, checked frame accounting, and runtime renderer/encoder capability preflight.
+- [x] Preserve 8-bit and 10-bit SDR through explicit HEVC Main/Main10 policy and deterministic composition validation.
+- [ ] Validate real HERO11 5.3K/10-bit fixtures and make targeted compatibility adjustments.
+- [ ] Implement and validate color-managed HDR/HLG/PQ/Log preservation; current export rejects these sources without silent conversion.
+- [ ] Validate production 8K on representative renderer/encoder hardware; deterministic model and capability-decision coverage is complete.
+- [ ] Preserve rotation and sample-aspect-ratio display transforms end to end (probe/model retention is complete).
 - [x] Establish process-tree termination guarantees for FFmpeg/ffprobe (macOS/Unix runtime-tested; Windows validated on the known configuration above).
 - [x] Add disk-space preflight and manifest-owned temporary-file management policy, including representative FFV1 sampling.
 - [ ] Validate the QML preview/export result against broader real media.

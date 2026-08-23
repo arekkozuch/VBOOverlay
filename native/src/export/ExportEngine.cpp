@@ -6,6 +6,7 @@
 #include "export/ExportProcessSupervisor.h"
 #include "export/ExportStoragePolicy.h"
 #include "export/ExportFormat.h"
+#include "export/ExportMediaProfile.h"
 #include "export/FfmpegTools.h"
 #include "export/ExportProgress.h"
 #include "export/RawFrameTransport.h"
@@ -27,16 +28,21 @@ namespace {
 
 QByteArray rgbaBytes(const QImage &image, const QSize &size)
 {
+    const auto expectedBytes = ExportFormat::rgbaFrameBytes(size);
+    const qint64 bytesPerRow = static_cast<qint64>(size.width()) * 4;
+    if (!expectedBytes || *expectedBytes > std::numeric_limits<qsizetype>::max()
+        || bytesPerRow > std::numeric_limits<int>::max()) return {};
     if (image.format() == QImage::Format_RGBA8888 && image.size() == size
-        && image.bytesPerLine() == size.width() * 4) {
+        && image.bytesPerLine() == bytesPerRow) {
         return QByteArray::fromRawData(
-            reinterpret_cast<const char *>(image.constBits()), size.width() * size.height() * 4);
+            reinterpret_cast<const char *>(image.constBits()), static_cast<qsizetype>(*expectedBytes));
     }
     const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
-    QByteArray packed(size.width() * size.height() * 4, Qt::Uninitialized);
+    QByteArray packed(static_cast<qsizetype>(*expectedBytes), Qt::Uninitialized);
     char *destination = packed.data();
     for (int row = 0; row < size.height(); ++row) {
-        memcpy(destination + row * size.width() * 4, rgba.constScanLine(row), size.width() * 4);
+        memcpy(destination + static_cast<qsizetype>(row) * bytesPerRow,
+               rgba.constScanLine(row), static_cast<size_t>(bytesPerRow));
     }
     return packed;
 }
@@ -403,6 +409,43 @@ ExportResult ExportEngine::exportVideo(
         });
         if (settings.encoderCallback && selected != encoders.cend()) {
             settings.encoderCallback(selected->id, selected->displayName);
+        }
+        result.mediaProfile = ExportMediaProfile::derive(
+            source, outputSize, exportFrameRate, settings.videoBitrate, encoder);
+        if (!result.mediaProfile.supported) {
+            result.error = result.mediaProfile.error;
+            return result;
+        }
+        const RendererCapabilityResult rendererCapability = renderer.capability();
+        if (!rendererCapability.supported) {
+            result.error = rendererCapability.error.isEmpty()
+                ? QStringLiteral("The offscreen renderer does not support the requested export raster.")
+                : rendererCapability.error;
+            return result;
+        }
+        const EncoderProfileSupport encoderSupport = EncoderDetector::verifyProfile(
+            {FfmpegTools::ffmpegPath(), encoder, outputSize, exportFrameRate,
+             result.mediaProfile.outputPixelFormat, result.mediaProfile.outputBitDepth,
+             result.mediaProfile.encoderProfile},
+            {}, [&settings] { return isCancelled(settings); });
+        observe(settings, QStringLiteral("log"), QStringLiteral("preparing"),
+                QStringLiteral("verifyExportCapabilities"),
+                encoderSupport.supported
+                    ? QStringLiteral("Renderer and encoder capability preflight passed")
+                    : QStringLiteral("Encoder capability preflight failed"),
+                QStringLiteral("capability"),
+                {{"width", outputSize.width()}, {"height", outputSize.height()},
+                 {"frameBytes", rendererCapability.frameBytes},
+                 {"pixelCount", rendererCapability.pixelCount},
+                 {"rendererBackend", rendererCapability.backend},
+                 {"rendererLimit", rendererCapability.maximumTextureSize},
+                 {"encoder", encoder}, {"pixelFormat", result.mediaProfile.outputPixelFormat},
+                 {"bitDepth", result.mediaProfile.outputBitDepth},
+                 {"encoderProfile", result.mediaProfile.encoderProfile},
+                 {"capabilityCacheHit", encoderSupport.cacheHit}});
+        if (!encoderSupport.supported) {
+            result.error = encoderSupport.error;
+            return result;
         }
         const QString temporaryOverlayPath = settings.temporaryOverlayPath.isEmpty()
             ? QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv")
@@ -932,25 +975,62 @@ ExportResult ExportEngine::exportVideo(
         activityTimer.restart();
         compositing = true;
         finalizing = false;
+        const QString overlayFormat = result.mediaProfile.outputBitDepth == 10
+            ? QStringLiteral("yuv420p10") : QStringLiteral("auto");
         const QString timeRangeFilter = QStringLiteral(
             "[0:v]trim=start=%1,setpts=PTS-STARTPTS%4,"
             "fps=fps=%2:start_time=0:round=near:eof_action=round,"
             "trim=end_frame=%3,setpts=PTS-STARTPTS[sourceVideo];"
             "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
-            "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=auto[video]")
+            "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=%5[composited];"
+            "[composited]format=pix_fmts=%6[video]")
                                             .arg(sourceRangeStart, 0, 'f', 9)
                                             .arg(rateString(exportFrameRate))
                                             .arg(expectedFrames)
                                             .arg(source.videoSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
-                                                .arg(outputSize.width()).arg(outputSize.height()));
+                                                .arg(outputSize.width()).arg(outputSize.height()))
+                                            .arg(overlayFormat)
+                                            .arg(result.mediaProfile.outputPixelFormat);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
             "-i", settings.inputPath, "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
             "-b:v", QString::number(settings.videoBitrate),
-            "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
+            "-tag:v", "hvc1", "-profile:v", result.mediaProfile.encoderProfile,
+            "-pix_fmt", result.mediaProfile.outputPixelFormat,
         };
+        const auto appendColorOption = [&compositionArguments](const QString &option, const QString &value) {
+            if (!value.isEmpty()) compositionArguments.append({option, value});
+        };
+        appendColorOption(QStringLiteral("-color_range"), result.mediaProfile.colorRange);
+        appendColorOption(QStringLiteral("-colorspace"), result.mediaProfile.colorSpace);
+        appendColorOption(QStringLiteral("-color_trc"), result.mediaProfile.colorTransfer);
+        appendColorOption(QStringLiteral("-color_primaries"), result.mediaProfile.colorPrimaries);
+        if (encoder == QStringLiteral("libx265")) {
+            QStringList x265ColorParameters;
+            if (!result.mediaProfile.colorPrimaries.isEmpty()) {
+                x265ColorParameters.append(
+                    QStringLiteral("colorprim=%1").arg(result.mediaProfile.colorPrimaries));
+            }
+            if (!result.mediaProfile.colorTransfer.isEmpty()) {
+                x265ColorParameters.append(
+                    QStringLiteral("transfer=%1").arg(result.mediaProfile.colorTransfer));
+            }
+            if (!result.mediaProfile.colorSpace.isEmpty()) {
+                x265ColorParameters.append(
+                    QStringLiteral("colormatrix=%1").arg(result.mediaProfile.colorSpace));
+            }
+            if (result.mediaProfile.colorRange == QStringLiteral("tv")) {
+                x265ColorParameters.append(QStringLiteral("range=limited"));
+            } else if (result.mediaProfile.colorRange == QStringLiteral("pc")) {
+                x265ColorParameters.append(QStringLiteral("range=full"));
+            }
+            if (!x265ColorParameters.isEmpty()) {
+                compositionArguments.append(
+                    {QStringLiteral("-x265-params"), x265ColorParameters.join(':')});
+            }
+        }
         if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
             compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
                 ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
@@ -1085,6 +1165,23 @@ ExportResult ExportEngine::exportVideo(
         const bool dimensionsOk = result.mediaInfo.videoSize == outputSize;
         const bool averageRateOk = result.mediaInfo.averageFrameRate.isEquivalentTo(exportFrameRate);
         const bool nominalRateOk = result.mediaInfo.frameRate.isEquivalentTo(exportFrameRate);
+        const bool pixelFormatOk = result.mediaProfile.acceptsOutputPixelFormat(
+            result.mediaInfo.pixelFormat);
+        const bool bitDepthOk = result.mediaInfo.bitDepth
+            && *result.mediaInfo.bitDepth == result.mediaProfile.outputBitDepth;
+        const QString actualProfile = result.mediaInfo.videoCodecProfile.toLower().remove(' ').remove('_');
+        const QString expectedProfile = result.mediaProfile.encoderProfile.toLower().remove(' ').remove('_');
+        const bool encoderProfileOk = !actualProfile.isEmpty()
+            && (actualProfile == expectedProfile
+                || (expectedProfile == QStringLiteral("main10")
+                    && actualProfile.startsWith(QStringLiteral("main10"))));
+        const auto preservedTag = [](const QString &expected, const QString &actual) {
+            return expected.isEmpty() || expected == actual;
+        };
+        const bool colorRangeOk = preservedTag(result.mediaProfile.colorRange, result.mediaInfo.colorRange);
+        const bool colorSpaceOk = preservedTag(result.mediaProfile.colorSpace, result.mediaInfo.colorSpace);
+        const bool colorTransferOk = preservedTag(result.mediaProfile.colorTransfer, result.mediaInfo.colorTransfer);
+        const bool colorPrimariesOk = preservedTag(result.mediaProfile.colorPrimaries, result.mediaInfo.colorPrimaries);
         const bool packetCountAvailable = result.mediaInfo.videoPacketCount > 0;
         const bool packetCountOk = !packetCountAvailable
             || result.mediaInfo.videoPacketCount == expectedFrames;
@@ -1136,6 +1233,23 @@ ExportResult ExportEngine::exportVideo(
                            rateString(exportFrameRate), rateString(result.mediaInfo.averageFrameRate), averageRateOk);
         finalValidationLog(QStringLiteral("checkNominalFrameRate"), QStringLiteral("Nominal frame rate"),
                            rateString(exportFrameRate), rateString(result.mediaInfo.frameRate), nominalRateOk);
+        finalValidationLog(QStringLiteral("checkPixelFormat"), QStringLiteral("Pixel format"),
+                           result.mediaProfile.outputPixelFormat, result.mediaInfo.pixelFormat, pixelFormatOk);
+        finalValidationLog(QStringLiteral("checkBitDepth"), QStringLiteral("Bit depth"),
+                           result.mediaProfile.outputBitDepth,
+                           result.mediaInfo.bitDepth ? QVariant(*result.mediaInfo.bitDepth)
+                                                     : QVariant(QStringLiteral("unknown")), bitDepthOk);
+        finalValidationLog(QStringLiteral("checkEncoderProfile"), QStringLiteral("Encoder profile"),
+                           result.mediaProfile.encoderProfile, result.mediaInfo.videoCodecProfile,
+                           encoderProfileOk);
+        finalValidationLog(QStringLiteral("checkColorRange"), QStringLiteral("Color range"),
+                           result.mediaProfile.colorRange, result.mediaInfo.colorRange, colorRangeOk);
+        finalValidationLog(QStringLiteral("checkColorSpace"), QStringLiteral("Color space"),
+                           result.mediaProfile.colorSpace, result.mediaInfo.colorSpace, colorSpaceOk);
+        finalValidationLog(QStringLiteral("checkColorTransfer"), QStringLiteral("Color transfer"),
+                           result.mediaProfile.colorTransfer, result.mediaInfo.colorTransfer, colorTransferOk);
+        finalValidationLog(QStringLiteral("checkColorPrimaries"), QStringLiteral("Color primaries"),
+                           result.mediaProfile.colorPrimaries, result.mediaInfo.colorPrimaries, colorPrimariesOk);
         finalValidationLog(QStringLiteral("checkPacketCount"), QStringLiteral("Video packet count"),
                            expectedFrames,
                            packetCountAvailable ? QVariant::fromValue(result.mediaInfo.videoPacketCount)
@@ -1171,8 +1285,10 @@ ExportResult ExportEngine::exportVideo(
             return result;
         }
         if (!codecOk || !dimensionsOk || !averageRateOk || !nominalRateOk
+            || !pixelFormatOk || !bitDepthOk || !encoderProfileOk
+            || !colorRangeOk || !colorSpaceOk || !colorTransferOk || !colorPrimariesOk
             || !videoStartOk || !durationOk || !audioOk) {
-            result.error = QStringLiteral("Export failed final timing validation.");
+            result.error = QStringLiteral("Export failed final media or timing validation.");
             return result;
         }
         observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),

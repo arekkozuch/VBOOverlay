@@ -673,8 +673,16 @@ ApplicationWindow {
                     if (sourceParts.length > 0)
                         lines.push(sourceParts.join(" · "));
 
-                    if (hasValue(info.videoCodec))
-                        streamParts.push(info.videoCodec);
+                    if (hasValue(info.videoCodec)) {
+                        const codec = info.videoCodec.toUpperCase();
+                        streamParts.push(hasValue(info.videoCodecProfile)
+                                         ? qsTr("%1 %2").arg(codec).arg(info.videoCodecProfile)
+                                         : codec);
+                    }
+                    if (hasValue(info.bitDepth))
+                        streamParts.push(qsTr("%1-bit").arg(info.bitDepth));
+                    if (hasValue(info.colorSummary))
+                        streamParts.push(info.colorSummary);
                     if (info.audioCodecs !== undefined && info.audioCodecs !== null) {
                         streamParts.push(audioCodecs.length > 0
                                          ? qsTr("Audio: %1").arg(audioCodecs)
@@ -690,6 +698,14 @@ ApplicationWindow {
                     return lines.join("\n");
                 }
                 color: "#b5c0cd"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 11
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: appController.exportSourceInfo.unsupportedColorManagedSource === true
+                text: qsTr("HDR/Log preservation is not yet supported. Export will be rejected rather than silently converted to SDR.")
+                color: "#ffc66d"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 11
             }
@@ -745,7 +761,7 @@ ApplicationWindow {
             FeTextField {
                 id: exportCustomBitrate; Layout.fillWidth: true
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
-                validator: DoubleValidator { bottom: 0.5; top: 120 }
+                validator: DoubleValidator { bottom: 0.5; top: 500 }
                 readOnly: exportQuality.currentIndex !== 3
                 opacity: readOnly ? 0.72 : 1.0
                 onTextChanged: if (exportQuality.currentIndex === 3) exportDialog.selectedBitrate = Math.round(Number(text) * 1000000)

@@ -6,6 +6,8 @@
 #include <QElapsedTimer>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QMutex>
+#include <QMutexLocker>
 #include <stdexcept>
 
 namespace FlappedEar {
@@ -56,7 +58,67 @@ bool canEncodeHevc(const QString &executable, const QString &encoder,
         && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
 }
 
+EncoderProfileSupport probeProfile(
+    const QString &executable, const EncoderProfileRequest &request,
+    const std::function<bool()> &cancelled)
+{
+    QProcess process;
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    ExportProcessSupervisor supervisor(process, false);
+    const QString rate = QStringLiteral("%1/%2")
+                             .arg(request.frameRate.numerator)
+                             .arg(request.frameRate.denominator);
+    QStringList arguments{
+        "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+        QStringLiteral("color=c=black:s=%1x%2:r=%3")
+            .arg(request.size.width()).arg(request.size.height()).arg(rate),
+        "-vf", QStringLiteral("format=pix_fmts=%1").arg(request.pixelFormat),
+        "-frames:v", "1", "-an", "-c:v", request.encoder,
+        "-profile:v", request.profile, "-pix_fmt", request.pixelFormat,
+        "-f", "null", "-",
+    };
+    supervisor.start(executable, arguments);
+    if (!supervisor.waitForStarted(5'000)
+        || !waitForFinished(process, supervisor, cancelled, 30'000)
+        || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        const QString diagnostics = QString::fromUtf8(process.readAllStandardError()).trimmed();
+        return {false, false,
+            QStringLiteral("Encoder %1 cannot encode %2×%3 at %4 using %5/%6 (%7-bit).%8")
+                .arg(request.encoder).arg(request.size.width()).arg(request.size.height())
+                .arg(rate, request.pixelFormat, request.profile)
+                .arg(request.bitDepth)
+                .arg(diagnostics.isEmpty() ? QString() : QStringLiteral(" FFmpeg: %1").arg(diagnostics))};
+    }
+    return {true, false, {}};
+}
+
 } // namespace
+
+QString EncoderProfileRequest::cacheKey() const
+{
+    return QStringLiteral("%1|%2|%3x%4|%5/%6|%7|%8|%9")
+        .arg(ffmpegExecutable).arg(encoder).arg(size.width()).arg(size.height())
+        .arg(frameRate.numerator).arg(frameRate.denominator)
+        .arg(pixelFormat).arg(bitDepth).arg(profile);
+}
+
+EncoderProfileSupport EncoderCapabilityCache::verify(
+    const EncoderProfileRequest &request, const Probe &probe)
+{
+    const QString key = request.cacheKey();
+    const auto existing = m_results.constFind(key);
+    if (existing != m_results.cend()) {
+        EncoderProfileSupport cached = existing.value();
+        cached.cacheHit = true;
+        return cached;
+    }
+    EncoderProfileSupport result = probe(request);
+    result.cacheHit = false;
+    m_results.insert(key, result);
+    return result;
+}
+
+qsizetype EncoderCapabilityCache::size() const { return m_results.size(); }
 
 QList<EncoderCapability> EncoderDetector::discover(
     const QString &requestedFfmpegPath, const std::function<bool()> &cancelled)
@@ -113,6 +175,25 @@ QString EncoderDetector::preferredHevcEncoder(const QList<EncoderCapability> &en
         }
     }
     return {};
+}
+
+EncoderProfileSupport EncoderDetector::verifyProfile(
+    const EncoderProfileRequest &request, const QString &requestedFfmpegPath,
+    const std::function<bool()> &cancelled)
+{
+    const QString executable = requestedFfmpegPath.isEmpty()
+        ? FfmpegTools::ffmpegPath() : requestedFfmpegPath;
+    if (executable.isEmpty()) {
+        return {false, false, FfmpegTools::missingToolsMessage()};
+    }
+    static QMutex mutex;
+    static EncoderCapabilityCache cache;
+    QMutexLocker locker(&mutex);
+    EncoderProfileRequest keyedRequest = request;
+    keyedRequest.ffmpegExecutable = executable;
+    return cache.verify(keyedRequest, [&](const EncoderProfileRequest &profileRequest) {
+        return probeProfile(executable, profileRequest, cancelled);
+    });
 }
 
 } // namespace FlappedEar

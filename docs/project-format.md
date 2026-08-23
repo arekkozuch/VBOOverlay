@@ -29,7 +29,7 @@ When a loaded source is in the project directory, or no more than two parent dir
 
 ## Source fingerprints
 
-Fingerprints are deterministic identity metadata, not cryptographic proof of complete-file identity. Both source types store file size and a SHA-256 digest over at most three fixed 64 KiB regions: head, middle, and tail. Video additionally stores probed duration in microseconds, dimensions, exact rational frame rate, and codec. Telemetry additionally stores parsed duration, sample count, and sorted channel name/unit/sample-count metadata.
+Fingerprints are deterministic identity metadata, not cryptographic proof of complete-file identity. Both source types store file size and a SHA-256 digest over at most three fixed 64 KiB regions: head, middle, and tail. Video additionally stores probed duration in microseconds, dimensions, exact rational frame rate, and codec. Newly modeled profile, pixel-format, bit-depth, orientation, bitrate, and color fields deliberately do not participate in the existing `video-v1` fingerprint, preserving compatibility with saved projects. Telemetry additionally stores parsed duration, sample count, and sorted channel name/unit/sample-count metadata.
 
 The bounded byte sampling reads at most 192 KiB per source and is cheap relative to video probing or VBO parsing. It detects common accidental substitutions, including size, media-metadata, telemetry-structure, and sampled-content changes. Changes confined to unsampled bytes can collide, so the value is deliberately called a source fingerprint rather than a content hash.
 

@@ -265,9 +265,21 @@ QVariantMap AppController::exportSourceInfo() const
     const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
         ? m_exportSourceInfo.averageFrameRate
         : m_exportSourceInfo.frameRate;
+    const QString colorSummary = m_exportSourceInfo.sourceColorClass == SourceColorClass::Sdr
+        && m_exportSourceInfo.colorPrimaries == QStringLiteral("bt709")
+        ? QStringLiteral("Rec.709 SDR")
+        : sourceColorClassName(m_exportSourceInfo.sourceColorClass);
+    const bool unsupportedColorManagedSource =
+        m_exportSourceInfo.sourceColorClass == SourceColorClass::HdrHlg
+        || m_exportSourceInfo.sourceColorClass == SourceColorClass::HdrPq
+        || m_exportSourceInfo.sourceColorClass == SourceColorClass::LogOrExtended;
     return {
         {"width", m_exportSourceInfo.videoSize.width()},
         {"height", m_exportSourceInfo.videoSize.height()},
+        {"codedWidth", m_exportSourceInfo.codedVideoSize.width()},
+        {"codedHeight", m_exportSourceInfo.codedVideoSize.height()},
+        {"displayWidth", m_exportSourceInfo.displayVideoSize.width()},
+        {"displayHeight", m_exportSourceInfo.displayVideoSize.height()},
         {"duration", m_exportSourceInfo.duration},
         {"frameRate", rate.value()},
         {"frameRateText", QStringLiteral("%1/%2 (%3 fps)")
@@ -275,6 +287,26 @@ QVariantMap AppController::exportSourceInfo() const
                               .arg(rate.denominator)
                               .arg(rate.value(), 0, 'f', 3)},
         {"videoCodec", m_exportSourceInfo.videoCodec},
+        {"videoCodecProfile", m_exportSourceInfo.videoCodecProfile},
+        {"pixelFormat", m_exportSourceInfo.pixelFormat},
+        {"bitDepth", m_exportSourceInfo.bitDepth
+                         ? QVariant(*m_exportSourceInfo.bitDepth) : QVariant()},
+        {"sourceVideoBitrate", m_exportSourceInfo.sourceVideoBitrate
+                                  ? QVariant(*m_exportSourceInfo.sourceVideoBitrate) : QVariant()},
+        {"sampleAspectRatio", m_exportSourceInfo.sampleAspectRatio.isValid()
+                                  ? QStringLiteral("%1:%2")
+                                        .arg(m_exportSourceInfo.sampleAspectRatio.numerator)
+                                        .arg(m_exportSourceInfo.sampleAspectRatio.denominator)
+                                  : QString()},
+        {"rotationDegrees", m_exportSourceInfo.rotationDegrees
+                                ? QVariant(*m_exportSourceInfo.rotationDegrees) : QVariant()},
+        {"colorRange", m_exportSourceInfo.colorRange},
+        {"colorSpace", m_exportSourceInfo.colorSpace},
+        {"colorTransfer", m_exportSourceInfo.colorTransfer},
+        {"colorPrimaries", m_exportSourceInfo.colorPrimaries},
+        {"colorClass", sourceColorClassName(m_exportSourceInfo.sourceColorClass)},
+        {"colorSummary", colorSummary},
+        {"unsupportedColorManagedSource", unsupportedColorManagedSource},
         {"audioCodecs", m_exportSourceInfo.audioCodecs.join(QStringLiteral(", "))},
         {"likelyVariableFrameRate", m_exportSourceInfo.likelyVariableFrameRate},
     };
@@ -310,7 +342,9 @@ QString AppController::formatEstimatedExportSize(const qint64 bytes) const
 qint64 AppController::recommendedExportBitrate(const int width, const int height, const qint64 numerator,
                                                const qint64 denominator, const QString &quality) const
 {
-    return ExportFormat::bitrateForQuality(quality, {width, height}, {numerator, denominator});
+    return ExportFormat::bitrateForQuality(
+        quality, {width, height}, {numerator, denominator},
+        m_exportSourceInfo.bitDepth.value_or(8));
 }
 QVariantMap AppController::exportMetrics() const { return m_exportMetrics; }
 QVariantMap AppController::exportProgressInfo() const { return m_exportProgressInfo; }
@@ -1236,13 +1270,35 @@ bool AppController::startExport(
         emit exportChanged();
         return false;
     }
+    if (m_exportSourceInfo.sourceColorClass == SourceColorClass::HdrHlg
+        || m_exportSourceInfo.sourceColorClass == SourceColorClass::HdrPq
+        || m_exportSourceInfo.sourceColorClass == SourceColorClass::LogOrExtended) {
+        m_exportError = QStringLiteral(
+            "%1 source detected. Color-managed HDR/Log preservation is not yet supported; "
+            "export will not silently convert it to SDR.")
+                            .arg(sourceColorClassName(m_exportSourceInfo.sourceColorClass));
+        m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        emit exportChanged();
+        return false;
+    }
+    if (!m_exportSourceInfo.bitDepth) {
+        m_exportError = QStringLiteral(
+            "Source bit depth is unknown (pixel format: %1); safe preservation cannot be verified.")
+                            .arg(m_exportSourceInfo.pixelFormat.isEmpty()
+                                     ? QStringLiteral("unknown") : m_exportSourceInfo.pixelFormat);
+        m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        emit exportChanged();
+        return false;
+    }
     const QSize outputSize(outputWidth, outputHeight);
     const MediaRational outputRate{frameRateNumerator, frameRateDenominator};
     if (!outputSize.isValid() || outputSize.width() % 2 || outputSize.height() % 2
         || outputSize.width() > m_exportSourceInfo.videoSize.width() || outputSize.height() > m_exportSourceInfo.videoSize.height()
         || !outputRate.isValid() || outputRate.value() > ExportEngine::effectiveFrameRate(m_exportSourceInfo).value()
         || !ExportFormat::validCustomBitrate(videoBitrate)) {
-        m_exportError = QStringLiteral("Export format is invalid. Choose an even, non-upscaled size, supported frame rate, and 0.5–120 Mbps bitrate.");
+        m_exportError = QStringLiteral("Export format is invalid. Choose an even, non-upscaled size, supported frame rate, and 0.5–500 Mbps bitrate.");
         m_exportState = QStringLiteral("failed"); emit exportChanged(); return false;
     }
     const double sourceDuration = m_exportSourceInfo.duration;
@@ -1697,6 +1753,10 @@ void AppController::handleExportOutput()
                                    QStringLiteral("operation"), QStringLiteral("stageElapsedMilliseconds"),
                                    QStringLiteral("totalElapsedMilliseconds"), QStringLiteral("stageDurations"),
                                    QStringLiteral("outputVideoCodec"), QStringLiteral("outputWidth"),
+                                   QStringLiteral("outputVideoProfile"),
+                                   QStringLiteral("outputPixelFormat"), QStringLiteral("outputBitDepth"),
+                                   QStringLiteral("outputColorRange"), QStringLiteral("outputColorSpace"),
+                                   QStringLiteral("outputColorTransfer"), QStringLiteral("outputColorPrimaries"),
                                    QStringLiteral("outputHeight"), QStringLiteral("outputDuration"),
                                    QStringLiteral("outputVideoDuration"), QStringLiteral("outputVideoStart"),
                                    QStringLiteral("outputVideoPacketCount"),

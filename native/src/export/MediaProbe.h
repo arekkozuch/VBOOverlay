@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 #include <functional>
+#include <optional>
 
 namespace FlappedEar {
 
@@ -17,15 +18,39 @@ struct MediaRational {
     [[nodiscard]] bool isEquivalentTo(const MediaRational &other) const;
 };
 
+enum class SourceColorClass {
+    Unknown,
+    Sdr,
+    HdrHlg,
+    HdrPq,
+    LogOrExtended,
+};
+
+[[nodiscard]] QString sourceColorClassName(SourceColorClass classification);
+
 struct MediaInfo {
     QString path;
     double duration = 0.0;
+    QSize codedVideoSize;
     QSize videoSize;
+    QSize displayVideoSize;
     MediaRational frameRate;
     MediaRational averageFrameRate;
     MediaRational timeBase;
     QString videoCodec;
+    QString videoCodecProfile;
     QString pixelFormat;
+    std::optional<int> bitDepth;
+    std::optional<qint64> sourceVideoBitrate;
+    MediaRational sampleAspectRatio;
+    std::optional<int> rotationDegrees;
+    QString colorRange;
+    QString colorSpace;
+    QString colorTransfer;
+    QString colorPrimaries;
+    QString masteringDisplayMetadata;
+    QString contentLightMetadata;
+    SourceColorClass sourceColorClass = SourceColorClass::Unknown;
     QStringList audioCodecs;
     qsizetype videoFrameCount = 0;
     qsizetype videoPacketCount = 0;
@@ -71,6 +96,10 @@ public:
         const MediaProbeCancellationCallback &cancellationCallback = {});
     [[nodiscard]] static MediaInfo parseJson(const QByteArray &json, const QString &path = {});
     [[nodiscard]] static MediaRational parseRational(const QString &value);
+    [[nodiscard]] static std::optional<int> bitDepthForPixelFormat(const QString &pixelFormat);
+    [[nodiscard]] static SourceColorClass classifyColor(
+        const QString &colorTransfer, const QString &colorSpace,
+        const QString &colorPrimaries);
 };
 
 } // namespace FlappedEar

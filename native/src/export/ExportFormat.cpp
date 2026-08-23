@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace FlappedEar {
 namespace {
@@ -9,7 +10,9 @@ QSize evenFit(const QSize &source, int targetWidth)
 {
     if (targetWidth > source.width()) return {};
     const int width = targetWidth - targetWidth % 2;
-    const int height = qMax(2, static_cast<int>(std::lround(double(source.height()) * width / source.width())) & ~1);
+    const long double scaledHeight = static_cast<long double>(source.height()) * width / source.width();
+    if (scaledHeight > std::numeric_limits<int>::max()) return {};
+    const int height = qMax(2, static_cast<int>(std::llround(scaledHeight)) & ~1);
     return {width, height};
 }
 }
@@ -39,36 +42,61 @@ QList<MediaRational> ExportFormat::frameRateOptions(const MediaRational &source)
     return result;
 }
 
-qint64 ExportFormat::recommendedVideoBitrate(const QSize &size, const MediaRational &rate)
+qint64 ExportFormat::recommendedVideoBitrate(
+    const QSize &size, const MediaRational &rate, const int bitDepth)
 {
     if (!size.isValid() || !rate.isValid()) return 0;
-    // HEVC baselines for high-motion onboard footage, at 30 fps.  The square-root
-    // cadence adjustment retains extra temporal detail without treating 60 fps as
-    // a full 2x bitrate requirement.
-    const qint64 baseline = size.height() <= 720 ? 6'000'000
-        : size.height() <= 1080 ? 12'500'000
-        : size.height() <= 1440 ? 21'200'000
-        : 36'500'000;
-    const double fpsMultiplier = std::sqrt(rate.value() / 30.0);
-    return qBound<qint64>(qint64{1'000'000}, qRound64(baseline * fpsMultiplier), qint64{120'000'000});
+    constexpr long double referencePixelRate = 1920.0L * 1080.0L * 30.0L;
+    constexpr long double referenceBitrate = 12'500'000.0L;
+    // Sublinear scaling reflects the increased compression efficiency of
+    // larger pictures while retaining the established 1080p/4K ballpark.
+    constexpr long double scalingExponent = 0.66L;
+    const long double pixelRate = static_cast<long double>(size.width()) * size.height()
+        * rate.numerator / rate.denominator;
+    if (!std::isfinite(static_cast<double>(pixelRate)) || pixelRate <= 0.0L) return 0;
+    const long double depthMultiplier = bitDepth > 8 ? 1.15L : 1.0L;
+    const long double recommendation = referenceBitrate
+        * std::pow(pixelRate / referencePixelRate, scalingExponent) * depthMultiplier;
+    if (!std::isfinite(static_cast<double>(recommendation))) return maximumCustomVideoBitrate;
+    return qBound<qint64>(1'000'000, static_cast<qint64>(std::llround(recommendation)),
+                          maximumCustomVideoBitrate);
 }
 
-qint64 ExportFormat::bitrateForQuality(const QString &quality, const QSize &size, const MediaRational &rate)
+qint64 ExportFormat::bitrateForQuality(
+    const QString &quality, const QSize &size, const MediaRational &rate,
+    const int bitDepth)
 {
     const double multiplier = quality == QStringLiteral("smaller") ? 0.70
         : quality == QStringLiteral("high") ? 1.30 : 1.0;
-    return qRound64(recommendedVideoBitrate(size, rate) * multiplier);
+    return qMin(maximumCustomVideoBitrate,
+                qRound64(recommendedVideoBitrate(size, rate, bitDepth) * multiplier));
 }
 
 bool ExportFormat::validCustomBitrate(const qint64 bitrate)
 {
-    return bitrate >= 500'000 && bitrate <= 120'000'000;
+    return bitrate >= 500'000 && bitrate <= maximumCustomVideoBitrate;
+}
+
+std::optional<qint64> ExportFormat::rgbaFrameBytes(const QSize &size)
+{
+    if (!size.isValid()) return std::nullopt;
+    constexpr qint64 channels = 4;
+    const qint64 width = size.width();
+    const qint64 height = size.height();
+    if (width > std::numeric_limits<qint64>::max() / height
+        || width * height > std::numeric_limits<qint64>::max() / channels) {
+        return std::nullopt;
+    }
+    return width * height * channels;
 }
 
 qint64 ExportFormat::estimatedBytes(const qint64 videoBitrate, const bool audioEnabled, const double seconds)
 {
     if (!validCustomBitrate(videoBitrate) || !std::isfinite(seconds) || seconds < 0) return 0;
-    return qRound64((videoBitrate + (audioEnabled ? audioBitrate : 0)) * seconds / 8.0 * 1.03);
+    const long double estimate = (static_cast<long double>(videoBitrate)
+        + (audioEnabled ? audioBitrate : 0)) * seconds / 8.0L * 1.03L;
+    return estimate >= std::numeric_limits<qint64>::max()
+        ? std::numeric_limits<qint64>::max() : static_cast<qint64>(std::llround(estimate));
 }
 
 QString ExportFormat::formatEstimatedSize(const qint64 bytes)
