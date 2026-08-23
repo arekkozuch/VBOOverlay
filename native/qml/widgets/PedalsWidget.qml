@@ -31,7 +31,8 @@ ColumnLayout {
             Layout.fillHeight: true
             spacing: 3 * frame.sceneScale
             property var pedalRaw: frame.raw(modelData.sourceKey, modelData.fallback)
-            property real pedalValue: Number(pedalRaw || 0)
+            property bool hasValue: pedalRaw !== undefined && pedalRaw !== null && Number.isFinite(Number(pedalRaw))
+            property real pedalValue: hasValue ? Number(pedalRaw) : 0
             RowLayout {
                 Layout.fillWidth: true
                 Label {
@@ -44,7 +45,7 @@ ColumnLayout {
                 }
                 Label {
                     visible: frame.widgetSettings.showValues ?? true
-                    text: parent.parent.pedalRaw === undefined ? "—" : parent.parent.pedalValue.toFixed(Number(frame.widgetSettings.decimals ?? 0)) + "%"
+                    text: parent.parent.hasValue ? parent.parent.pedalValue.toFixed(Number(frame.widgetSettings.decimals ?? 0)) + "%" : "—"
                     color: frame.primary
                     font.family: frame.family
                     font.weight: Font.DemiBold
@@ -59,7 +60,7 @@ ColumnLayout {
                 Rectangle {
                     property real low: Number(frame.widgetSettings[modelData.minKey] ?? 0)
                     property real high: Number(frame.widgetSettings[modelData.maxKey] ?? 100)
-                    width: parent.width * Math.max(0, Math.min(1, (parent.parent.pedalValue - low) / Math.max(0.001, high - low)))
+                    width: parent.parent.hasValue ? parent.width * Math.max(0, Math.min(1, (parent.parent.pedalValue - low) / Math.max(0.001, high - low))) : 0
                     height: parent.height
                     radius: parent.radius
                     color: frame.widgetSettings[modelData.colorKey] || frame.accent

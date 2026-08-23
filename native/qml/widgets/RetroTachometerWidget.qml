@@ -5,12 +5,16 @@ import QtQuick.Layouts
 Item {
     property var frame: parent.frame
     anchors.fill: parent
-    property real value: Number(frame.adjusted(frame.raw("source", "rpm")) || 0)
+    property var rawValue: frame.adjusted(frame.raw("source", "rpm"))
+    property bool hasValue: rawValue !== undefined && rawValue !== null && Number.isFinite(Number(rawValue))
+    property real value: hasValue ? Number(rawValue) : Number(frame.widgetSettings.minValue ?? 0)
     Canvas {
         id: retroTachometerCanvas
         anchors.fill: parent
         property real value: parent.value
+        property bool hasValue: parent.hasValue
         onValueChanged: requestPaint()
+        onHasValueChanged: requestPaint()
         onPaint: {
             const ctx = getContext("2d");
             ctx.reset();
@@ -48,17 +52,19 @@ Item {
                 ctx.stroke();
                 ctx.fillText(String(Math.round((minimum + (maximum - minimum) * step / steps) / 1000)), cx + Math.cos(angle) * radius * 1.35, cy + Math.sin(angle) * radius * 1.35);
             }
-            const angle = Math.PI * 0.5 + Math.PI * 1.5 * progress;
-            ctx.strokeStyle = settings.needleColor || "#e32636";
-            ctx.lineWidth = Math.max(3 * frame.sceneScale, radius * 0.05);
-            ctx.beginPath();
-            ctx.moveTo(cx - Math.cos(angle) * radius * 0.13, cy - Math.sin(angle) * radius * 0.13);
-            ctx.lineTo(cx + Math.cos(angle) * radius * 0.86, cy + Math.sin(angle) * radius * 0.86);
-            ctx.stroke();
-            ctx.fillStyle = settings.dialColor || "#f4f4f4";
-            ctx.beginPath();
-            ctx.arc(cx, cy, Math.max(5 * frame.sceneScale, radius * 0.12), 0, Math.PI * 2);
-            ctx.fill();
+            if (hasValue) {
+                const angle = Math.PI * 0.5 + Math.PI * 1.5 * progress;
+                ctx.strokeStyle = settings.needleColor || "#e32636";
+                ctx.lineWidth = Math.max(3 * frame.sceneScale, radius * 0.05);
+                ctx.beginPath();
+                ctx.moveTo(cx - Math.cos(angle) * radius * 0.13, cy - Math.sin(angle) * radius * 0.13);
+                ctx.lineTo(cx + Math.cos(angle) * radius * 0.86, cy + Math.sin(angle) * radius * 0.86);
+                ctx.stroke();
+                ctx.fillStyle = settings.dialColor || "#f4f4f4";
+                ctx.beginPath();
+                ctx.arc(cx, cy, Math.max(5 * frame.sceneScale, radius * 0.12), 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
     }
     Connections {

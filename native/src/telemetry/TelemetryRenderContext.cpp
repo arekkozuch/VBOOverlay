@@ -1,9 +1,85 @@
 #include "telemetry/TelemetryRenderContext.h"
 
 #include <QtGlobal>
+#include <algorithm>
 #include <cmath>
 
 namespace FlappedEar {
+
+namespace {
+
+struct PresentationPolicy {
+    double smoothingSeconds;
+    double staleSeconds;
+    InterpolationMode interpolation;
+};
+
+PresentationPolicy presentationPolicy(const QString &channelName)
+{
+    const QString name = channelName.toLower();
+    if (name.contains(QStringLiteral("throttle")) || name.contains(QStringLiteral("brake")))
+        return {0.10, 0.75, InterpolationMode::Linear};
+    if (name.contains(QStringLiteral("lateral")) || name.contains(QStringLiteral("longitudinal"))
+        || name.contains(QStringLiteral("accel")) || name.contains(QStringLiteral("gforce")))
+        return {0.20, 0.75, InterpolationMode::Linear};
+    if (name.contains(QStringLiteral("heart")) || name.contains(QStringLiteral("hr"))
+        || name.contains(QStringLiteral("bpm")))
+        return {0.25, 2.0, InterpolationMode::Linear};
+    if (name.contains(QStringLiteral("gear")))
+        return {0.0, 0.75, InterpolationMode::Previous};
+    if (name.contains(QStringLiteral("speed")) || name.contains(QStringLiteral("rpm")))
+        return {0.15, 0.75, InterpolationMode::Linear};
+    return {0.15, 0.75, InterpolationMode::Linear};
+}
+
+std::optional<double> presentationValueAt(
+    const TelemetrySession &session, const QString &channelName, const double time)
+{
+    const QString resolved = session.aliases.value(channelName, channelName);
+    const auto channelIterator = session.channels.constFind(resolved);
+    if (channelIterator == session.channels.cend()) return std::nullopt;
+    const TelemetryChannel &channel = channelIterator.value();
+    if (channel.timestamps.size() != channel.values.size() || channel.timestamps.isEmpty())
+        return std::nullopt;
+
+    const PresentationPolicy policy = presentationPolicy(channelName + QLatin1Char(' ') + resolved);
+    std::optional<double> presented = session.valueAt(channelName, time, policy.interpolation);
+    const auto next = std::lower_bound(channel.timestamps.cbegin(), channel.timestamps.cend(), time);
+    if (presented && next != channel.timestamps.cbegin() && next != channel.timestamps.cend()
+        && *next != time) {
+        const double gap = *next - *(next - 1);
+        if (gap > telemetryGapThreshold(channel, policy.staleSeconds)) presented.reset();
+    }
+    if (!presented) {
+        const auto after = std::upper_bound(channel.timestamps.cbegin(), channel.timestamps.cend(), time);
+        for (auto iterator = after; iterator != channel.timestamps.cbegin();) {
+            --iterator;
+            const qsizetype index = std::distance(channel.timestamps.cbegin(), iterator);
+            if (time - *iterator > policy.staleSeconds) break;
+            if (std::isfinite(channel.values[index])) {
+                presented = channel.values[index];
+                break;
+            }
+        }
+    }
+    if (!presented || policy.smoothingSeconds <= 0.0) return presented;
+
+    double weightedTotal = *presented;
+    double totalWeight = 1.0;
+    const double windowStart = time - policy.smoothingSeconds;
+    auto iterator = std::lower_bound(channel.timestamps.cbegin(), channel.timestamps.cend(), windowStart);
+    for (; iterator != channel.timestamps.cend() && *iterator <= time; ++iterator) {
+        const qsizetype index = std::distance(channel.timestamps.cbegin(), iterator);
+        if (qFuzzyCompare(*iterator, time) || !std::isfinite(channel.values[index])) continue;
+        const double weight = std::max(0.0, 1.0 - (time - *iterator) / policy.smoothingSeconds);
+        weightedTotal += channel.values[index] * weight;
+        totalWeight += weight;
+    }
+    const double smoothed = weightedTotal / totalWeight;
+    return std::isfinite(smoothed) ? std::optional<double>(smoothed) : std::nullopt;
+}
+
+} // namespace
 
 TelemetryRenderContext::TelemetryRenderContext(QObject *parent)
     : QObject(parent)
@@ -75,7 +151,7 @@ QVariant TelemetryRenderContext::telemetryValue(const QString &channelName) cons
     if (!m_session || channelName.isEmpty()) {
         return {};
     }
-    const auto value = m_session->valueAt(channelName, telemetryTime());
+    const auto value = presentationValueAt(*m_session, channelName, telemetryTime());
     return value ? QVariant(*value) : QVariant();
 }
 

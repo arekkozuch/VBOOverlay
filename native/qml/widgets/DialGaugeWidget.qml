@@ -6,13 +6,16 @@ Item {
     property var frame: parent.frame
     anchors.fill: parent
     property var gaugeRaw: frame.raw("source", "rpm")
-    property real gaugeValue: Number(frame.adjusted(gaugeRaw) || 0)
+    property var adjustedValue: frame.adjusted(gaugeRaw)
+    property bool hasValue: adjustedValue !== undefined && adjustedValue !== null && Number.isFinite(Number(adjustedValue))
+    property real gaugeValue: hasValue ? Number(adjustedValue) : minimum
     property real minimum: Number(frame.widgetSettings.minValue ?? 0)
     property real maximum: Math.max(minimum + 0.001, Number(frame.widgetSettings.maxValue ?? 8000))
     Canvas {
         id: dialCanvas
         anchors.fill: parent
         property real gaugeValue: parent.gaugeValue
+        property bool hasValue: parent.hasValue
         property real minimum: parent.minimum
         property real maximum: parent.maximum
         property real startAngle: Number(frame.widgetSettings.startAngle ?? 140)
@@ -20,6 +23,7 @@ Item {
         property int majorTicks: Math.max(2, Number(frame.widgetSettings.majorTicks ?? 8))
         property int minorTicks: Math.max(0, Number(frame.widgetSettings.minorTicks ?? 4))
         onGaugeValueChanged: requestPaint()
+        onHasValueChanged: requestPaint()
         onMinimumChanged: requestPaint()
         onMaximumChanged: requestPaint()
         onStartAngleChanged: requestPaint()
@@ -50,18 +54,20 @@ Item {
                     context.stroke();
                 }
             }
-            const progress = Math.max(0, Math.min(1, (gaugeValue - minimum) / (maximum - minimum)));
-            const needleAngle = start + (end - start) * progress;
-            context.strokeStyle = frame.widgetSettings.needleColor || "#ff5b63";
-            context.lineWidth = 3 * frame.sceneScale;
-            context.beginPath();
-            context.moveTo(cx - Math.cos(needleAngle) * radius * 0.12, cy - Math.sin(needleAngle) * radius * 0.12);
-            context.lineTo(cx + Math.cos(needleAngle) * radius * 0.72, cy + Math.sin(needleAngle) * radius * 0.72);
-            context.stroke();
-            context.fillStyle = frame.widgetSettings.needleColor || "#ff5b63";
-            context.beginPath();
-            context.arc(cx, cy, 5 * frame.sceneScale, 0, Math.PI * 2, false);
-            context.fill();
+            if (hasValue) {
+                const progress = Math.max(0, Math.min(1, (gaugeValue - minimum) / (maximum - minimum)));
+                const needleAngle = start + (end - start) * progress;
+                context.strokeStyle = frame.widgetSettings.needleColor || "#ff5b63";
+                context.lineWidth = 3 * frame.sceneScale;
+                context.beginPath();
+                context.moveTo(cx - Math.cos(needleAngle) * radius * 0.12, cy - Math.sin(needleAngle) * radius * 0.12);
+                context.lineTo(cx + Math.cos(needleAngle) * radius * 0.72, cy + Math.sin(needleAngle) * radius * 0.72);
+                context.stroke();
+                context.fillStyle = frame.widgetSettings.needleColor || "#ff5b63";
+                context.beginPath();
+                context.arc(cx, cy, 5 * frame.sceneScale, 0, Math.PI * 2, false);
+                context.fill();
+            }
         }
     }
     Column {

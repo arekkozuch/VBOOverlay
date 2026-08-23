@@ -53,6 +53,7 @@ private slots:
     void rejectsMissingSections();
     void interpolatesByTime();
     void preservesMissingTelemetryGaps();
+    void filtersOverlayPresentationValues();
     void samplesTelemetryRanges();
     void parsesTextFirstVboTimeFormats();
     void keepsVboTimestampsStrictlyMonotonic();
@@ -583,10 +584,10 @@ void TelemetryTests::preservesMissingTelemetryGaps()
     QVERIFY(!session.valueAt("speed", 0.15));
     QVERIFY(!session.valueAt("speed", 0.15, InterpolationMode::Previous));
     QVERIFY(!session.valueAt("speed", 0.11, InterpolationMode::Nearest));
-    const QVector<QPointF> gapPoints = session.sampledRange("speed", 0.0, 0.2, 5);
-    QCOMPARE(gapPoints.size(), 2);
-    QCOMPARE(gapPoints.front(), QPointF(0.0, 10.0));
-    QCOMPARE(gapPoints.back(), QPointF(0.2, 30.0));
+    const QVector<QVector<QPointF>> gapSegments = session.sampledSegments("speed", 0.0, 0.2, 5);
+    QCOMPARE(gapSegments.size(), 2);
+    QCOMPARE(gapSegments.front(), QVector<QPointF>({QPointF(0.0, 10.0)}));
+    QCOMPARE(gapSegments.back(), QVector<QPointF>({QPointF(0.2, 30.0)}));
     QVERIFY(!session.valueAt("speed", std::numeric_limits<double>::quiet_NaN()));
     QVERIFY(!session.valueAt("speed", std::numeric_limits<double>::infinity()));
     QVERIFY(!session.valueAt("speed", -std::numeric_limits<double>::infinity()));
@@ -616,8 +617,8 @@ void TelemetryTests::preservesMissingTelemetryGaps()
     TelemetryRenderContext context;
     context.setSession(&session);
     context.setTime(0.1);
-    QVERIFY(!context.telemetryValue("speed").isValid());
-    QCOMPARE(context.valueText("speed"), QStringLiteral("—"));
+    QCOMPARE(context.telemetryValue("speed").toDouble(), 10.0);
+    QCOMPARE(context.valueText("speed"), QStringLiteral("10.00"));
 
     TelemetrySession positionSession;
     TelemetryChannel latitude;
@@ -639,17 +640,114 @@ void TelemetryTests::preservesMissingTelemetryGaps()
     QVERIFY(!currentTrackPoint(positionSession, 2.1, geometry));
 }
 
+void TelemetryTests::filtersOverlayPresentationValues()
+{
+    TelemetrySession session;
+    const auto addChannel = [&session](const QString &name, QVector<float> values) {
+        TelemetryChannel channel;
+        channel.name = name;
+        channel.timestamps = {0.0, 0.1, 0.2, 0.3};
+        channel.values = std::move(values);
+        session.channels.insert(name, channel);
+        session.aliases.insert(name, name);
+    };
+    addChannel(QStringLiteral("speed"), {0.0F, 10.0F, std::numeric_limits<float>::quiet_NaN(), 30.0F});
+    addChannel(QStringLiteral("rpm"), {0.0F, 1000.0F, std::numeric_limits<float>::quiet_NaN(), 3000.0F});
+    addChannel(QStringLiteral("throttle"), {0.0F, 50.0F, std::numeric_limits<float>::quiet_NaN(), 100.0F});
+    addChannel(QStringLiteral("brake"), {0.0F, 25.0F, std::numeric_limits<float>::quiet_NaN(), 0.0F});
+    addChannel(QStringLiteral("lateralAcceleration"), {0.0F, 0.5F, std::numeric_limits<float>::quiet_NaN(), 1.0F});
+    addChannel(QStringLiteral("longitudinalAcceleration"), {0.0F, -0.5F, std::numeric_limits<float>::quiet_NaN(), -1.0F});
+
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    context.setTime(0.0);
+    QCOMPARE(context.telemetryValue("speed").toDouble(), 0.0);
+    QCOMPARE(context.telemetryValue("rpm").toDouble(), 0.0);
+    QCOMPARE(context.telemetryValue("throttle").toDouble(), 0.0);
+    QCOMPARE(context.telemetryValue("brake").toDouble(), 0.0);
+    QCOMPARE(context.telemetryValue("lateralAcceleration").toDouble(), 0.0);
+    QCOMPARE(context.telemetryValue("longitudinalAcceleration").toDouble(), 0.0);
+    QVERIFY(!context.telemetryValue("missing").isValid());
+
+    context.setTime(0.2);
+    QVERIFY(context.telemetryValue("speed").isValid());
+    QVERIFY(context.telemetryValue("rpm").isValid());
+    QVERIFY(context.telemetryValue("throttle").isValid());
+    QVERIFY(context.telemetryValue("brake").isValid());
+    QVERIFY(context.telemetryValue("lateralAcceleration").isValid());
+    QVERIFY(context.telemetryValue("longitudinalAcceleration").isValid());
+
+    context.setTime(1.1);
+    QVERIFY(!context.telemetryValue("speed").isValid());
+    QCOMPARE(context.valueText("speed"), QStringLiteral("—"));
+}
+
 void TelemetryTests::samplesTelemetryRanges()
 {
     const auto session = VboParser::parse(
         u"[column names]\ntime speed\n[data]\n0 0\n1 10\n2 20\n3 30\n4 40");
-    const QVector<QPointF> points = session.sampledRange("speed", 1.0, 3.0, 5);
-    QCOMPARE(points.size(), 5);
-    QCOMPARE(points.front(), QPointF(1.0, 10.0));
-    QCOMPARE(points[2], QPointF(2.0, 20.0));
-    QCOMPARE(points.back(), QPointF(3.0, 30.0));
-    QVERIFY(session.sampledRange("missing", 0.0, 1.0, 10).isEmpty());
-    QVERIFY(session.sampledRange("speed", 0.0, 1.0, 1).isEmpty());
+    const QVector<QVector<QPointF>> segments = session.sampledSegments("speed", 1.0, 3.0, 5);
+    QCOMPARE(segments.size(), 1);
+    QCOMPARE(segments.front(), QVector<QPointF>({QPointF(1.0, 10.0), QPointF(2.0, 20.0), QPointF(3.0, 30.0)}));
+    QVERIFY(session.sampledSegments("missing", 0.0, 1.0, 10).isEmpty());
+    QVERIFY(session.sampledSegments("speed", 0.0, 1.0, 1).isEmpty());
+
+    TelemetrySession extrema;
+    TelemetryChannel signal;
+    signal.name = QStringLiteral("rpm");
+    for (int index = 0; index < 1000; ++index) {
+        signal.timestamps.append(index / 100.0);
+        signal.values.append(index == 513 ? 9000.0F : (index % 2 == 0 ? 1000.0F : 1001.0F));
+    }
+    extrema.channels.insert(signal.name, signal);
+    const QVector<QVector<QPointF>> reduced = extrema.sampledSegments("rpm", 0.0, 10.0, 20);
+    QCOMPARE(reduced.size(), 1);
+    qsizetype pointCount = 0;
+    bool retainedPeak = false;
+    for (const QPointF &point : reduced.front()) {
+        ++pointCount;
+        retainedPeak = retainedPeak || point.y() == 9000.0;
+    }
+    QVERIFY(pointCount <= 40);
+    QVERIFY(retainedPeak);
+
+    TelemetrySession flat;
+    TelemetryChannel flatSignal;
+    flatSignal.name = QStringLiteral("flat");
+    for (int index = 0; index < 100; ++index) {
+        flatSignal.timestamps.append(index / 10.0);
+        flatSignal.values.append(42.0F);
+    }
+    flat.channels.insert(flatSignal.name, flatSignal);
+    const QVector<QVector<QPointF>> flatReduced = flat.sampledSegments("flat", 0.0, 10.0, 10);
+    QCOMPARE(flatReduced.size(), 1);
+    QVERIFY(flatReduced.front().size() <= 20);
+    QVERIFY(std::all_of(flatReduced.front().cbegin(), flatReduced.front().cend(), [](const QPointF &point) {
+        return point.y() == 42.0;
+    }));
+
+    TelemetrySession timestampGap;
+    TelemetryChannel gapped;
+    gapped.name = QStringLiteral("brake");
+    gapped.timestamps = {0.0, 0.1, 0.2, 2.0, 2.1, 2.2};
+    gapped.values = {0.0F, 10.0F, 20.0F, 80.0F, 90.0F, 100.0F};
+    timestampGap.channels.insert(gapped.name, gapped);
+    timestampGap.aliases.insert(gapped.name, gapped.name);
+    const QVector<QVector<QPointF>> separated = timestampGap.sampledSegments("brake", 0.0, 2.2, 20);
+    QCOMPARE(separated.size(), 2);
+    QCOMPARE(separated.front().back(), QPointF(0.2, 20.0));
+    QCOMPARE(separated.back().front(), QPointF(2.0, 80.0));
+
+    TelemetryRenderContext presentation;
+    presentation.setSession(&timestampGap);
+    presentation.setTime(0.5);
+    QVERIFY(presentation.telemetryValue("brake").isValid());
+    presentation.setTime(1.0);
+    QVERIFY(!presentation.telemetryValue("brake").isValid());
+
+    const QVector<QVector<QPointF>> shortRange = extrema.sampledSegments("rpm", 5.13, 5.13, 2);
+    QCOMPARE(shortRange.size(), 1);
+    QCOMPARE(shortRange.front(), QVector<QPointF>({QPointF(5.13, 9000.0)}));
 }
 
 void TelemetryTests::parsesTextFirstVboTimeFormats()

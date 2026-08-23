@@ -5,6 +5,20 @@
 
 namespace FlappedEar {
 
+double telemetryGapThreshold(const TelemetryChannel &channel, const double minimumSeconds)
+{
+    QVector<double> intervals;
+    intervals.reserve(std::max<qsizetype>(0, channel.timestamps.size() - 1));
+    for (qsizetype index = 1; index < channel.timestamps.size(); ++index) {
+        const double interval = channel.timestamps[index] - channel.timestamps[index - 1];
+        if (std::isfinite(interval) && interval > 0.0) intervals.append(interval);
+    }
+    if (intervals.isEmpty()) return std::max(0.0, minimumSeconds);
+    const auto middle = intervals.begin() + intervals.size() / 2;
+    std::nth_element(intervals.begin(), middle, intervals.end());
+    return std::max(std::max(0.0, minimumSeconds), *middle * 3.0);
+}
+
 std::optional<double> TelemetrySession::valueAt(
     const QString &channelName,
     const double time,
@@ -67,7 +81,7 @@ QStringList TelemetrySession::channelNames() const
     return names;
 }
 
-QVector<QPointF> TelemetrySession::sampledRange(
+QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
     const QString &channelName,
     double rangeStart,
     double rangeEnd,
@@ -79,19 +93,125 @@ QVector<QPointF> TelemetrySession::sampledRange(
     if (rangeStart > rangeEnd) {
         std::swap(rangeStart, rangeEnd);
     }
-    const int count = std::max(2, maximumPoints);
-    const double span = rangeEnd - rangeStart;
-    QVector<QPointF> result;
-    result.reserve(count);
-    for (int index = 0; index < count; ++index) {
-        const double ratio = static_cast<double>(index) / static_cast<double>(count - 1);
-        const double timestamp = rangeStart + span * ratio;
-        const auto value = valueAt(channelName, timestamp);
-        if (value && std::isfinite(*value)) {
-            result.append(QPointF(timestamp, *value));
-        }
+    const QString resolved = aliases.value(channelName, channelName);
+    const auto channelIterator = channels.constFind(resolved);
+    if (channelIterator == channels.cend()) {
+        return {};
     }
-    return result;
+    const TelemetryChannel &channel = channelIterator.value();
+    if (channel.timestamps.size() != channel.values.size() || channel.timestamps.isEmpty()) {
+        return {};
+    }
+
+    QVector<QVector<QPointF>> rawSegments;
+    QVector<QPointF> current;
+    const double gapThreshold = telemetryGapThreshold(channel);
+    for (qsizetype index = 0; index < channel.timestamps.size(); ++index) {
+        const double timestamp = channel.timestamps[index];
+        const double value = channel.values[index];
+        if (!std::isfinite(timestamp) || timestamp < rangeStart || timestamp > rangeEnd) {
+            continue;
+        }
+        if (!std::isfinite(value)) {
+            if (!current.isEmpty()) {
+                rawSegments.append(std::move(current));
+                current.clear();
+            }
+            continue;
+        }
+        if (!current.isEmpty() && gapThreshold > 0.0
+            && timestamp - current.back().x() > gapThreshold) {
+            rawSegments.append(std::move(current));
+            current.clear();
+        }
+        current.append(QPointF(timestamp, value));
+    }
+    if (!current.isEmpty()) {
+        rawSegments.append(std::move(current));
+    }
+    if (rawSegments.isEmpty()) {
+        return {};
+    }
+
+    const double span = rangeEnd - rangeStart;
+    if (span <= 0.0) {
+        return rawSegments;
+    }
+
+    QVector<QVector<QPointF>> result;
+    result.reserve(rawSegments.size());
+    for (const QVector<QPointF> &segment : rawSegments) {
+        QVector<QPointF> reduced;
+        int activeBucket = -1;
+        QPointF minimum;
+        QPointF maximum;
+        const auto flushBucket = [&reduced, &minimum, &maximum, &activeBucket]() {
+            if (activeBucket < 0) return;
+            if (minimum.x() <= maximum.x()) {
+                reduced.append(minimum);
+                if (maximum != minimum) reduced.append(maximum);
+            } else {
+                reduced.append(maximum);
+                reduced.append(minimum);
+            }
+        };
+        for (const QPointF &point : segment) {
+            const int bucket = std::clamp(
+                static_cast<int>((point.x() - rangeStart) / span * maximumPoints),
+                0, maximumPoints - 1);
+            if (bucket != activeBucket) {
+                flushBucket();
+                activeBucket = bucket;
+                minimum = point;
+                maximum = point;
+            } else {
+                if (point.y() < minimum.y()) minimum = point;
+                if (point.y() > maximum.y()) maximum = point;
+            }
+        }
+        flushBucket();
+        if (!reduced.isEmpty()) result.append(std::move(reduced));
+    }
+    qsizetype totalPoints = 0;
+    for (const QVector<QPointF> &segment : result) totalPoints += segment.size();
+    const qsizetype pointLimit = static_cast<qsizetype>(maximumPoints) * 2;
+    if (totalPoints <= pointLimit) return result;
+
+    struct Candidate {
+        qsizetype segment;
+        QPointF point;
+    };
+    QVector<Candidate> candidates;
+    candidates.reserve(totalPoints);
+    for (qsizetype segmentIndex = 0; segmentIndex < result.size(); ++segmentIndex) {
+        for (const QPointF &point : result[segmentIndex]) candidates.append({segmentIndex, point});
+    }
+    QVector<bool> selected(candidates.size(), false);
+    qsizetype minimumIndex = 0;
+    qsizetype maximumIndex = 0;
+    for (qsizetype index = 1; index < candidates.size(); ++index) {
+        if (candidates[index].point.y() < candidates[minimumIndex].point.y()) minimumIndex = index;
+        if (candidates[index].point.y() > candidates[maximumIndex].point.y()) maximumIndex = index;
+    }
+    selected[minimumIndex] = true;
+    selected[maximumIndex] = true;
+    const qsizetype uniformBudget = std::max<qsizetype>(1, pointLimit - 2);
+    for (qsizetype slot = 0; slot < uniformBudget; ++slot) {
+        const qsizetype index = uniformBudget == 1
+            ? 0
+            : slot * (candidates.size() - 1) / (uniformBudget - 1);
+        selected[index] = true;
+    }
+    QVector<QVector<QPointF>> bounded;
+    qsizetype previousSegment = -1;
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        if (!selected[index]) continue;
+        if (bounded.isEmpty() || candidates[index].segment != previousSegment)
+            bounded.append(QVector<QPointF>{});
+        bounded.back().append(candidates[index].point);
+        previousSegment = candidates[index].segment;
+    }
+    return bounded;
 }
 
 double videoToTelemetryTime(const double videoTime, const SyncTransform &transform)

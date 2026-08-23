@@ -43,8 +43,10 @@ Item {
         radius: 2 * frame.sceneScale
         color: "#24303d"
         Rectangle {
-            property real value: Number(frame.adjusted(frame.raw("source", "speed")) || 0)
-            width: parent.width * Math.max(0, Math.min(1, (value - Number(frame.widgetSettings.minValue ?? 0)) / Math.max(1, Number(frame.widgetSettings.maxValue ?? 300) - Number(frame.widgetSettings.minValue ?? 0))))
+            property var rawValue: frame.adjusted(frame.raw("source", "speed"))
+            property bool hasValue: rawValue !== undefined && rawValue !== null && Number.isFinite(Number(rawValue))
+            property real value: hasValue ? Number(rawValue) : Number(frame.widgetSettings.minValue ?? 0)
+            width: hasValue ? parent.width * Math.max(0, Math.min(1, (value - Number(frame.widgetSettings.minValue ?? 0)) / Math.max(1, Number(frame.widgetSettings.maxValue ?? 300) - Number(frame.widgetSettings.minValue ?? 0)))) : 0
             height: parent.height
             radius: 2 * frame.sceneScale
             color: frame.accent

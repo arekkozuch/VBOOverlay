@@ -31,7 +31,30 @@ The parser may retain non-finite numeric values internally as placeholders so ch
 
 For example, with samples `0 s = 10`, `1 s = missing`, and `2 s = 30`, a lookup at `1 s` is no data in every mode. A linear lookup at `0.5 s` and `1.5 s` is also no data because one adjacent endpoint is missing.
 
-This is intentional: visible missing telemetry is safer than fabricated or stale telemetry.
+Missing telemetry is not numeric zero. A finite zero remains a valid measurement, while widgets expose unavailable or stale values as no data (`—`). Geometry may use an internal minimum/zero fallback only when a separate validity flag prevents that fallback from being presented as measured telemetry.
+
+## Overlay presentation
+
+Preview and export share `TelemetryRenderContext`, which applies presentation filtering without modifying `TelemetrySession` or its raw lookup API. Ordinary finite samples are timestamp-interpolated (gear uses previous-value semantics). A missing value or the end of a channel may hold the most recent finite value for a bounded stale interval: 750 ms for ordinary channels and 2 seconds for heart rate. After that, the value is no data.
+
+Light, recency-weighted trailing smoothing uses finite values only, with older samples contributing progressively less. The centralized starting windows are:
+
+- speed and RPM: 150 ms;
+- lateral/longitudinal G-force: 200 ms;
+- throttle and brake: 100 ms;
+- heart rate: 250 ms;
+- other continuous channels: 150 ms;
+- gear: no smoothing.
+
+These short windows reduce frame-to-frame jitter without delaying pedal events with a large average. Missing channels remain unavailable; in particular, absent G-force channels hide the moving dot instead of placing it at fake `0 g`.
+
+For a finite timestamp jump, three times the channel's median positive sample interval defines the normal-cadence tolerance. Overlay presentation uses the larger of that tolerance and its stale interval. Across a larger jump it stops interpolation, briefly holds the preceding value, then becomes stale. This distinguishes ordinary sparse sampling from a real gap deterministically.
+
+## Analysis ranges
+
+Analysis reads actual raw channel samples, not presentation-filtered values. Non-finite values start a new segment. A timestamp jump greater than three times the median positive channel interval also starts a new segment, so the renderer issues a new path rather than drawing across a real gap.
+
+Display decimation divides the requested range into time buckets and retains each bucket's minimum and maximum in timestamp order. This preserves short braking, RPM, throttle, and acceleration extrema where practical. Returned data is bounded to at most twice the requested bucket count; pathological high-gap input may omit some runs to respect that bound, but retained runs are still separate and never connected across a gap. Analysis never inserts zero, interpolates a replacement sample, or applies overlay smoothing.
 
 ## GPS tracks
 

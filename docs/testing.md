@@ -24,7 +24,8 @@ Private VBO and GoPro media are ignored by Git and must remain local. A VBO-only
 ## Current test coverage
 
 - VBO parsing, deterministic mid-parse cancellation, file/line/row/column/field limits, malformed input, text time formats, monotonic/rollover behavior, coordinate conversion, and optional real VBO parsing.
-- Missing-data lookup semantics and sampled telemetry ranges.
+- Missing-versus-zero raw and overlay presentation semantics, bounded stale holding, and channel availability.
+- Segmented raw analysis ranges, cadence-relative timestamp gaps, and bounded min/max decimation that retains short peaks.
 - Deterministic, ambiguous, and cooperatively cancelled GPS-speed synchronization, plus optional real GoPro/VBO synchronization.
 - GPS9 GPMF decoding, malformed packet extents, container-depth and record-count limits, and deterministic sorting/deduplication of timestamps.
 - A portable native fake ffprobe covers prompt cancellation/reaping and bounded stdout without shell dependencies or long real inputs.

@@ -176,8 +176,8 @@ Rectangle {
                                             context.lineTo(x, height);
                                             context.stroke();
                                         }
-                                        const points = plotSeries.points || [];
-                                        if (points.length < 2)
+                                        const segments = plotSeries.segments || [];
+                                        if (segments.length === 0)
                                             return;
                                         const low = Number(plotSeries.minimum || 0);
                                         const high = Number(plotSeries.maximum || 0);
@@ -185,16 +185,21 @@ Rectangle {
                                         context.strokeStyle = chartRow.lineColor;
                                         context.lineWidth = 1.6;
                                         context.lineJoin = "round";
-                                        context.beginPath();
-                                        for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
-                                            const x = Number(points[pointIndex].x) * width;
-                                            const y = height - 3 - (Number(points[pointIndex].y) - low) / span * Math.max(1, height - 6);
-                                            if (pointIndex === 0)
-                                                context.moveTo(x, y);
-                                            else
-                                                context.lineTo(x, y);
+                                        for (let segmentIndex = 0; segmentIndex < segments.length; ++segmentIndex) {
+                                            const points = segments[segmentIndex];
+                                            if (points.length === 0)
+                                                continue;
+                                            context.beginPath();
+                                            for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
+                                                const x = Number(points[pointIndex].x) * width;
+                                                const y = height - 3 - (Number(points[pointIndex].y) - low) / span * Math.max(1, height - 6);
+                                                if (pointIndex === 0)
+                                                    context.moveTo(x, y);
+                                                else
+                                                    context.lineTo(x, y);
+                                            }
+                                            context.stroke();
                                         }
-                                        context.stroke();
                                     }
                                 }
                                 Rectangle {

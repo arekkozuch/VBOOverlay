@@ -605,30 +605,37 @@ QVariantMap AppController::telemetrySeries(
     }
     const double telemetryStart = videoToTelemetryTime(videoStart, m_sync);
     const double telemetryEnd = videoToTelemetryTime(videoEnd, m_sync);
-    const QVector<QPointF> samples = m_session->sampledRange(
+    const QVector<QVector<QPointF>> sampledSegments = m_session->sampledSegments(
         channelName, telemetryStart, telemetryEnd, qBound(2, maximumPoints, 2000));
-    if (samples.isEmpty()) {
+    if (sampledSegments.isEmpty()) {
         return {};
     }
-    double minimum = samples.front().y();
+    double minimum = sampledSegments.front().front().y();
     double maximum = minimum;
-    for (const QPointF &sample : samples) {
-        minimum = std::min(minimum, sample.y());
-        maximum = std::max(maximum, sample.y());
+    for (const QVector<QPointF> &segment : sampledSegments) {
+        for (const QPointF &sample : segment) {
+            minimum = std::min(minimum, sample.y());
+            maximum = std::max(maximum, sample.y());
+        }
     }
     const double telemetrySpan = telemetryEnd - telemetryStart;
-    QVariantList points;
-    points.reserve(samples.size());
-    for (const QPointF &sample : samples) {
-        const double normalizedTime = telemetrySpan == 0.0
-            ? 0.0
-            : (sample.x() - telemetryStart) / telemetrySpan;
-        points.append(QVariantMap{{"x", normalizedTime}, {"y", sample.y()}});
+    QVariantList segments;
+    segments.reserve(sampledSegments.size());
+    for (const QVector<QPointF> &sampledSegment : sampledSegments) {
+        QVariantList points;
+        points.reserve(sampledSegment.size());
+        for (const QPointF &sample : sampledSegment) {
+            const double normalizedTime = telemetrySpan == 0.0
+                ? 0.0
+                : (sample.x() - telemetryStart) / telemetrySpan;
+            points.append(QVariantMap{{"x", normalizedTime}, {"y", sample.y()}});
+        }
+        segments.append(points);
     }
     const QString resolved = m_session->aliases.value(channelName, channelName);
     const auto channel = m_session->channels.constFind(resolved);
     return {
-        {"points", points},
+        {"segments", segments},
         {"minimum", minimum},
         {"maximum", maximum},
         {"unit", channel == m_session->channels.cend() ? QString() : channel->unit},

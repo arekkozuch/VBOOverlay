@@ -6,7 +6,9 @@ Item {
     property var frame: parent.frame
     anchors.fill: parent
     property var gaugeRaw: frame.raw("source", "speed")
-    property real gaugeValue: Number(frame.adjusted(gaugeRaw) || 0)
+    property var adjustedValue: frame.adjusted(gaugeRaw)
+    property bool hasValue: adjustedValue !== undefined && adjustedValue !== null && Number.isFinite(Number(adjustedValue))
+    property real gaugeValue: hasValue ? Number(adjustedValue) : minimum
     property real minimum: Number(frame.widgetSettings.minValue ?? 0)
     property real maximum: Math.max(minimum + 0.001, Number(frame.widgetSettings.maxValue ?? 300))
     property real progress: Math.max(0, Math.min(1, (gaugeValue - minimum) / (maximum - minimum)))
@@ -14,10 +16,12 @@ Item {
         id: arcCanvas
         anchors.fill: parent
         property real progress: parent.progress
+        property bool hasValue: parent.hasValue
         property real startAngle: Number(frame.widgetSettings.startAngle ?? 155)
         property real endAngle: Number(frame.widgetSettings.endAngle ?? 385)
         property real arcWidth: Number(frame.widgetSettings.arcWidth ?? 12) * frame.sceneScale
         onProgressChanged: requestPaint()
+        onHasValueChanged: requestPaint()
         onStartAngleChanged: requestPaint()
         onEndAngleChanged: requestPaint()
         onArcWidthChanged: requestPaint()
@@ -35,10 +39,12 @@ Item {
             context.beginPath();
             context.arc(centerX, centerY, radius, start, end, false);
             context.stroke();
-            context.strokeStyle = frame.accent;
-            context.beginPath();
-            context.arc(centerX, centerY, radius, start, start + (end - start) * progress, false);
-            context.stroke();
+            if (hasValue) {
+                context.strokeStyle = frame.accent;
+                context.beginPath();
+                context.arc(centerX, centerY, radius, start, start + (end - start) * progress, false);
+                context.stroke();
+            }
         }
     }
     Column {

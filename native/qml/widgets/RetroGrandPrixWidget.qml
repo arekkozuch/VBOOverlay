@@ -9,16 +9,26 @@ Item {
     property var speedRaw: frame.raw("speedSource", "speed")
     property bool hasRpm: rpmRaw !== undefined && rpmRaw !== null && Number.isFinite(Number(rpmRaw))
     property bool hasSpeed: speedRaw !== undefined && speedRaw !== null && Number.isFinite(Number(speedRaw))
+    property var gearRaw: frame.raw("gearSource", "gear")
+    property var throttleRaw: frame.raw("throttleSource", "throttle")
+    property var brakeRaw: frame.raw("brakeSource", "brake")
+    property bool hasGear: gearRaw !== undefined && gearRaw !== null && Number.isFinite(Number(gearRaw))
+    property bool hasThrottle: throttleRaw !== undefined && throttleRaw !== null && Number.isFinite(Number(throttleRaw))
+    property bool hasBrake: brakeRaw !== undefined && brakeRaw !== null && Number.isFinite(Number(brakeRaw))
     property real rpmValue: hasRpm ? Number(rpmRaw) : 0
     property real speedValue: hasSpeed ? Number(speedRaw) : 0
-    property real gearValue: Number(frame.raw("gearSource", "gear"))
-    property real throttleValue: Number(frame.raw("throttleSource", "throttle") || 0)
-    property real brakeValue: Number(frame.raw("brakeSource", "brake") || 0)
+    property real gearValue: hasGear ? Number(gearRaw) : 0
+    property real throttleValue: hasThrottle ? Number(throttleRaw) : 0
+    property real brakeValue: hasBrake ? Number(brakeRaw) : 0
     property var timingValue: frame.raw("timingSource", "")
     Canvas {
         id: retroCanvas
         anchors.fill: parent
         property bool hasSpeed: parent.hasSpeed
+        property bool hasRpm: parent.hasRpm
+        property bool hasGear: parent.hasGear
+        property bool hasThrottle: parent.hasThrottle
+        property bool hasBrake: parent.hasBrake
         property real rpmValue: parent.rpmValue
         property real speedValue: parent.speedValue
         property real gearValue: parent.gearValue
@@ -26,6 +36,10 @@ Item {
         property real brakeValue: parent.brakeValue
         property var timingValue: parent.timingValue
         onHasSpeedChanged: requestPaint()
+        onHasRpmChanged: requestPaint()
+        onHasGearChanged: requestPaint()
+        onHasThrottleChanged: requestPaint()
+        onHasBrakeChanged: requestPaint()
         onRpmValueChanged: requestPaint()
         onSpeedValueChanged: requestPaint()
         onGearValueChanged: requestPaint()
@@ -76,17 +90,19 @@ Item {
                 const label = Math.round((rpmMin + (rpmMax - rpmMin) * step / rpmSteps) / 1000);
                 ctx.fillText(String(label), 160 + Math.cos(angle) * 125, 142 + Math.sin(angle) * 125);
             }
-            const needleAngle = Math.PI * 0.5 + Math.PI * 1.5 * rpmProgress;
-            ctx.strokeStyle = settings.needleColor || "#d73737";
-            ctx.lineWidth = 5;
-            ctx.beginPath();
-            ctx.moveTo(160 - Math.cos(needleAngle) * 15, 142 - Math.sin(needleAngle) * 15);
-            ctx.lineTo(160 + Math.cos(needleAngle) * 86, 142 + Math.sin(needleAngle) * 86);
-            ctx.stroke();
-            ctx.fillStyle = white;
-            ctx.beginPath();
-            ctx.arc(160, 142, 12, 0, Math.PI * 2);
-            ctx.fill();
+            if (hasRpm) {
+                const needleAngle = Math.PI * 0.5 + Math.PI * 1.5 * rpmProgress;
+                ctx.strokeStyle = settings.needleColor || "#d73737";
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.moveTo(160 - Math.cos(needleAngle) * 15, 142 - Math.sin(needleAngle) * 15);
+                ctx.lineTo(160 + Math.cos(needleAngle) * 86, 142 + Math.sin(needleAngle) * 86);
+                ctx.stroke();
+                ctx.fillStyle = white;
+                ctx.beginPath();
+                ctx.arc(160, 142, 12, 0, Math.PI * 2);
+                ctx.fill();
+            }
 
             // Gear and pedal-state stack.
             const boxX = 212;
@@ -97,22 +113,22 @@ Item {
             ctx.fillRect(boxX, 143, boxW, boxH);
             ctx.fillStyle = "#111111";
             ctx.font = "700 20px " + family;
-            const gear = Number.isFinite(gearValue) ? Math.round(gearValue).toString() : "—";
+            const gear = hasGear ? Math.round(gearValue).toString() : "—";
             ctx.fillText((settings.gearLabel || "Gear") + "  " + gear, boxX + boxW / 2, 160);
             const throttleProgress = Math.max(0, Math.min(1, throttleValue / 100));
-            ctx.globalAlpha = 0.45 + throttleProgress * 0.55;
-            ctx.fillStyle = settings.throttleColor || "#00c839";
+            ctx.globalAlpha = hasThrottle ? 0.45 + throttleProgress * 0.55 : 0.35;
+            ctx.fillStyle = hasThrottle ? (settings.throttleColor || "#00c839") : "#575f68";
             ctx.fillRect(boxX, 177, boxW, boxH);
             ctx.globalAlpha = 1;
             ctx.fillStyle = white;
-            ctx.fillText(settings.throttleLabel || "Throttle", boxX + boxW / 2, 194);
+            ctx.fillText((settings.throttleLabel || "Throttle") + (hasThrottle ? "" : "  —"), boxX + boxW / 2, 194);
             const brakeProgress = Math.max(0, Math.min(1, brakeValue / 100));
-            ctx.globalAlpha = 0.5 + brakeProgress * 0.5;
-            ctx.fillStyle = brakeProgress > 0.03 ? (settings.brakeActiveColor || "#d23737") : (settings.brakeColor || "#575244");
+            ctx.globalAlpha = hasBrake ? 0.5 + brakeProgress * 0.5 : 0.35;
+            ctx.fillStyle = !hasBrake ? "#575f68" : (brakeProgress > 0.03 ? (settings.brakeActiveColor || "#d23737") : (settings.brakeColor || "#575244"));
             ctx.fillRect(boxX, 211, boxW, boxH);
             ctx.globalAlpha = 1;
             ctx.fillStyle = white;
-            ctx.fillText(settings.brakeLabel || "Brake", boxX + boxW / 2, 228);
+            ctx.fillText((settings.brakeLabel || "Brake") + (hasBrake ? "" : "  —"), boxX + boxW / 2, 228);
 
             // Segmented speed arc.
             const speedMax = Math.max(1, Number(settings.speedMax ?? 360));

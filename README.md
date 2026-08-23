@@ -49,7 +49,7 @@ Module details are in [docs/architecture.md](docs/architecture.md). The project 
 
 ## Telemetry semantics
 
-Telemetry has strict no-data semantics: public lookup never returns `NaN` or infinity, and it does not bridge missing samples or values outside a channel's range. See [docs/telemetry-semantics.md](docs/telemetry-semantics.md).
+Telemetry has strict no-data semantics: missing is distinct from a measured numeric zero, public raw lookup never returns `NaN` or infinity, and raw analysis does not bridge missing samples or real timestamp gaps. Preview/export overlays use a separate bounded hold and lightweight smoothing policy to remain stable between ordinary samples without changing raw telemetry. See [docs/telemetry-semantics.md](docs/telemetry-semantics.md).
 
 ## Export
 

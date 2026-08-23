@@ -51,7 +51,7 @@ Each source operation begins a new source generation and uses normalized source 
 
 `VboParser` performs bounded chunked file reads, reads VBO sections, resolves standard channel aliases, normalizes supported coordinate formats, and produces a `TelemetrySession`. It rejects files above 128 MiB, more than 1,000,000 lines or 500,000 data rows, more than 512 columns, lines above 1 MiB, and fields above 64 KiB before the corresponding unbounded work. These limits leave substantial headroom over the validated 32,718-row, 49-channel fixture while preventing multi-GiB allocation patterns. `TelemetrySession` performs time-based channel lookup and interpolation. `TrackGeometry` derives an offline normalized track outline from valid latitude/longitude samples.
 
-`TelemetryRenderContext` combines a session, optional track geometry, and the central `SyncTransform`. Its telemetry time is `videoTime * timeScale + offset`; preview and export both use this context. The full behavioral contract is in [telemetry-semantics.md](telemetry-semantics.md).
+`TelemetryRenderContext` combines a session, optional track geometry, and the central `SyncTransform`. Its telemetry time is `videoTime * timeScale + offset`; preview and export both use this context. It is also the presentation boundary: bounded holding and small channel-specific smoothing windows apply there only. `AppController` obtains analysis segments directly from raw `TelemetrySession` samples, so charts retain gaps and extrema and never inherit overlay filtering. The full behavioral contract is in [telemetry-semantics.md](telemetry-semantics.md).
 
 ## GoPro and synchronization
 

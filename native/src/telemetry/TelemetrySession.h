@@ -42,7 +42,10 @@ public:
         InterpolationMode mode = InterpolationMode::Linear) const;
 
     [[nodiscard]] QStringList channelNames() const;
-    [[nodiscard]] QVector<QPointF> sampledRange(
+    // Analysis uses actual samples, split at every missing value. Each time
+    // bucket contributes its ordered minimum/maximum, so the result is bounded
+    // to approximately twice maximumPoints while retaining short extrema.
+    [[nodiscard]] QVector<QVector<QPointF>> sampledSegments(
         const QString &channelName,
         double startTime,
         double endTime,
@@ -50,5 +53,7 @@ public:
 };
 
 [[nodiscard]] double videoToTelemetryTime(double videoTime, const SyncTransform &transform);
+[[nodiscard]] double telemetryGapThreshold(
+    const TelemetryChannel &channel, double minimumSeconds = 0.0);
 
 } // namespace FlappedEar
