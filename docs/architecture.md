@@ -45,17 +45,19 @@ Each project-load candidate also carries the document revision captured at load 
 
 Video metadata probing uses `MediaProbe`/`ffprobe`; VBO loading parses telemetry and builds `TrackGeometry`. The standalone loads and project-source loads run asynchronously.
 
-Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. Cancellation flags are passed to probe operations. At startup, sources are restored only as part of loading the authoritative saved project or an explicitly accepted recovery snapshot.
+Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. All long-running source work receives the same lightweight `CancellationCheck` callback and throws `OperationCancelled` on cancellation. VBO reads/parsing, media probes, GoPro packet indexing/reads/decoding, and both coarse and fine synchronization check it in bounded batches. Starting a replacement generation signals every previous source and sync token; destruction does the same before a bounded two-second convergence wait. Generation checks prevent stale commits while cancellation stops wasted work, so neither replaces the other. At startup, sources are restored only as part of loading the authoritative saved project or an explicitly accepted recovery snapshot.
 
 ## Telemetry
 
-`VboParser` reads VBO sections, resolves standard channel aliases, normalizes supported coordinate formats, and produces a `TelemetrySession`. `TelemetrySession` performs time-based channel lookup and interpolation. `TrackGeometry` derives an offline normalized track outline from valid latitude/longitude samples.
+`VboParser` performs bounded chunked file reads, reads VBO sections, resolves standard channel aliases, normalizes supported coordinate formats, and produces a `TelemetrySession`. It rejects files above 128 MiB, more than 1,000,000 lines or 500,000 data rows, more than 512 columns, lines above 1 MiB, and fields above 64 KiB before the corresponding unbounded work. These limits leave substantial headroom over the validated 32,718-row, 49-channel fixture while preventing multi-GiB allocation patterns. `TelemetrySession` performs time-based channel lookup and interpolation. `TrackGeometry` derives an offline normalized track outline from valid latitude/longitude samples.
 
 `TelemetryRenderContext` combines a session, optional track geometry, and the central `SyncTransform`. Its telemetry time is `videoTime * timeScale + offset`; preview and export both use this context. The full behavioral contract is in [telemetry-semantics.md](telemetry-semantics.md).
 
 ## GoPro and synchronization
 
-`GoProTelemetrySource` discovers the MP4 `gpmd` data stream with `ffprobe`, indexes packets, and decodes supported GPS5/GPS9 records into a telemetry session. `TelemetrySyncEngine` compares GoPro GPS speed with VBO speed and returns an offset/time-scale candidate with diagnostics and confidence. Async sync results are also generation and path checked before they can affect the controller.
+`GoProTelemetrySource` discovers the MP4 `gpmd` data stream with the authoritative `FfmpegTools::ffprobePath()`, indexes packets, and decodes supported GPS5/GPS9 records into a telemetry session. Its process runner polls without busy-waiting, enforces a 120-second timeout and 64 MiB stdout bound, and terminates/reaps ffprobe on cancellation or limit failure. Packet count is capped at 100,000, aggregate GPMF bytes at 512 MiB, decoded records at 250,000, and container depth at 32. Packet position/size is checked with subtraction-based file extents before allocation. Final GPS samples are stable-sorted by timestamp and later equal timestamps are discarded, preserving the first sample for each time; channels are then verified finite and strictly increasing before publication.
+
+`TelemetrySyncEngine` compares GoPro GPS speed with VBO speed and returns an offset/time-scale candidate with diagnostics and confidence. Cancellation is checked between offsets and in sampling/correlation batches, without changing the existing numerical algorithm. Async sync results are also generation and path checked before they can affect the controller.
 
 ## Widgets and QML
 

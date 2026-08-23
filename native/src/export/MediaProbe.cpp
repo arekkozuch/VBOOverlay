@@ -30,6 +30,16 @@ QString secondsText(const qint64 milliseconds)
     return QString::number(milliseconds / 1'000.0, 'f', milliseconds >= 1'000 ? 1 : 3);
 }
 
+void stopAndReap(QProcess &process)
+{
+    if (process.state() == QProcess::NotRunning) return;
+    process.terminate();
+    if (!process.waitForFinished(processShutdownTimeoutMilliseconds)) {
+        process.kill();
+        static_cast<void>(process.waitForFinished(processShutdownTimeoutMilliseconds));
+    }
+}
+
 double jsonNumber(const QJsonValue &value, const double fallback = 0.0)
 {
     if (value.isDouble()) {
@@ -84,12 +94,8 @@ MediaInfo runProbe(
     bool finished = false;
     while (!finished && elapsed.elapsed() < timeoutMilliseconds) {
         if (cancellationCallback && cancellationCallback()) {
-            process.terminate();
-            if (!process.waitForFinished(processShutdownTimeoutMilliseconds)) {
-                process.kill();
-                process.waitForFinished();
-            }
-            throw std::runtime_error(
+            stopAndReap(process);
+            throw OperationCancelled(
                 QStringLiteral("ffprobe cancelled while probing: %1").arg(path).toStdString());
         }
         const qint64 remaining = timeoutMilliseconds - elapsed.elapsed();
@@ -100,11 +106,7 @@ MediaInfo runProbe(
         }
     }
     if (!finished) {
-        process.terminate();
-        if (!process.waitForFinished(processShutdownTimeoutMilliseconds)) {
-            process.kill();
-            process.waitForFinished();
-        }
+        stopAndReap(process);
         const QByteArray stdoutOutput = process.readAllStandardOutput();
         const QByteArray stderrOutput = process.readAllStandardError();
         throw std::runtime_error(

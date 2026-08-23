@@ -26,11 +26,13 @@
 
 #include <QFile>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QProcess>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QUuid>
 #include <QtEndian>
 #include <QtTest>
@@ -54,6 +56,8 @@ private slots:
     void samplesTelemetryRanges();
     void parsesTextFirstVboTimeFormats();
     void keepsVboTimestampsStrictlyMonotonic();
+    void cancelsVboParsingDeterministically();
+    void enforcesVboResourceLimits();
     void convertsArcMinuteCoordinates();
     void parsesOptionalRealVbo();
     void persistsWidgetScenes();
@@ -66,7 +70,13 @@ private slots:
     void buildsTrackGeometry();
     void decodesGps9Gpmf();
     void rejectsMalformedGpmf();
+    void cancelsSlowGoProProbePromptly();
+    void boundsGoProProbeOutput();
+    void rejectsOutOfFileGpmfPackets();
+    void boundsGpmfDepthAndRecordCount();
+    void normalizesGpmfTimestamps();
     void synchronizesGpsSpeed();
+    void cancelsSynchronizationDeterministically();
     void reportsAmbiguousGpsSpeed();
     void gatesWeakSyncCandidates();
     void rendersTelemetryAtExplicitTime();
@@ -118,6 +128,8 @@ private slots:
     void gatesDirtyDestructiveActions();
     void resolvesDirtyDecisionsSafely();
     void retainsTelemetryAfterFailedAsyncLoad();
+    void replacesInFlightSourceLoad();
+    void shutsDownWithInFlightSourceLoad();
     void opensProjectsTransactionally();
     void restoresSavedProjectsAndPreservesUnknownFields();
     void recoversAndDiscardsSavedChanges();
@@ -694,6 +706,51 @@ void TelemetryTests::keepsVboTimestampsStrictlyMonotonic()
         QVERIFY(speed.timestamps[index] > speed.timestamps[index - 1]);
     }
     QVERIFY(guarded.warnings.size() >= 6);
+}
+
+void TelemetryTests::cancelsVboParsingDeterministically()
+{
+    QString text = QStringLiteral("[column names]\ntime speed\n[data]\n");
+    text.reserve(200'000);
+    for (int row = 0; row < 10'000; ++row) text += QStringLiteral("%1 %2\n").arg(row).arg(row % 200);
+    int checks = 0;
+    QVERIFY_THROWS_EXCEPTION(
+        OperationCancelled,
+        (void) VboParser::parse(text, [&checks] { return ++checks == 4; }));
+    QVERIFY(checks >= 4);
+}
+
+void TelemetryTests::enforcesVboResourceLimits()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile oversized(directory.filePath(QStringLiteral("oversized.vbo")));
+    QVERIFY(oversized.open(QIODevice::WriteOnly));
+    QVERIFY(oversized.resize(VboParser::kMaximumFileBytes + 1));
+    oversized.close();
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, (void) VboParser::parseFile(oversized.fileName()));
+
+    QStringList names;
+    QStringList values;
+    for (qsizetype column = 0; column <= VboParser::kMaximumColumns; ++column) {
+        names.append(QStringLiteral("c%1").arg(column));
+        values.append(QStringLiteral("1"));
+    }
+    QVERIFY_THROWS_EXCEPTION(
+        ResourceLimitError,
+        (void) VboParser::parse(QStringLiteral("[column names]\n%1\n[data]\n%2")
+                                    .arg(names.join(' '), values.join(' '))));
+
+    QString rows = QStringLiteral("[column names]\ntime speed\n[data]\n");
+    rows.reserve(static_cast<qsizetype>(VboParser::kMaximumDataRows) * 4);
+    for (qsizetype row = 0; row <= VboParser::kMaximumDataRows; ++row) rows += QStringLiteral("0 1\n");
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, (void) VboParser::parse(rows));
+
+    const QString longField(VboParser::kMaximumFieldCharacters + 1, QLatin1Char('1'));
+    QVERIFY_THROWS_EXCEPTION(
+        ResourceLimitError,
+        (void) VboParser::parse(
+            QStringLiteral("[column names]\ntime speed\n[data]\n0 %1").arg(longField)));
 }
 
 void TelemetryTests::convertsArcMinuteCoordinates()
@@ -1408,6 +1465,48 @@ void TelemetryTests::retainsTelemetryAfterFailedAsyncLoad()
     QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("error"));
     QCOMPARE(controller.telemetryName(), loadedName);
     QCOMPARE(controller.channelNames(), loadedChannels);
+}
+
+void TelemetryTests::replacesInFlightSourceLoad()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QString large = QStringLiteral("[column names]\ntime speed\n[data]\n");
+    large.reserve(4'000'000);
+    for (int row = 0; row < 250'000; ++row) large += QStringLiteral("%1 %2\n").arg(row).arg(row % 200);
+    const QString sourceA = directory.filePath(QStringLiteral("source-a.vbo"));
+    QVERIFY(writeBytes(sourceA, large.toUtf8()));
+
+    AppController controller;
+    controller.loadVbo(QUrl::fromLocalFile(sourceA));
+    controller.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.vboLoadState(), QStringLiteral("ready"), 10'000);
+    QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
+    QCOMPARE(controller.sampleCount(), 3);
+}
+
+void TelemetryTests::shutsDownWithInFlightSourceLoad()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QString large = QStringLiteral("[column names]\ntime speed\n[data]\n");
+    large.reserve(4'000'000);
+    for (int row = 0; row < 250'000; ++row) large += QStringLiteral("%1 %2\n").arg(row).arg(row % 200);
+    const QString source = directory.filePath(QStringLiteral("shutdown.vbo"));
+    QVERIFY(writeBytes(source, large.toUtf8()));
+    QElapsedTimer elapsed;
+    elapsed.start();
+    {
+        AppController controller;
+        controller.loadVbo(QUrl::fromLocalFile(source));
+    }
+    QVERIFY2(elapsed.elapsed() < 3'000, qPrintable(QString::number(elapsed.elapsed())));
 }
 
 void TelemetryTests::opensProjectsTransactionally()
@@ -2430,6 +2529,105 @@ void TelemetryTests::rejectsMalformedGpmf()
         (void) GoProTelemetrySource::decodeGpsPackets({{{"broken"}, 0.0, 1.0}}, 1.0));
 }
 
+void TelemetryTests::cancelsSlowGoProProbePromptly()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString media = directory.filePath(QStringLiteral("slow.mp4"));
+    QVERIFY(writeBytes(media, "media"));
+    std::atomic_bool cancelled = false;
+    std::thread canceller([&cancelled] {
+        QThread::msleep(150);
+        cancelled.store(true);
+    });
+    const auto join = qScopeGuard([&canceller] { canceller.join(); });
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QVERIFY_THROWS_EXCEPTION(
+        OperationCancelled,
+        (void) GoProTelemetrySource::load(
+            media, [&cancelled] { return cancelled.load(); }, QStringLiteral(PROBE_TEST_HELPER_PATH)));
+    QVERIFY2(elapsed.elapsed() < 3'000, qPrintable(QString::number(elapsed.elapsed())));
+}
+
+void TelemetryTests::boundsGoProProbeOutput()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString media = directory.filePath(QStringLiteral("large-output.mp4"));
+    QVERIFY(writeBytes(media, "media"));
+    try {
+        (void) GoProTelemetrySource::load(media, {}, QStringLiteral(PROBE_TEST_HELPER_PATH));
+        QFAIL("Expected ffprobe output to be rejected");
+    } catch (const ResourceLimitError &error) {
+        QVERIFY(QString::fromUtf8(error.what()).contains(QStringLiteral("ffprobe output")));
+    }
+}
+
+void TelemetryTests::rejectsOutOfFileGpmfPackets()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    for (const QString &name : {QStringLiteral("outside.mp4"), QStringLiteral("overflow.mp4")}) {
+        const QString media = directory.filePath(name);
+        QVERIFY(writeBytes(media, "tiny"));
+        try {
+            (void) GoProTelemetrySource::load(media, {}, QStringLiteral(PROBE_TEST_HELPER_PATH));
+            QFAIL("Expected malformed packet bounds to be rejected");
+        } catch (const std::runtime_error &error) {
+            QVERIFY(QString::fromUtf8(error.what()).contains(QStringLiteral("outside the media file")));
+        }
+    }
+}
+
+void TelemetryTests::boundsGpmfDepthAndRecordCount()
+{
+    QVector<GpmfPacket> tooManyPackets(GoProTelemetrySource::kMaximumPacketCount + 1);
+    QVERIFY_THROWS_EXCEPTION(
+        ResourceLimitError,
+        (void) GoProTelemetrySource::decodeGpsPackets(tooManyPackets, 1.0));
+
+    QByteArray nested = klvRecord("JUNK", 'c', 1, 1, QByteArray(1, 'x'));
+    for (int depth = 0; depth <= GoProTelemetrySource::kMaximumContainerDepth; ++depth) {
+        nested = klvRecord("DEVC", 0, 1, static_cast<quint16>(nested.size()), nested);
+    }
+    QVERIFY_THROWS_EXCEPTION(
+        ResourceLimitError,
+        (void) GoProTelemetrySource::decodeGpsPackets({{nested, 0.0, 1.0}}, 1.0));
+
+    QByteArray manyRecords;
+    manyRecords.reserve((GoProTelemetrySource::kMaximumRecordCount + 1) * 8);
+    const QByteArray emptyRecord = klvRecord("JUNK", 'c', 1, 0, {});
+    for (qsizetype index = 0; index <= GoProTelemetrySource::kMaximumRecordCount; ++index) {
+        manyRecords += emptyRecord;
+    }
+    QVERIFY_THROWS_EXCEPTION(
+        ResourceLimitError,
+        (void) GoProTelemetrySource::decodeGpsPackets({{manyRecords, 0.0, 1.0}}, 1.0));
+}
+
+void TelemetryTests::normalizesGpmfTimestamps()
+{
+    const auto packetAt = [](const double pts, const qint32 speed) {
+        QByteArray scale;
+        for (const qint32 value : {10000000, 10000000, 1000, 1000, 100, 1, 1000, 100, 1}) append32(scale, value);
+        QByteArray gps;
+        for (const qint32 value : {500000000, 190000000, 250000, speed, 130, 10000, 200000}) append32(gps, value);
+        append16(gps, 150);
+        append16(gps, 3);
+        QByteArray stream = klvRecord("SCAL", 'l', 4, 9, scale);
+        stream += klvRecord("GPS9", '?', 32, 1, gps);
+        const QByteArray streamRecord = klvRecord("STRM", 0, 1, stream.size(), stream);
+        return GpmfPacket{klvRecord("DEVC", 0, 1, streamRecord.size(), streamRecord), pts, 1.0};
+    };
+    const GoProTelemetryResult result = GoProTelemetrySource::decodeGpsPackets(
+        {packetAt(2.0, 1000), packetAt(1.0, 2000), packetAt(1.0, 3000)}, 3.0);
+    const TelemetryChannel speed = result.session.channels.value(QStringLiteral("GoPro GPS speed"));
+    QCOMPARE(speed.timestamps, QVector<double>({1.0, 2.0}));
+    QVERIFY(speed.timestamps[1] > speed.timestamps[0]);
+    QVERIFY(qAbs(speed.values[0] - 7.2F) < 0.001F);
+}
+
 void TelemetryTests::synchronizesGpsSpeed()
 {
     const TelemetrySession video = speedSession(0.0, 60.0, 0.0);
@@ -2438,6 +2636,18 @@ void TelemetryTests::synchronizesGpsSpeed()
     QVERIFY2(qAbs(candidate.offset - 3.2) <= 0.11, qPrintable(QString::number(candidate.offset)));
     QVERIFY(candidate.diagnostics.correlation > 0.99);
     QVERIFY(candidate.confidence > 0.7);
+}
+
+void TelemetryTests::cancelsSynchronizationDeterministically()
+{
+    const TelemetrySession video = speedSession(0.0, 600.0, 0.0);
+    const TelemetrySession telemetry = speedSession(0.0, 700.0, 3.2);
+    int checks = 0;
+    QVERIFY_THROWS_EXCEPTION(
+        OperationCancelled,
+        (void) TelemetrySyncEngine::synchronize(
+            video, telemetry, [&checks] { return ++checks == 20; }));
+    QVERIFY(checks >= 20);
 }
 
 void TelemetryTests::reportsAmbiguousGpsSpeed()

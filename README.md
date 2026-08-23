@@ -14,7 +14,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - A visual widget editor, projects, built-in layouts, and shareable templates.
 - Synchronized telemetry analysis, including charts and a track view.
 - CFR HEVC/AAC MP4 export at the effective rational export rate, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
-- Asynchronous video/VBO loading, transactional project loading, and stale asynchronous-result rejection.
+- Bounded, cooperatively cancellable video/VBO/GoPro loading and synchronization, transactional project loading, and stale asynchronous-result rejection.
 - Crash-safe export-output handling, atomic project saving, and explicit unsaved-change recovery.
 
 ## Requirements

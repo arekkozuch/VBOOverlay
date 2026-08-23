@@ -16,6 +16,8 @@ Clock timestamps can cross midnight once when a previous clock value is at or af
 
 Parser warnings are capped at 200 stored messages; additional warnings are summarized in one final message.
 
+VBO input is treated as untrusted. Parsing is cooperatively cancellable and rejects files above 128 MiB, more than 1,000,000 lines or 500,000 data rows, more than 512 columns, lines above 1 MiB, and fields above 64 KiB. Resource-limit failures and cancellation are distinct from invalid VBO syntax.
+
 ## Missing values and lookup
 
 The parser may retain non-finite numeric values internally as placeholders so channel rows remain aligned. The public `TelemetrySession::valueAt()` API never returns `NaN` or infinity: it returns no data instead.

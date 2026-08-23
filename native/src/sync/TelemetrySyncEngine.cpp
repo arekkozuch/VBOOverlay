@@ -48,7 +48,10 @@ std::optional<double> interpolate(const TelemetryChannel &signal, const double t
     return signal.values[low] + (signal.values[high] - signal.values[low]) * ratio;
 }
 
-double correlation(const QVector<double> &a, const QVector<double> &b)
+double correlation(
+    const QVector<double> &a,
+    const QVector<double> &b,
+    const CancellationCheck &cancelled)
 {
     if (a.size() < 2 || a.size() != b.size()) {
         return -1.0;
@@ -59,6 +62,7 @@ double correlation(const QVector<double> &a, const QVector<double> &b)
     double varianceA = 0.0;
     double varianceB = 0.0;
     for (qsizetype index = 0; index < a.size(); ++index) {
+        if ((index & 0xfff) == 0) throwIfCancelled(cancelled);
         const double da = a[index] - meanA;
         const double db = b[index] - meanB;
         numerator += da * db;
@@ -75,7 +79,8 @@ SyncCandidate calculate(
     const TelemetryChannel &telemetry,
     const double searchWindow,
     const double sampleRate,
-    const double centerOffset)
+    const double centerOffset,
+    const CancellationCheck &cancelled)
 {
     if (video.values.size() < 20 || telemetry.values.size() < 20) {
         throw std::runtime_error("Insufficient usable GPS speed samples for synchronization.");
@@ -85,9 +90,12 @@ SyncCandidate calculate(
     for (double offset = centerOffset - searchWindow;
          offset <= centerOffset + searchWindow + step / 2.0;
          offset += step) {
+        throwIfCancelled(cancelled);
         QVector<double> a;
         QVector<double> b;
+        qsizetype sampleIndex = 0;
         for (double time = video.timestamps.constFirst(); time <= video.timestamps.constLast(); time += step) {
+            if ((sampleIndex++ & 0xff) == 0) throwIfCancelled(cancelled);
             const auto av = interpolate(video, time);
             const auto bv = interpolate(telemetry, time + offset);
             if (av && bv && std::isfinite(*av) && std::isfinite(*bv)) {
@@ -95,8 +103,9 @@ SyncCandidate calculate(
                 b.append(*bv);
             }
         }
-        results.append({offset, correlation(a, b), static_cast<int>(a.size())});
+        results.append({offset, correlation(a, b, cancelled), static_cast<int>(a.size())});
     }
+    throwIfCancelled(cancelled);
     std::sort(results.begin(), results.end(), [](const Result &left, const Result &right) {
         return left.score > right.score;
     });
@@ -124,8 +133,10 @@ SyncCandidate calculate(
 
 SyncCandidate TelemetrySyncEngine::synchronize(
     const TelemetrySession &video,
-    const TelemetrySession &telemetry)
+    const TelemetrySession &telemetry,
+    const CancellationCheck &cancelled)
 {
+    throwIfCancelled(cancelled);
     const auto videoIt = video.channels.constFind(video.aliases.value("speed"));
     const auto telemetryIt = telemetry.channels.constFind(telemetry.aliases.value("speed"));
     if (videoIt == video.channels.cend() || telemetryIt == telemetry.channels.cend()) {
@@ -141,8 +152,9 @@ SyncCandidate TelemetrySyncEngine::synchronize(
     }
     const double center = (minimum + maximum) / 2.0;
     const double window = std::max(1.0, (maximum - minimum) / 2.0);
-    const SyncCandidate coarse = calculate(videoSpeed, telemetrySpeed, window, 1.0, center);
-    SyncCandidate fine = calculate(videoSpeed, telemetrySpeed, 5.0, 10.0, coarse.offset);
+    const SyncCandidate coarse = calculate(videoSpeed, telemetrySpeed, window, 1.0, center, cancelled);
+    SyncCandidate fine = calculate(videoSpeed, telemetrySpeed, 5.0, 10.0, coarse.offset, cancelled);
+    throwIfCancelled(cancelled);
     fine.diagnostics.coarseOffset = coarse.offset;
     return fine;
 }

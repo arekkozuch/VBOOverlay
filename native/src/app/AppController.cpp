@@ -22,6 +22,8 @@
 #include <QStandardPaths>
 #include <QScopedValueRollback>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QtConcurrent>
 #include <QtGlobal>
 #include <algorithm>
@@ -56,6 +58,11 @@ AppController::AppController(QObject *parent, QString recoveryPath)
             return;
         }
         if (!result.success) {
+            if (result.cancelled) {
+                AppLog::warn(QStringLiteral("Auto-sync cancelled"));
+                setStatus(QStringLiteral("Auto sync cancelled."));
+                return;
+            }
             AppLog::error(QStringLiteral("Auto-sync failed: %1").arg(result.error));
             m_syncCandidate.clear();
             emit syncCandidateChanged();
@@ -102,6 +109,12 @@ AppController::AppController(QObject *parent, QString recoveryPath)
             return;
         }
         if (!result.success) {
+            if (result.cancelled) {
+                AppLog::warn(QStringLiteral("Video probe cancelled: %1").arg(result.path));
+                m_videoLoadState = QStringLiteral("idle");
+                emit sourceLoadStateChanged();
+                return;
+            }
             AppLog::error(QStringLiteral("Video load failed: %1: %2").arg(result.path, result.error));
             m_videoLoadState = QStringLiteral("error");
             emit sourceLoadStateChanged();
@@ -117,6 +130,12 @@ AppController::AppController(QObject *parent, QString recoveryPath)
             return;
         }
         if (!result.success) {
+            if (result.cancelled) {
+                AppLog::warn(QStringLiteral("VBO load cancelled: %1").arg(result.path));
+                m_vboLoadState = QStringLiteral("idle");
+                emit sourceLoadStateChanged();
+                return;
+            }
             AppLog::error(QStringLiteral("VBO load failed: %1: %2").arg(result.path, result.error));
             m_vboLoadState = QStringLiteral("error");
             emit sourceLoadStateChanged();
@@ -133,6 +152,12 @@ AppController::AppController(QObject *parent, QString recoveryPath)
             return;
         }
         if (!result.success) {
+            if (result.cancelled) {
+                AppLog::warn(QStringLiteral("Project source load cancelled: %1")
+                                 .arg(result.projectPath));
+                setProjectLoadState(false);
+                return;
+            }
             AppLog::error(QStringLiteral("Project load failed: %1: %2")
                               .arg(result.projectPath, result.error));
             setProjectLoadState(false, {}, result.error);
@@ -154,6 +179,18 @@ AppController::AppController(QObject *parent, QString recoveryPath)
 
 AppController::~AppController()
 {
+    cancelSourceJobs();
+    QElapsedTimer sourceShutdown;
+    sourceShutdown.start();
+    while (sourceShutdown.elapsed() < 2'000
+           && (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
+               || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning())) {
+        QThread::msleep(10);
+    }
+    if (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
+        || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning()) {
+        AppLog::warn(QStringLiteral("Source worker shutdown exceeded the bounded wait"));
+    }
     if (exporting()) {
         QFile cancellationFile(m_exportCancelPath);
         if (cancellationFile.open(QIODevice::WriteOnly)) {
@@ -307,7 +344,10 @@ QVariantList AppController::trackPointsFor(const TrackGeometry &geometry)
 quint64 AppController::beginSourceGeneration()
 {
     ++m_sourceGeneration;
+    const bool replacing = m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
+        || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning();
     cancelSourceJobs();
+    if (replacing) AppLog::info(QStringLiteral("Previous source load cancelled after replacement"));
     if (m_videoProbeWatcher.isRunning()) {
         m_videoLoadState = QStringLiteral("idle");
     }
@@ -316,16 +356,13 @@ quint64 AppController::beginSourceGeneration()
     }
     emit sourceLoadStateChanged();
     setProjectLoadState(false);
-    if (m_syncCancellation) {
-        m_syncCancellation->store(true);
-    }
     return m_sourceGeneration;
 }
 
 void AppController::cancelSourceJobs()
 {
     for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
-                                     m_projectLoadCancellation}) {
+                                     m_projectLoadCancellation, m_syncCancellation}) {
         if (cancellation) {
             cancellation->store(true);
         }
@@ -350,8 +387,12 @@ void AppController::startVideoProbe(
                 path, {}, false, -1, {}, [cancellation] { return cancellation->load(); });
             result.success = !cancellation->load();
             if (!result.success) {
+                result.cancelled = true;
                 result.error = QStringLiteral("Video loading was cancelled.");
             }
+        } catch (const OperationCancelled &) {
+            result.cancelled = true;
+            result.error = QStringLiteral("Video loading was cancelled.");
         } catch (const std::exception &error) {
             result.error = QString::fromUtf8(error.what());
         }
@@ -373,16 +414,22 @@ void AppController::startVboLoad(
         result.path = path;
         result.generation = generation;
         try {
-            result.session = VboParser::parseFile(path);
+            result.session = VboParser::parseFile(
+                path, [cancellation] { return cancellation->load(); });
             if (cancellation->load()) {
+                result.cancelled = true;
                 result.error = QStringLiteral("Telemetry loading was cancelled.");
                 return result;
             }
             result.geometry = buildTrackGeometry(result.session);
             result.success = !cancellation->load();
             if (!result.success) {
+                result.cancelled = true;
                 result.error = QStringLiteral("Telemetry loading was cancelled.");
             }
+        } catch (const OperationCancelled &) {
+            result.cancelled = true;
+            result.error = QStringLiteral("Telemetry loading was cancelled.");
         } catch (const std::exception &error) {
             result.error = QString::fromUtf8(error.what());
         }
@@ -782,12 +829,17 @@ bool AppController::beginProjectLoad(
                         normalizedVideoPath, {}, false, -1, {},
                         [cancellation] { return cancellation->load(); });
                     result.video.success = !cancellation->load();
+                } catch (const OperationCancelled &) {
+                    result.cancelled = true;
+                    result.error = QStringLiteral("video source loading was cancelled.");
+                    return result;
                 } catch (const std::exception &error) {
                     result.error = QStringLiteral("video source %1: %2")
                                        .arg(normalizedVideoPath, QString::fromUtf8(error.what()));
                     return result;
                 }
                 if (!result.video.success) {
+                    result.cancelled = true;
                     result.error = QStringLiteral("video source loading was cancelled.");
                     return result;
                 }
@@ -796,19 +848,26 @@ bool AppController::beginProjectLoad(
                 result.vbo.path = normalizedVboPath;
                 result.vbo.generation = generation;
                 try {
-                    result.vbo.session = VboParser::parseFile(normalizedVboPath);
+                    result.vbo.session = VboParser::parseFile(
+                        normalizedVboPath, [cancellation] { return cancellation->load(); });
                     if (cancellation->load()) {
+                        result.cancelled = true;
                         result.error = QStringLiteral("telemetry source loading was cancelled.");
                         return result;
                     }
                     result.vbo.geometry = buildTrackGeometry(result.vbo.session);
                     result.vbo.success = !cancellation->load();
+                } catch (const OperationCancelled &) {
+                    result.cancelled = true;
+                    result.error = QStringLiteral("telemetry source loading was cancelled.");
+                    return result;
                 } catch (const std::exception &error) {
                     result.error = QStringLiteral("telemetry source %1: %2")
                                        .arg(normalizedVboPath, QString::fromUtf8(error.what()));
                     return result;
                 }
                 if (!result.vbo.success) {
+                    result.cancelled = true;
                     result.error = QStringLiteral("telemetry source loading was cancelled.");
                     return result;
                 }
@@ -977,20 +1036,29 @@ void AppController::autoSync()
         result.vboPath = normalizedVboPath;
         try {
             if (cancellation->load()) {
+                result.cancelled = true;
                 return result;
             }
-            const GoProTelemetryResult videoTelemetry = GoProTelemetrySource::load(normalizedVideoPath);
+            const auto cancelled = [cancellation] { return cancellation->load(); };
+            const GoProTelemetryResult videoTelemetry = GoProTelemetrySource::load(
+                normalizedVideoPath, cancelled);
             if (cancellation->load()) {
+                result.cancelled = true;
                 return result;
             }
-            result.candidate = TelemetrySyncEngine::synchronize(videoTelemetry.session, telemetry);
+            result.candidate = TelemetrySyncEngine::synchronize(
+                videoTelemetry.session, telemetry, cancelled);
             if (cancellation->load()) {
+                result.cancelled = true;
                 return result;
             }
             result.packetCount = videoTelemetry.packetCount;
             result.gpsSampleCount = videoTelemetry.session.sampleCount;
             result.gpsStream = videoTelemetry.gpsStream;
             result.success = true;
+        } catch (const OperationCancelled &) {
+            result.cancelled = true;
+            result.error = QStringLiteral("Auto sync was cancelled.");
         } catch (const std::exception &error) {
             result.error = QString::fromUtf8(error.what());
         }

@@ -206,6 +206,7 @@ signals:
 private:
     struct AutoSyncResult {
         bool success = false;
+        bool cancelled = false;
         QString error;
         SyncCandidate candidate;
         qsizetype packetCount = 0;
@@ -218,6 +219,7 @@ private:
 
     struct VideoProbeResult {
         bool success = false;
+        bool cancelled = false;
         QString path;
         MediaInfo mediaInfo;
         QString error;
@@ -226,6 +228,7 @@ private:
 
     struct VboLoadResult {
         bool success = false;
+        bool cancelled = false;
         QString path;
         TelemetrySession session;
         TrackGeometry geometry;
@@ -235,6 +238,7 @@ private:
 
     struct ProjectLoadResult {
         bool success = false;
+        bool cancelled = false;
         QString projectPath;
         QJsonObject project;
         QJsonArray widgets;

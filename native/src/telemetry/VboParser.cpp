@@ -177,17 +177,40 @@ VboParseError::VboParseError(const QString &message)
 {
 }
 
-TelemetrySession VboParser::parseFile(const QString &path)
+TelemetrySession VboParser::parseFile(const QString &path, const CancellationCheck &cancelled)
 {
+    throwIfCancelled(cancelled);
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         throw VboParseError(QStringLiteral("Could not open VBO: %1").arg(file.errorString()));
     }
-    return parse(QString::fromUtf8(file.readAll()));
+    if (file.size() > kMaximumFileBytes) {
+        throw ResourceLimitError("VBO exceeds the supported 128 MiB file size limit.");
+    }
+    QByteArray bytes;
+    bytes.reserve(static_cast<qsizetype>(file.size()));
+    constexpr qint64 chunkSize = 1024 * 1024;
+    while (!file.atEnd()) {
+        throwIfCancelled(cancelled);
+        const QByteArray chunk = file.read(chunkSize);
+        if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
+            throw VboParseError(QStringLiteral("Could not read VBO: %1").arg(file.errorString()));
+        }
+        bytes.append(chunk);
+        if (bytes.size() > kMaximumFileBytes) {
+            throw ResourceLimitError("VBO exceeds the supported 128 MiB file size limit.");
+        }
+    }
+    throwIfCancelled(cancelled);
+    return parse(QString::fromUtf8(bytes), cancelled);
 }
 
-TelemetrySession VboParser::parse(QStringView text)
+TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &cancelled)
 {
+    throwIfCancelled(cancelled);
+    if (text.size() > kMaximumFileBytes) {
+        throw ResourceLimitError("VBO text exceeds the supported complexity limit.");
+    }
     QString content = text.toString();
     if (content.startsWith(QChar::ByteOrderMark)) {
         content.removeFirst();
@@ -195,7 +218,16 @@ TelemetrySession VboParser::parse(QStringView text)
     QHash<QString, QStringList> sections;
     QString section;
     const QStringList lines = content.split(QRegularExpression("\\r?\\n"));
-    for (const QString &raw : lines) {
+    if (lines.size() > kMaximumLines) {
+        throw ResourceLimitError("VBO contains too many lines.");
+    }
+    qsizetype dataRows = 0;
+    for (qsizetype lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+        if ((lineIndex & 0xff) == 0) throwIfCancelled(cancelled);
+        const QString &raw = lines[lineIndex];
+        if (raw.size() > kMaximumLineCharacters) {
+            throw ResourceLimitError("VBO contains a line longer than the supported 1 MiB limit.");
+        }
         const QString line = raw.trimmed();
         if (line.isEmpty() || line.startsWith(';') || line.startsWith('#')) {
             continue;
@@ -207,6 +239,9 @@ TelemetrySession VboParser::parse(QStringView text)
                 sections.insert(section, QStringList{});
             }
         } else {
+            if (section.startsWith("data") && ++dataRows > kMaximumDataRows) {
+                throw ResourceLimitError("VBO contains too many data rows.");
+            }
             sections[section].append(line);
         }
     }
@@ -244,7 +279,16 @@ TelemetrySession VboParser::parse(QStringView text)
     }
 
     QStringList names = splitRow(columnSection.join(' '));
+    if (names.size() > kMaximumColumns) {
+        throw ResourceLimitError("VBO contains too many columns.");
+    }
+    if (names.isEmpty()) {
+        throw VboParseError("VBO contains no column names.");
+    }
     for (QString &name : names) {
+        if (name.size() > kMaximumFieldCharacters) {
+            throw ResourceLimitError("VBO contains a column name longer than the supported field limit.");
+        }
         name = normalizeName(name);
     }
     names = uniqueNames(names);
@@ -274,7 +318,13 @@ TelemetrySession VboParser::parse(QStringView text)
         }
     };
     for (qsizetype rowIndex = 0; rowIndex < dataSection.size(); ++rowIndex) {
+        if ((rowIndex & 0xff) == 0) throwIfCancelled(cancelled);
         const QStringList cells = splitRow(dataSection[rowIndex]);
+        for (const QString &cell : cells) {
+            if (cell.size() > kMaximumFieldCharacters) {
+                throw ResourceLimitError("VBO contains a field longer than the supported 64 KiB limit.");
+            }
+        }
         if (cells.size() < names.size()) {
             appendWarning(QStringLiteral("Row %1: missing %2 value(s).")
                               .arg(rowIndex + 1)
@@ -350,17 +400,21 @@ TelemetrySession VboParser::parse(QStringView text)
         throw VboParseError("VBO contains no valid timestamped data rows.");
     }
     for (qsizetype index = 1; index < rawTimes.size(); ++index) {
+        if ((index & 0xfff) == 0) throwIfCancelled(cancelled);
         if (!(rawTimes[index] > rawTimes[index - 1])) {
             throw VboParseError("VBO parser produced non-monotonic timestamps.");
         }
     }
 
     for (qsizetype column = 0; column < names.size(); ++column) {
+        if ((column & 0x1f) == 0) throwIfCancelled(cancelled);
         if (column == timeIndex) {
             continue;
         }
         bool containsNumericValue = false;
+        qsizetype valueIndex = 0;
         for (const float value : rawValues[column]) {
+            if ((valueIndex++ & 0xfff) == 0) throwIfCancelled(cancelled);
             if (std::isfinite(value)) {
                 containsNumericValue = true;
                 break;
@@ -379,6 +433,7 @@ TelemetrySession VboParser::parse(QStringView text)
     session.startTime = origin.value_or(0.0);
     session.sampleCount = rawTimes.size();
     session.aliases = resolveAliases(session.channelNames());
+    throwIfCancelled(cancelled);
     return session;
 }
 

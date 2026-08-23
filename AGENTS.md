@@ -38,6 +38,11 @@
   recovery state rather than persisting it as the next clean session.
 - Source and project async results must be guarded by generation and source identity. Stale results
   must never mutate committed state.
+- Long-running source parsing, media probing, and synchronization operations must be cooperatively
+  cancellable. Source-generation checks prevent stale commits; cancellation prevents wasted work.
+  Both are required.
+- Untrusted/imported telemetry and media metadata must be resource-bounded before large allocation
+  or recursion.
 - Parser output timestamps must remain strictly monotonic. Public telemetry boundaries must not expose
   `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a

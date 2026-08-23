@@ -1,6 +1,7 @@
 #pragma once
 
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/SourceOperation.h"
 
 #include <QString>
 
@@ -38,7 +39,8 @@ class TelemetrySyncEngine {
 public:
     [[nodiscard]] static SyncCandidate synchronize(
         const TelemetrySession &video,
-        const TelemetrySession &telemetry);
+        const TelemetrySession &telemetry,
+        const CancellationCheck &cancelled = {});
 };
 
 } // namespace FlappedEar

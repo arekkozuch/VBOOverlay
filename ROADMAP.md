@@ -12,6 +12,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Atomic project saving and dirty-state safeguards for destructive project actions.
 - [x] Separate atomic unsaved-document recovery from authoritative saved projects, including explicit startup recovery/discard and unknown-field preservation.
 - [x] Asynchronous video/VBO loading, transactional project loading, and stale-result rejection.
+- [x] Cooperative cancellation and defensive resource bounds for VBO parsing, GoPro probing/GPMF decoding, auto-sync, source replacement, and shutdown.
 - [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
 - [x] Windows compilation validation.
 - [x] Windows runtime/export validation on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration.

@@ -54,6 +54,7 @@ qt_add_library(flappedear_core STATIC
     src/sync/TelemetrySyncEngine.h
     src/telemetry/TelemetrySession.cpp
     src/telemetry/TelemetrySession.h
+    src/telemetry/SourceOperation.h
     src/telemetry/TelemetryRenderContext.cpp
     src/telemetry/TelemetryRenderContext.h
     src/telemetry/TrackGeometry.cpp

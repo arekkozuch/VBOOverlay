@@ -1,5 +1,7 @@
 #pragma once
 
+#include "telemetry/SourceOperation.h"
+
 #include <QSize>
 #include <QString>
 #include <QStringList>
@@ -49,7 +51,7 @@ struct MediaProbeEvent {
 };
 
 using MediaProbeProgressCallback = std::function<void(const MediaProbeEvent &event)>;
-using MediaProbeCancellationCallback = std::function<bool()>;
+using MediaProbeCancellationCallback = CancellationCheck;
 
 class MediaProbe final {
 public:
