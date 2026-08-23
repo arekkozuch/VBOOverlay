@@ -45,6 +45,8 @@
   or recursion.
 - Parser output timestamps must remain strictly monotonic. Public telemetry boundaries must not expose
   `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
+- Static telemetry geometry must not be rebuilt or repainted on playback-time updates. Dynamic
+  playback markers must update independently from static geometry.
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
   safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
 - Raw-frame transport into encoder processes uses bounded byte-oriented backpressure. Never assume

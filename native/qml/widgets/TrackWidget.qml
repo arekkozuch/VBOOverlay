@@ -1,8 +1,10 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 
 Item {
+    id: root
     property var frame: parent.frame
     anchors.fill: parent
     property var currentPoint: {
@@ -10,35 +12,37 @@ Item {
         return frame.renderContext.currentTrackPoint;
     }
     property real trackPad: Number(frame.widgetSettings.trackPadding ?? 10) * frame.sceneScale
-    Canvas {
-        id: trackCanvas
-        anchors.fill: parent
-        onPaint: {
-            const context = getContext("2d");
-            context.reset();
-            const points = frame.renderContext.trackPoints;
-            if (points.length < 2)
-                return;
-            const pad = parent.trackPad;
-            const drawX = value => pad + (frame.widgetSettings.mirrorX ? 1 - value : value) * Math.max(1, width - 2 * pad);
-            const drawY = value => pad + (frame.widgetSettings.mirrorY ? 1 - value : value) * Math.max(1, height - 2 * pad);
-            context.strokeStyle = frame.widgetSettings.lineColor || frame.accent;
-            context.lineWidth = Number(frame.widgetSettings.lineWidth ?? 3) * frame.sceneScale;
-            context.lineCap = "round";
-            context.lineJoin = "round";
-            context.beginPath();
-            context.moveTo(drawX(points[0].x), drawY(points[0].y));
-            for (let pointIndex = 1; pointIndex < points.length; ++pointIndex)
-                context.lineTo(drawX(points[pointIndex].x), drawY(points[pointIndex].y));
-            context.stroke();
+    property color trackLineColor: frame.widgetSettings.lineColor || frame.accent
+    property real trackLineWidth: Number(frame.widgetSettings.lineWidth ?? 3) * frame.sceneScale
+    property bool trackMirrorX: frame.widgetSettings.mirrorX ?? false
+    property bool trackMirrorY: frame.widgetSettings.mirrorY ?? false
+    property var renderedTrackPoints: {
+        frame.renderContext.trackRevision;
+        const points = frame.renderContext.trackPoints;
+        const result = new Array(points.length);
+        const drawWidth = Math.max(1, width - 2 * trackPad);
+        const drawHeight = Math.max(1, height - 2 * trackPad);
+        for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
+            const point = points[pointIndex];
+            const xValue = trackMirrorX ? 1 - point.x : point.x;
+            const yValue = trackMirrorY ? 1 - point.y : point.y;
+            result[pointIndex] = Qt.point(
+                trackPad + xValue * drawWidth,
+                trackPad + yValue * drawHeight);
         }
-        Connections {
-            target: frame.renderContext
-            function onSourceChanged() {
-                trackCanvas.requestPaint();
-            }
-            function onTimeChanged() {
-                trackCanvas.requestPaint();
+        return result;
+    }
+    Shape {
+        anchors.fill: parent
+        visible: root.renderedTrackPoints.length >= 2
+        ShapePath {
+            strokeColor: root.trackLineColor
+            strokeWidth: root.trackLineWidth
+            capStyle: ShapePath.RoundCap
+            joinStyle: ShapePath.RoundJoin
+            fillColor: "transparent"
+            PathPolyline {
+                path: root.renderedTrackPoints
             }
         }
     }
@@ -48,13 +52,7 @@ Item {
         height: width
         radius: width / 2
         color: frame.widgetSettings.markerColor || "#ffffff"
-        x: parent.trackPad + (frame.widgetSettings.mirrorX ? 1 - Number(parent.currentPoint.x || 0) : Number(parent.currentPoint.x || 0)) * Math.max(1, parent.width - 2 * parent.trackPad) - width / 2
-        y: parent.trackPad + (frame.widgetSettings.mirrorY ? 1 - Number(parent.currentPoint.y || 0) : Number(parent.currentPoint.y || 0)) * Math.max(1, parent.height - 2 * parent.trackPad) - height / 2
-    }
-    Connections {
-        target: frame.widgetModel
-        function onRevisionChanged() {
-            trackCanvas.requestPaint();
-        }
+        x: root.trackPad + (root.trackMirrorX ? 1 - Number(root.currentPoint.x || 0) : Number(root.currentPoint.x || 0)) * Math.max(1, root.width - 2 * root.trackPad) - width / 2
+        y: root.trackPad + (root.trackMirrorY ? 1 - Number(root.currentPoint.y || 0) : Number(root.currentPoint.y || 0)) * Math.max(1, root.height - 2 * root.trackPad) - height / 2
     }
 }

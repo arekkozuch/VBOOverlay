@@ -20,6 +20,7 @@ target_link_libraries(flappedear_native_tests PRIVATE flappedear_core Qt6::Concu
 flappedear_enable_warnings(flappedear_native_tests)
 target_compile_definitions(flappedear_native_tests PRIVATE
     TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/basic.vbo"
+    TRACK_WIDGET_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/widgets/TrackWidget.qml"
     RAW_TRANSPORT_CONSUMER_PATH="$<TARGET_FILE:flappedear_raw_transport_consumer>"
     PROBE_TEST_HELPER_PATH="$<TARGET_FILE:flappedear_probe_test_helper>"
 )

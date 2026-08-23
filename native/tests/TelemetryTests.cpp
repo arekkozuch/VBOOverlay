@@ -40,6 +40,7 @@
 #include <cmath>
 #include <atomic>
 #include <limits>
+#include <numbers>
 #include <thread>
 
 using namespace FlappedEar;
@@ -70,6 +71,8 @@ private slots:
     void groupsAndMovesWidgets();
     void constrainsWidgetGeometry();
     void buildsTrackGeometry();
+    void cachesStaticTrackGeometry();
+    void keepsStaticTrackIndependentFromTime();
     void decodesGps9Gpmf();
     void rejectsMalformedGpmf();
     void cancelsSlowGoProProbePromptly();
@@ -1232,6 +1235,103 @@ void TelemetryTests::buildsTrackGeometry()
     QVERIFY2(
         qAbs(current->y() - 0.5) < 0.01,
         qPrintable(QStringLiteral("y=%1").arg(current->y(), 0, 'g', 12)));
+}
+
+void TelemetryTests::cachesStaticTrackGeometry()
+{
+    constexpr qsizetype pointCount = 30'000;
+    TrackGeometry geometry;
+    geometry.valid = true;
+    geometry.originLatitude = 52.0;
+    geometry.originLongitude = 21.0;
+    geometry.localCenter = {0.0, 0.0};
+    geometry.normalizationScale = 1.0;
+    geometry.points.reserve(pointCount);
+
+    TelemetrySession session;
+    TelemetryChannel latitude;
+    latitude.name = QStringLiteral("latitude");
+    latitude.timestamps.reserve(pointCount);
+    latitude.values.reserve(pointCount);
+    TelemetryChannel longitude;
+    longitude.name = QStringLiteral("longitude");
+    longitude.timestamps.reserve(pointCount);
+    longitude.values.reserve(pointCount);
+    for (qsizetype index = 0; index < pointCount; ++index) {
+        const double progress = static_cast<double>(index) / static_cast<double>(pointCount - 1);
+        geometry.points.append(
+            {progress, 0.5 + 0.4 * std::sin(progress * 8.0 * std::numbers::pi)});
+        const double timestamp = static_cast<double>(index) / 10.0;
+        latitude.timestamps.append(timestamp);
+        longitude.timestamps.append(timestamp);
+        latitude.values.append(static_cast<float>(52.0 + progress * 0.001));
+        longitude.values.append(static_cast<float>(21.0 + progress * 0.001));
+    }
+    session.channels.insert(latitude.name, latitude);
+    session.channels.insert(longitude.name, longitude);
+    session.aliases.insert(QStringLiteral("latitude"), latitude.name);
+    session.aliases.insert(QStringLiteral("longitude"), longitude.name);
+
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    QSignalSpy geometryChanges(&context, &TelemetryRenderContext::trackGeometryChanged);
+    QElapsedTimer constructionTimer;
+    constructionTimer.start();
+    context.setTrackGeometry(&geometry);
+    const qint64 constructionNanoseconds = constructionTimer.nsecsElapsed();
+    QCOMPARE(context.trackPoints().size(), pointCount);
+    QCOMPARE(context.trackRevision(), quint64(1));
+    QCOMPARE(context.trackConversionCount(), quint64(1));
+    QCOMPARE(geometryChanges.count(), 1);
+
+    const QVariantMap startPoint = context.currentTrackPoint();
+    QElapsedTimer updatesTimer;
+    updatesTimer.start();
+    for (int update = 1; update <= 10'000; ++update) {
+        context.setTime(static_cast<double>(update % pointCount) / 10.0);
+        QVERIFY(context.currentTrackPoint().contains(QStringLiteral("x")));
+        QCOMPARE(context.trackPoints().size(), pointCount);
+    }
+    const qint64 updateNanoseconds = updatesTimer.nsecsElapsed();
+    const QVariantMap laterPoint = context.currentTrackPoint();
+    QVERIFY(startPoint != laterPoint);
+    QCOMPARE(context.trackConversionCount(), quint64(1));
+    QCOMPARE(context.trackRevision(), quint64(1));
+    QCOMPARE(geometryChanges.count(), 1);
+    const quint64 additionalConversions = context.trackConversionCount() - 1;
+
+    geometry.points = {{0.1, 0.2}, {0.8, 0.9}};
+    context.setTrackGeometry(&geometry); // The owner intentionally reuses the same storage address.
+    QCOMPARE(context.trackPoints().size(), 2);
+    QCOMPARE(context.trackPoints().front().toPointF(), QPointF(0.1, 0.2));
+    QCOMPARE(context.trackConversionCount(), quint64(2));
+    QCOMPARE(context.trackRevision(), quint64(2));
+    QCOMPARE(geometryChanges.count(), 2);
+
+    context.setTrackGeometry(nullptr);
+    QVERIFY(context.trackPoints().isEmpty());
+    QVERIFY(context.currentTrackPoint().isEmpty());
+    QCOMPARE(context.trackConversionCount(), quint64(2));
+    QCOMPARE(context.trackRevision(), quint64(3));
+    QCOMPARE(geometryChanges.count(), 3);
+
+    qInfo().nospace() << "track-cache-benchmark points=" << pointCount
+                      << " initial-cache-ms=" << constructionNanoseconds / 1'000'000.0
+                      << " time-marker-updates=10000 updates-ms="
+                      << updateNanoseconds / 1'000'000.0
+                      << " additional-conversions=" << additionalConversions;
+}
+
+void TelemetryTests::keepsStaticTrackIndependentFromTime()
+{
+    QFile source(QStringLiteral(TRACK_WIDGET_QML_PATH));
+    QVERIFY2(source.open(QIODevice::ReadOnly), qPrintable(source.errorString()));
+    const QByteArray qml = source.readAll();
+    QVERIFY(qml.contains("frame.renderContext.trackRevision"));
+    QVERIFY(qml.contains("PathPolyline"));
+    QVERIFY(!qml.contains("function onTimeChanged()"));
+    QVERIFY(!qml.contains("requestPaint"));
+    QVERIFY(!qml.contains("onRevisionChanged"));
 }
 
 void TelemetryTests::gatesWeakSyncCandidates()

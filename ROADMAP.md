@@ -15,6 +15,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Cooperative cancellation and defensive resource bounds for VBO parsing, GoPro probing/GPMF decoding, auto-sync, source replacement, and shutdown.
 - [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
 - [x] Stable no-data-aware overlay presentation and gap/extrema-preserving analysis decimation.
+- [x] Cached static track geometry and time-independent track-marker rendering.
 - [x] Windows compilation validation.
 - [x] Windows runtime/export validation on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration.
 

@@ -60,4 +60,6 @@ Display decimation divides the requested range into time buckets and retains eac
 
 Track construction ignores non-finite latitude/longitude values, latitudes outside `-90..90`, and longitudes outside `-180..180`. If there are no usable coordinate pairs, the track is unavailable. A current track position is unavailable when either latitude or longitude has no telemetry value at the requested time.
 
+The normalized track outline is static for the lifetime of an assigned geometry and is cached for QML rendering. Time changes update only the independently rendered current-position marker. Replacing or clearing geometry invalidates the cached outline and marker together; this rendering lifecycle does not alter GPS lookup or missing-data semantics.
+
 RaceChrono coordinates supplied as signed total arc-minutes are converted to degrees when their magnitude identifies that representation.

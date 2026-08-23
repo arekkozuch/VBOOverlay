@@ -15,7 +15,8 @@ namespace FlappedEar {
 class TelemetryRenderContext final : public QObject {
     Q_OBJECT
     Q_PROPERTY(double time READ time WRITE setTime NOTIFY timeChanged)
-    Q_PROPERTY(QVariantList trackPoints READ trackPoints NOTIFY sourceChanged)
+    Q_PROPERTY(QVariantList trackPoints READ trackPoints NOTIFY trackGeometryChanged)
+    Q_PROPERTY(quint64 trackRevision READ trackRevision NOTIFY trackGeometryChanged)
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY timeChanged)
 
 public:
@@ -23,6 +24,8 @@ public:
 
     [[nodiscard]] double time() const;
     [[nodiscard]] QVariantList trackPoints() const;
+    [[nodiscard]] quint64 trackRevision() const;
+    [[nodiscard]] quint64 trackConversionCount() const;
     [[nodiscard]] QVariantMap currentTrackPoint() const;
     [[nodiscard]] const TelemetrySession *session() const;
     [[nodiscard]] SyncTransform syncTransform() const;
@@ -41,13 +44,17 @@ public slots:
 signals:
     void timeChanged();
     void sourceChanged();
+    void trackGeometryChanged();
     void syncTransformChanged();
 
 private:
     const TelemetrySession *m_session = nullptr;
     const TrackGeometry *m_geometry = nullptr;
+    QVariantList m_trackPoints;
     SyncTransform m_sync;
     double m_time = 0.0;
+    quint64 m_trackRevision = 0;
+    quint64 m_trackConversionCount = 0;
 };
 
 } // namespace FlappedEar

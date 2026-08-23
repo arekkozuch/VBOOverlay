@@ -90,16 +90,11 @@ double TelemetryRenderContext::time() const { return m_time; }
 
 QVariantList TelemetryRenderContext::trackPoints() const
 {
-    QVariantList points;
-    if (!m_geometry) {
-        return points;
-    }
-    points.reserve(m_geometry->points.size());
-    for (const QPointF &point : m_geometry->points) {
-        points.append(point);
-    }
-    return points;
+    return m_trackPoints;
 }
+
+quint64 TelemetryRenderContext::trackRevision() const { return m_trackRevision; }
+quint64 TelemetryRenderContext::trackConversionCount() const { return m_trackConversionCount; }
 
 QVariantMap TelemetryRenderContext::currentTrackPoint() const
 {
@@ -125,10 +120,17 @@ void TelemetryRenderContext::setSession(const TelemetrySession *session)
 
 void TelemetryRenderContext::setTrackGeometry(const TrackGeometry *geometry)
 {
-    if (m_geometry == geometry) {
-        return;
-    }
     m_geometry = geometry;
+    m_trackPoints.clear();
+    if (m_geometry) {
+        m_trackPoints.reserve(m_geometry->points.size());
+        for (const QPointF &point : m_geometry->points) {
+            m_trackPoints.append(point);
+        }
+        ++m_trackConversionCount;
+    }
+    ++m_trackRevision;
+    emit trackGeometryChanged();
     emit sourceChanged();
     emit timeChanged();
 }

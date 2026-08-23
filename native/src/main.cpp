@@ -24,18 +24,50 @@
 #include <QQuickStyle>
 #include <QTextStream>
 #include <QThread>
+#include <cmath>
+#include <numbers>
 
 namespace {
 
+FlappedEar::TelemetrySession syntheticTrackSession(const qsizetype pointCount = 30'000)
+{
+    FlappedEar::TelemetrySession session;
+    FlappedEar::TelemetryChannel latitude;
+    latitude.name = QStringLiteral("latitude");
+    latitude.timestamps.reserve(pointCount);
+    latitude.values.reserve(pointCount);
+    FlappedEar::TelemetryChannel longitude;
+    longitude.name = QStringLiteral("longitude");
+    longitude.timestamps.reserve(pointCount);
+    longitude.values.reserve(pointCount);
+    for (qsizetype index = 0; index < pointCount; ++index) {
+        const double progress = static_cast<double>(index) / static_cast<double>(pointCount - 1);
+        const double angle = progress * 2.0 * std::numbers::pi;
+        const double timestamp = static_cast<double>(index) / 10.0;
+        latitude.timestamps.append(timestamp);
+        longitude.timestamps.append(timestamp);
+        latitude.values.append(static_cast<float>(52.0 + 0.001 * std::sin(angle)));
+        longitude.values.append(static_cast<float>(21.0 + 0.0015 * std::cos(angle)));
+    }
+    session.channels.insert(latitude.name, latitude);
+    session.channels.insert(longitude.name, longitude);
+    session.aliases.insert(QStringLiteral("latitude"), latitude.name);
+    session.aliases.insert(QStringLiteral("longitude"), longitude.name);
+    session.sampleCount = pointCount;
+    session.startTime = 0.0;
+    session.duration = latitude.timestamps.back();
+    return session;
+}
+
 int renderStill(const QString &path)
 {
-    const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parse(
-        u"[column names]\ntime speed\n[data]\n0 0\n10 100");
+    const FlappedEar::TelemetrySession session = syntheticTrackSession();
+    const FlappedEar::TrackGeometry geometry = FlappedEar::buildTrackGeometry(session);
     FlappedEar::WidgetModel widgets;
     widgets.resetDefaults();
     FlappedEar::TelemetryFrameRenderer renderer;
     if (!renderer.initialize(
-            &widgets, &session, nullptr, FlappedEar::SyncTransform{}, QSize(320, 180))) {
+            &widgets, &session, &geometry, FlappedEar::SyncTransform{}, QSize(1920, 1080))) {
         qCritical().noquote() << renderer.errorString();
         return EXIT_FAILURE;
     }
@@ -113,12 +145,12 @@ int exportTest(const QString &inputPath, const QString &outputPath)
 
 int benchmarkRender(const QSize size, const int frames)
 {
-    const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parse(
-        u"[column names]\ntime speed\n[data]\n0 0\n10 100");
+    const FlappedEar::TelemetrySession session = syntheticTrackSession();
+    const FlappedEar::TrackGeometry geometry = FlappedEar::buildTrackGeometry(session);
     FlappedEar::WidgetModel widgets;
     widgets.resetDefaults();
     FlappedEar::TelemetryFrameRenderer renderer;
-    if (!renderer.initialize(&widgets, &session, nullptr, FlappedEar::SyncTransform{}, size)) {
+    if (!renderer.initialize(&widgets, &session, &geometry, FlappedEar::SyncTransform{}, size)) {
         qCritical().noquote() << renderer.errorString();
         return EXIT_FAILURE;
     }
@@ -137,7 +169,8 @@ int benchmarkRender(const QSize size, const int frames)
     };
     qInfo().noquote() << QStringLiteral(
         "Renderer benchmark: backend=Qt Quick RHI graphicsApi=%1 resolution=%2x%3 frames=%4 "
-        "elapsedMs=%5 fps=%6 totalMsPerFrame=%7 polishMsPerFrame=%8 syncRenderMsPerFrame=%9 readbackMsPerFrame=%10")
+        "trackPoints=30000 elapsedMs=%5 fps=%6 totalMsPerFrame=%7 polishMsPerFrame=%8 "
+        "syncRenderMsPerFrame=%9 readbackMsPerFrame=%10")
                              .arg(renderer.graphicsApiName()).arg(size.width()).arg(size.height())
                              .arg(frames).arg(milliseconds, 0, 'f', 1)
                              .arg(frames * 1000.0 / milliseconds, 0, 'f', 2)
