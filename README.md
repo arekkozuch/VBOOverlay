@@ -12,7 +12,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - RaceChrono and VBOX VBO telemetry import.
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates.
-- Synchronized telemetry analysis, including charts and a track view.
+- Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.
 - CFR HEVC/AAC MP4 export at the effective rational export rate, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
 - Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
@@ -65,7 +65,7 @@ FLAPPEDEAR_REAL_VBO=/path/to/session.vbo \
   ./build-native/native/tests/flappedear_native_tests
 ```
 
-A private RaceChrono fixture has been validated with 32,718 samples, 49 channels, 3,271.7 seconds, and zero parser warnings. Development validation has also completed a real non-zero-range 4K, approximately 59.94 fps HEVC/AAC export on macOS through the private GoPro/VBO workflow. This is a development result, not a cross-platform performance guarantee.
+A private RaceChrono fixture has been validated with 32,718 samples, 49 channels, 3,271.7 seconds, and zero parser warnings. An August 2026 macOS regression run on one private GoPro/VBO pair restored 1,536-packet / 14,796-sample GPS extraction and +90.217 s auto-sync at 0.999575 correlation. The exact 3840×2160, `60000/1001`, 30→90 HEVC/AAC export also passed with 3,597 final video packets, alongside short 1080p59.94 and 720p29.97 checks. These are development results, not cross-platform performance guarantees.
 
 ## Current limitations
 

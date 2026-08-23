@@ -258,7 +258,6 @@ private:
         QJsonObject project;
         QJsonArray widgets;
         QStringList analysisChannels;
-        bool analysisVisible = true;
         SyncTransform sync;
         ProjectSourceReference videoReference;
         ProjectSourceReference vboReference;
@@ -371,7 +370,7 @@ private:
     bool m_quitAfterExport = false;
     QVariantMap m_syncCandidate;
     QStringList m_analysisChannels;
-    bool m_analysisVisible = true;
+    bool m_analysisVisible = false;
 };
 
 } // namespace FlappedEar

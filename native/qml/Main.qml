@@ -753,7 +753,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 visible: exportCustomBitrate.readOnly
-                text: qsTr("Automatically selected for %1 @ %2").arg(selectedSize().label || "").arg(selectedRate().label || "")
+                text: qsTr("Automatically selected for %1 @ %2").arg(exportDialog.selectedSize().label || "").arg(exportDialog.selectedRate().label || "")
                 color: "#718092"
                 font.pixelSize: 11
                 elide: Text.ElideRight

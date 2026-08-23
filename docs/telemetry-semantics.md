@@ -18,6 +18,8 @@ Parser warnings are capped at 200 stored messages; additional warnings are summa
 
 VBO input is treated as untrusted. Parsing is cooperatively cancellable and rejects files above 128 MiB, more than 1,000,000 lines or 500,000 data rows, more than 512 columns, lines above 1 MiB, and fields above 64 KiB. Resource-limit failures and cancellation are distinct from invalid VBO syntax.
 
+GoPro GPMF input is likewise bounded independently by packet count, aggregate metadata bytes, parsed KLV-header work, and container depth. The KLV counter includes structural/container and non-GPS sensor headers as well as GPS records; it is not a GPS sample count. Limit failures report the reached count, configured limit, packet, and parse context, while cancellation remains a distinct outcome.
+
 ## Missing values and lookup
 
 The parser may retain non-finite numeric values internally as placeholders so channel rows remain aligned. The public `TelemetrySession::valueAt()` API never returns `NaN` or infinity: it returns no data instead.

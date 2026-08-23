@@ -461,14 +461,26 @@ ExportResult ExportEngine::exportVideo(
                     {{"path", temporaryOverlayPath}, {"bytes", temporaryInfo.size()}});
             // The controller's manifest janitor is the only authority allowed
             // to remove worker-owned artifacts. Legacy direct callers retain
-            // the old local temporary-file cleanup behavior.
-            const bool removed = !temporaryInfo.exists()
-                || (settings.manifestPath.isEmpty() && QFile::remove(temporaryOverlayPath));
+            // local temporary-file cleanup behavior.
+            if (!settings.manifestPath.isEmpty()) {
+                observe(settings, QStringLiteral("log"), QStringLiteral("cleaningUp"),
+                        QStringLiteral("removeTemporaryOverlay"),
+                        temporaryInfo.exists()
+                            ? QStringLiteral("Temporary overlay cleanup deferred to ownership manifest")
+                            : QStringLiteral("Temporary overlay already cleaned"),
+                        QStringLiteral("cleanup"),
+                        {{"result", temporaryInfo.exists() ? "deferred" : "alreadyAbsent"}});
+                return;
+            }
+            const bool alreadyAbsent = !temporaryInfo.exists();
+            const bool removed = alreadyAbsent || QFile::remove(temporaryOverlayPath);
             observe(settings, QStringLiteral("log"), QStringLiteral("cleaningUp"),
                     QStringLiteral("removeTemporaryOverlay"),
-                    removed ? QStringLiteral("Temporary overlay deleted")
-                            : QStringLiteral("Temporary overlay deletion failed"),
-                    QStringLiteral("cleanup"), {{"result", removed ? "deleted" : "failed"}});
+                    alreadyAbsent ? QStringLiteral("Temporary overlay already cleaned")
+                        : removed ? QStringLiteral("Temporary overlay deleted")
+                                  : QStringLiteral("Temporary overlay deletion failed"),
+                    QStringLiteral("cleanup"),
+                    {{"result", alreadyAbsent ? "alreadyAbsent" : removed ? "deleted" : "failed"}});
         });
         QProcess ffmpeg;
         // Keep FFmpeg in the worker's group, so a forced GUI-worker shutdown
@@ -921,13 +933,12 @@ ExportResult ExportEngine::exportVideo(
         compositing = true;
         finalizing = false;
         const QString timeRangeFilter = QStringLiteral(
-            "[0:v]trim=start=%1:end=%2,setpts=PTS-STARTPTS%5,"
-            "fps=fps=%3:start_time=0:round=near:eof_action=round,"
-            "trim=end_frame=%4,setpts=PTS-STARTPTS[sourceVideo];"
+            "[0:v]trim=start=%1,setpts=PTS-STARTPTS%4,"
+            "fps=fps=%2:start_time=0:round=near:eof_action=round,"
+            "trim=end_frame=%3,setpts=PTS-STARTPTS[sourceVideo];"
             "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
             "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=auto[video]")
                                             .arg(sourceRangeStart, 0, 'f', 9)
-                                            .arg(sourceRangeEnd, 0, 'f', 9)
                                             .arg(rateString(exportFrameRate))
                                             .arg(expectedFrames)
                                             .arg(source.videoSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
@@ -1014,10 +1025,12 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("ffmpeg"), {{"exitCode", compositor.exitCode()},
                                             {"stderr", standardErrorText.right(16 * 1024)}});
         if (lastFfmpegProgress.encodedFrames != expectedFrames) {
-            result.error = QStringLiteral("FFmpeg output advanced beyond the telemetry overlay.");
-            result.diagnostics = QStringLiteral("Prepared %1 telemetry frames; FFmpeg reported %2 output frames.")
-                                     .arg(expectedFrames).arg(lastFfmpegProgress.encodedFrames);
-            return result;
+            observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
+                    QStringLiteral("compareProgressFrameCount"),
+                    QStringLiteral("FFmpeg progress frame count differs from the schedule; final packet count will decide validation"),
+                    QStringLiteral("validation"),
+                    {{"expectedFrames", static_cast<qint64>(expectedFrames)},
+                     {"progressFrames", static_cast<qint64>(lastFfmpegProgress.encodedFrames)}});
         }
         observe(settings, QStringLiteral("status"), QStringLiteral("validatingOutput"),
                 QStringLiteral("checkOutputExists"), QStringLiteral("Checking output file exists"));
@@ -1075,6 +1088,9 @@ ExportResult ExportEngine::exportVideo(
         const bool packetCountAvailable = result.mediaInfo.videoPacketCount > 0;
         const bool packetCountOk = !packetCountAvailable
             || result.mediaInfo.videoPacketCount == expectedFrames;
+        if (packetCountAvailable) {
+            result.encodedFrames = result.mediaInfo.videoPacketCount;
+        }
         const double videoStartTolerance = result.mediaInfo.timeBase.isValid()
             ? result.mediaInfo.timeBase.value() : frameInterval;
         const bool videoStartOk = qAbs(result.mediaInfo.videoStartTime) <= videoStartTolerance;
@@ -1141,7 +1157,20 @@ ExportResult ExportEngine::exportVideo(
                                QString::number(requestedDuration, 'f', 6),
                                QString::number(result.mediaInfo.audioDuration, 'f', 6), audioDurationOk);
         }
-        if (!codecOk || !dimensionsOk || !averageRateOk || !nominalRateOk || !packetCountOk
+        if (!packetCountOk) {
+            const bool fewer = result.mediaInfo.videoPacketCount < expectedFrames;
+            result.error = fewer
+                ? QStringLiteral("Final output contains fewer video packets than the telemetry frame schedule.")
+                : QStringLiteral("Final output contains more video packets than the telemetry frame schedule.");
+            result.diagnostics = QStringLiteral(
+                "Prepared %1 telemetry frames; final ffprobe packet count is %2. "
+                "FFmpeg's final progress report was %3 frames.")
+                                     .arg(expectedFrames)
+                                     .arg(result.mediaInfo.videoPacketCount)
+                                     .arg(lastFfmpegProgress.encodedFrames);
+            return result;
+        }
+        if (!codecOk || !dimensionsOk || !averageRateOk || !nominalRateOk
             || !videoStartOk || !durationOk || !audioOk) {
             result.error = QStringLiteral("Export failed final timing validation.");
             return result;

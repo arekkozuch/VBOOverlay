@@ -111,6 +111,7 @@ private slots:
     void validatesQuantizedTemporaryOverlayCadence();
     void preservesAbsoluteExportTimestamps();
     void composesNonZeroExportRangeWithZeroBasedOutput();
+    void composes5994SixtySecondNonZeroRange();
     void normalizesNonZeroStreamPtsForVideoAndAudio();
     void convertsVfrInputToCfrWithFrameCorrectOverlay();
     void estimatesExportProgress();
@@ -1749,6 +1750,7 @@ void TelemetryTests::cleansOnlyManifestOwnedArtifacts()
     QString error;
     QVERIFY2(ExportArtifactManifest::create(manifest, &error), qPrintable(error));
     QVERIFY2(ExportArtifactManifest::cleanupOwned(ExportArtifactManifest::manifestPathFor(id), &error), qPrintable(error));
+    QVERIFY2(ExportArtifactManifest::cleanupOwned(ExportArtifactManifest::manifestPathFor(id), &error), qPrintable(error));
     QVERIFY(!QFileInfo::exists(overlay));
     QVERIFY(!QFileInfo::exists(staging));
     QVERIFY(QFileInfo::exists(unrelated));
@@ -1894,6 +1896,8 @@ void TelemetryTests::opensProjectsTransactionally()
     QCOMPARE(controller.syncOffset(), 4.0);
     QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(failedPath).canonicalFilePath());
     QVERIFY(!controller.dirty());
+    controller.setAnalysisVisible(true);
+    QVERIFY(controller.analysisVisible());
 
     const QJsonObject successProject{{"version", 2},
                                      {"scene", scene},
@@ -1908,6 +1912,7 @@ void TelemetryTests::opensProjectsTransactionally()
     QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(successPath).canonicalFilePath());
     QCOMPARE(controller.telemetryName(), QStringLiteral("basic.vbo"));
     QCOMPARE(controller.syncOffset(), 2.5);
+    QVERIFY(!controller.analysisVisible());
     QVERIFY(!controller.dirty());
     QVERIFY(controller.saveCurrentProject());
     const QJsonObject migrated = QJsonDocument::fromJson(readBytes(successPath)).object();
@@ -2147,6 +2152,11 @@ void TelemetryTests::restoresSavedProjectsAndPreservesUnknownFields()
         QTRY_VERIFY(!controller.projectLoading());
         QCOMPARE(controller.syncOffset(), 1.25);
         QVERIFY(!controller.dirty());
+        QVERIFY(!controller.analysisVisible());
+        controller.setAnalysisVisible(true);
+        QVERIFY(!controller.dirty());
+        controller.setAnalysisVisible(false);
+        QVERIFY(!controller.dirty());
         QCOMPARE(controller.analysisWindowWidth(), 777);
         controller.setSyncOffset(2.5);
         QVERIFY(controller.saveCurrentProject());
@@ -2162,6 +2172,8 @@ void TelemetryTests::restoresSavedProjectsAndPreservesUnknownFields()
              QStringLiteral("preserve me"));
     QCOMPARE(reloaded.value(QStringLiteral("sync")).toObject()
                  .value(QStringLiteral("offset")).toDouble(), 2.5);
+    QVERIFY(!reloaded.value(QStringLiteral("analysis")).toObject()
+                 .contains(QStringLiteral("visible")));
     QVERIFY(!settings.contains(QStringLiteral("sync/offset")));
     QVERIFY(!settings.contains(QStringLiteral("editor/widgets")));
 }
@@ -2276,7 +2288,7 @@ void TelemetryTests::discardsUnsavedStateForQuitNewAndOpen()
         QTRY_VERIFY(!controller.projectLoading());
         QCOMPARE(controller.syncOffset(), 1.0);
         QVERIFY(controller.telemetryName().isEmpty());
-        QVERIFY(controller.analysisVisible());
+        QVERIFY(!controller.analysisVisible());
         QVERIFY(!controller.dirty());
 
         controller.setSyncOffset(8.0);
@@ -2285,6 +2297,7 @@ void TelemetryTests::discardsUnsavedStateForQuitNewAndOpen()
         controller.resolveDestructiveAction(QStringLiteral("discard"));
         QCOMPARE(controller.syncOffset(), 0.0);
         QVERIFY(controller.projectPath().isEmpty());
+        QVERIFY(!controller.analysisVisible());
         QVERIFY(!controller.dirty());
         QVERIFY(!QFileInfo(recoveryPath).exists());
 
@@ -2808,6 +2821,51 @@ void TelemetryTests::composesNonZeroExportRangeWithZeroBasedOutput()
     }
 }
 
+void TelemetryTests::composes5994SixtySecondNonZeroRange()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the 59.94 range regression test.");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const MediaRational rate{60'000, 1'001};
+    const qsizetype expectedFrames = ExportEngine::frameCount(30.0, 90.0, rate);
+    QCOMPARE(expectedFrames, qsizetype(3'597));
+    const QString source = directory.filePath(QStringLiteral("source.mp4"));
+    const QString overlay = directory.filePath(QStringLiteral("overlay.mkv"));
+    const QString output = directory.filePath(QStringLiteral("output.mp4"));
+    const auto runFfmpeg = [&ffmpeg](const QStringList &arguments) {
+        QProcess process;
+        process.start(ffmpeg, arguments);
+        QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+        QVERIFY2(process.waitForFinished(30'000), qPrintable(process.errorString()));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    };
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+               "color=c=black:s=64x16:r=60000/1001:d=91", "-f", "lavfi", "-i",
+               "sine=frequency=440:sample_rate=48000:duration=91", "-map", "0:v", "-map", "1:a",
+               "-c:v", "mpeg4", "-q:v", "2", "-c:a", "aac", source});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+               "color=c=black:s=64x16:r=60000/1001", "-frames:v", QString::number(expectedFrames),
+               "-an", "-c:v", "ffv1", "-pix_fmt", "bgra", overlay});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", source, "-i", overlay,
+               "-filter_complex",
+               QStringLiteral("[0:v]trim=start=30,setpts=PTS-STARTPTS,fps=fps=60000/1001:start_time=0:round=near:eof_action=round,trim=end_frame=%1,setpts=PTS-STARTPTS[source];[1:v]setpts=PTS-STARTPTS[telemetry];[source][telemetry]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall[video];[0:a]atrim=start=30:end=90,asetpts=PTS-STARTPTS[audio]")
+                   .arg(expectedFrames),
+               "-map", "[video]", "-fps_mode:v", "cfr", "-map", "[audio]", "-c:v", "mpeg4",
+               "-q:v", "2", "-c:a", "aac", output});
+    const MediaInfo info = MediaProbe::probe(output, {}, true, -1, {}, {}, true);
+    QCOMPARE(info.videoFrameCount, expectedFrames);
+    QCOMPARE(info.videoPacketCount, expectedFrames);
+    QVERIFY(info.frameRate.isEquivalentTo(rate));
+    QVERIFY(info.averageFrameRate.isEquivalentTo(rate));
+    QVERIFY(qAbs(info.videoDuration - ExportEngine::outputDuration(expectedFrames, rate))
+            <= 1.0 / rate.value());
+    QVERIFY(!info.audioCodecs.isEmpty());
+    QVERIFY(qAbs(info.audioStartTime - info.videoStartTime) <= 1024.0 / 48'000.0);
+    QVERIFY(qAbs(info.audioDuration - 60.0) <= 1024.0 / 48'000.0);
+}
+
 void TelemetryTests::normalizesNonZeroStreamPtsForVideoAndAudio()
 {
     const QString ffmpeg = FfmpegTools::ffmpegPath();
@@ -3160,9 +3218,16 @@ void TelemetryTests::boundsGpmfDepthAndRecordCount()
     for (qsizetype index = 0; index <= GoProTelemetrySource::kMaximumRecordCount; ++index) {
         manyRecords += emptyRecord;
     }
-    QVERIFY_THROWS_EXCEPTION(
-        ResourceLimitError,
-        (void) GoProTelemetrySource::decodeGpsPackets({{manyRecords, 0.0, 1.0}}, 1.0));
+    try {
+        (void) GoProTelemetrySource::decodeGpsPackets({{manyRecords, 0.0, 1.0}}, 1.0);
+        QFAIL("Expected excessive GPMF record headers to be rejected");
+    } catch (const ResourceLimitError &error) {
+        const QString diagnostic = QString::fromUtf8(error.what());
+        QVERIFY(diagnostic.contains(QString::number(GoProTelemetrySource::kMaximumRecordCount + 1)));
+        QVERIFY(diagnostic.contains(QString::number(GoProTelemetrySource::kMaximumRecordCount)));
+        QVERIFY(diagnostic.contains(QStringLiteral("packet 1")));
+        QVERIFY(diagnostic.contains(QStringLiteral("KLV header")));
+    }
 }
 
 void TelemetryTests::normalizesGpmfTimestamps()
@@ -3234,8 +3299,9 @@ void TelemetryTests::syncsOptionalRealRecording()
     const TelemetrySession telemetry = VboParser::parseFile(vboPath);
     const SyncCandidate candidate = TelemetrySyncEngine::synchronize(video.session, telemetry);
     qInfo().noquote()
-        << QStringLiteral("real GoPro: %1 packets, %2 %3 samples; offset=%4 correlation=%5 confidence=%6")
+        << QStringLiteral("real GoPro: %1 packets, %2 records, %3 %4 samples; offset=%5 correlation=%6 confidence=%7")
                .arg(video.packetCount)
+               .arg(video.recordCount)
                .arg(video.session.sampleCount)
                .arg(video.gpsStream)
                .arg(candidate.offset, 0, 'f', 3)

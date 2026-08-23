@@ -13,6 +13,7 @@
 
 #include <QGuiApplication>
 #include <QIcon>
+#include <QEvent>
 #include <QFile>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -22,6 +23,9 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QMediaPlayer>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QThread>
 #include <cmath>
@@ -480,6 +484,7 @@ int main(int argc, char *argv[])
     const bool exportTestMode = argc == 4 && QString::fromLocal8Bit(argv[1]) == "--export-test";
     const bool exportWorkerMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--export-worker";
     const bool benchmarkRenderMode = argc == 5 && QString::fromLocal8Bit(argv[1]) == "--benchmark-render";
+    const bool startupSmokeMode = argc == 2 && QString::fromLocal8Bit(argv[1]) == "--startup-smoke";
     if (qEnvironmentVariableIntValue("FLAPPEDEAR_EXPORT_SOFTWARE") == 1) {
         qputenv("QT_QUICK_BACKEND", "software");
     }
@@ -490,7 +495,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationDomain("flappedear.com");
     QCoreApplication::setApplicationName("FlappedEar Telemetry");
     const bool applicationMode = !renderStillMode && !exportTestMode && !exportWorkerMode
-        && !benchmarkRenderMode;
+        && !benchmarkRenderMode && !startupSmokeMode;
     if (applicationMode) {
         static_cast<void>(FlappedEar::AppLog::initialize());
         FlappedEar::AppLog::info(QStringLiteral("Application startup"));
@@ -526,6 +531,12 @@ int main(int argc, char *argv[])
         }
         return benchmarkRender(QSize(width, height), frames);
     }
+    if (startupSmokeMode) {
+        QStandardPaths::setTestModeEnabled(true);
+        QSettings settings;
+        settings.clear();
+        settings.sync();
+    }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, [] {
         FlappedEar::AppLog::info(QStringLiteral("Application shutdown"));
     });
@@ -547,7 +558,29 @@ int main(int argc, char *argv[])
         if (!engine.rootObjects().isEmpty()) {
             FlappedEar::AppLog::info(QStringLiteral("Main QML loaded"));
         }
-        result = app.exec();
+        if (startupSmokeMode && !engine.rootObjects().isEmpty()) {
+            QObject *root = engine.rootObjects().constFirst();
+            QCoreApplication::processEvents();
+            const qsizetype closedPlayers = root->findChildren<QMediaPlayer *>().size();
+            controller.setAnalysisVisible(true);
+            QCoreApplication::processEvents();
+            const qsizetype openPlayers = root->findChildren<QMediaPlayer *>().size();
+            controller.setAnalysisVisible(false);
+            QCoreApplication::processEvents();
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            const qsizetype releasedPlayers = root->findChildren<QMediaPlayer *>().size();
+            if (closedPlayers != 1 || openPlayers != 2 || releasedPlayers != 1) {
+                qCritical().noquote() << QStringLiteral(
+                    "Startup smoke failed: media players closed=%1 open=%2 released=%3")
+                                             .arg(closedPlayers).arg(openPlayers).arg(releasedPlayers);
+                result = EXIT_FAILURE;
+            } else {
+                qInfo() << "Startup smoke passed: Analysis decoder lifecycle is lazy";
+                result = EXIT_SUCCESS;
+            }
+        } else {
+            result = app.exec();
+        }
     }
     FlappedEar::AppLog::restoreQtMessageHandler();
     FlappedEar::AppLog::shutdown();

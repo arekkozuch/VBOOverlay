@@ -676,6 +676,7 @@ void AppController::performClearProject()
     m_previewRenderContext.setTrackGeometry(nullptr);
     m_trackPoints.clear();
     setAnalysisChannels({});
+    setAnalysisVisible(false);
     m_playbackTime = 0.0;
     m_sync = {};
     m_syncCandidate.clear();
@@ -929,7 +930,6 @@ bool AppController::beginProjectLoad(
     result.project = project;
     result.widgets = scene.value(QStringLiteral("widgets")).toArray();
     result.analysisChannels = channels;
-    result.analysisVisible = analysis.value(QStringLiteral("visible")).toBool(true);
     result.sync = {offset, timeScale};
     result.generation = generation;
     result.recovered = recovered;
@@ -1005,7 +1005,7 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     m_syncCandidate.clear();
     m_analysisChannels.clear();
     setAnalysisChannels(result.analysisChannels);
-    setAnalysisVisible(result.analysisVisible);
+    setAnalysisVisible(false);
     reconcileAnalysisChannels();
     if (!result.projectPath.isEmpty()) {
         m_settings.setValue("project/path", result.projectPath);
@@ -1070,7 +1070,7 @@ QJsonObject AppController::currentProjectObject(const QString &projectPath) cons
     project.insert("scene", scene);
     QJsonObject analysis = project.value("analysis").toObject();
     analysis.insert("channels", QJsonArray::fromStringList(m_analysisChannels));
-    analysis.insert("visible", m_analysisVisible);
+    analysis.remove(QStringLiteral("visible"));
     project.insert("analysis", analysis);
     if (!project.contains("mapSettings")) {
         project.insert("mapSettings", QJsonObject{{"providerId", "none"}});
@@ -1904,7 +1904,6 @@ void AppController::setAnalysisVisible(const bool visible)
     }
     m_analysisVisible = visible;
     emit analysisChanged();
-    markPersistentChange();
 }
 
 QVariant AppController::semanticValue(const QString &alias) const

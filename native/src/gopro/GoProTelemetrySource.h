@@ -18,6 +18,7 @@ struct GpmfPacket {
 struct GoProTelemetryResult {
     TelemetrySession session;
     qsizetype packetCount = 0;
+    qsizetype recordCount = 0;
     QString gpsStream;
 };
 
@@ -26,7 +27,11 @@ public:
     static constexpr qsizetype kMaximumProbeOutputBytes = 64 * 1024 * 1024;
     static constexpr qsizetype kMaximumPacketCount = 100'000;
     static constexpr qint64 kMaximumMetadataBytes = 512LL * 1024 * 1024;
-    static constexpr qsizetype kMaximumRecordCount = 250'000;
+    // Counts every parsed KLV header across the metadata track. The byte,
+    // packet, and depth limits independently bound storage and nesting; this
+    // cap bounds header-processing work with substantial headroom over real
+    // multi-sensor GoPro recordings.
+    static constexpr qsizetype kMaximumRecordCount = 1'000'000;
     static constexpr int kMaximumContainerDepth = 32;
 
     [[nodiscard]] static GoProTelemetryResult load(

@@ -50,7 +50,7 @@ The staging step exists because FFmpeg framesync can select the latest secondary
 
 ## Stage B: compose the final MP4
 
-Stage B trims the source video to the requested range, normalizes timestamps to zero, then applies FFmpeg's `fps` filter at the effective exact rational rate before framesync. The CFR source and the completed CFR overlay therefore enter framesync on the same deterministic cadence. The filter is limited to the authoritative `[start, end)` frame count before composition.
+Stage B trims the source video at the requested start and normalizes timestamps to zero, then applies FFmpeg's `fps` filter at the effective exact rational rate before framesync. The pre-`fps` stream intentionally retains end-boundary lookahead: at fractional rates an exact range endpoint can fall between source frames, and removing the following frame prevents `fps=round=near` from selecting the last scheduled pre-end frame. The authoritative `end_frame=expectedFrames` trim after cadence conversion enforces the `[start, end)` schedule without timeline drift. The CFR source and completed CFR overlay therefore enter framesync on the same deterministic cadence.
 
 The output also uses the per-video-stream `-fps_mode:v cfr` control. The `fps` filter establishes the cadence before framesync; `-fps_mode:v cfr` makes the final output policy explicit without relying on deprecated global `-vsync`. Stage B then overlays telemetry, encodes HEVC, optionally trims/re-encodes source audio to AAC, and writes an MP4 staging target.
 
@@ -70,8 +70,11 @@ older files matching that export-log naming convention in this dedicated directo
 keeping approximately the ten newest logs.
 One cancellation file is consulted by input/temporary/final `ffprobe` calls, encoder discovery/capability checks, and both FFmpeg stages. Cancellation follows cooperative request, a short graceful wait, process-tree termination, then force kill. On macOS/Unix the GUI worker starts in a dedicated process group; FFmpeg and ffprobe inherit it, so forced worker shutdown reaches the complete export tree. The current Unix behavior is runtime-tested. Windows assigns the top-level worker to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job and reports the exact failed Job Object API if that cannot be established; export then fails before worker release. The worker waits for an explicit parent readiness file before starting FFmpeg/ffprobe work, closing the assignment-before-descendant race in the current design. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; heavy 4K GUI responsiveness, a wider GPU/encoder matrix, packaging/signing, and multi-instance export-log safety remain open.
 Final validation checks for a nonempty result, HEVC codec, dimensions, exact
-nominal and average rate, progress frame count, independent video packet count
-when available, zero video start, scheduled video duration, and requested audio.
+nominal and average rate, authoritative video packet count when available, zero
+video start, scheduled video duration, and requested audio. FFmpeg progress is
+retained for diagnostics and progress reporting, but an apparent mismatch does
+not bypass the final probe or override its packet count. A real packet deficit or
+surplus fails with direction-specific diagnostics.
 After validation, an existing destination is replaced only if its prepare-time native regular-file
 identity, size, and modification state still match; otherwise encoding is reported as finished but the
 changed destination is preserved and commit fails.
@@ -82,6 +85,6 @@ Audio is trimmed from the requested source interval and reset to output time zer
 
 Every final export is CFR at the effective exact rational export rate. For a selected source interval `[start, end)`, `expectedFrames` is `ceil((end - start) * rate)` and output video duration is `expectedFrames / rate`; the final frame's PTS is `(expectedFrames - 1) / rate`. Telemetry frame `N` remains evaluated at `start + N / rate`, while the output timeline begins at zero.
 
-The normal validation path uses FFmpeg's final progress frame count plus an independent packet count where the container exposes one. Full decoded frame counts remain part of deterministic integration tests rather than every production export, avoiding an unnecessary full decode of long media.
+The normal validation path records FFmpeg's final progress frame count and uses the independent final packet count as authoritative where the container exposes one. Full decoded frame counts remain part of deterministic integration tests rather than every production export, avoiding an unnecessary full decode of long media.
 
 For target-file transaction guarantees, see [export-output-safety.md](export-output-safety.md).

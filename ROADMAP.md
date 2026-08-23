@@ -33,7 +33,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [ ] Add native Windows ACL-denied filesystem coverage and validate multi-instance export-log safety.
 - [ ] Define the packaging, signing, and release gate.
 
-Development validation includes a successful private non-zero-range 4K, approximately 59.94 fps HEVC/AAC export on macOS. It does not replace wider real-media or Windows runtime validation.
+Development validation includes a successful private 3840×2160, `60000/1001`, 30→90 HEVC/AAC export on macOS with 3,597 final packets, plus restored real GoPro/VBO auto-sync at +90.217 s and 0.999575 correlation. It does not replace wider real-media or Windows runtime validation.
 
 ## Product work
 

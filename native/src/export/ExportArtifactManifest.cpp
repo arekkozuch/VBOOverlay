@@ -113,6 +113,10 @@ bool ExportArtifactManifest::read(const QString &manifestPath, ExportArtifactMan
 
 bool ExportArtifactManifest::cleanupOwned(const QString &manifestPath, QString *error)
 {
+    if (!QFileInfo::exists(manifestPath)) {
+        if (error) error->clear();
+        return true;
+    }
     ExportArtifactManifestData data;
     if (!read(manifestPath, &data, error)) return false;
     bool clean = true;

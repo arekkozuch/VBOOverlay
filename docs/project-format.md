@@ -41,6 +41,10 @@ Locate uses the ordinary bounded, cancellable, generation-guarded video probe or
 
 Successful relinking or intentional source replacement updates document source metadata and marks the project dirty. Resolving the same persisted relative reference after moving the complete folder does not mark it dirty. Recovery snapshots serialize the same complete source objects and remain unsaved document state; they never replace the saved project as authoritative clean state.
 
+## Analysis state
+
+`analysis.channels` is project content and remains in canonical saves and recovery snapshots. Whether the floating Analysis window is open is transient UI state: startup, New, and Open always begin with it closed. Older v2 documents may contain `analysis.visible`; the loader safely ignores that field and the next canonical save removes it without discarding channel configuration or unknown sibling fields.
+
 ## Legacy v2 compatibility
 
 When `sources.video` or `sources.telemetry` is absent, the loader reads the old absolute-only `videoPath` or `vboPath` field. Available sources load normally and acquire fingerprints in memory. Missing legacy sources become independently relinkable rather than failing project open. The next save writes the canonical `sources` form, removes the known legacy path fields, and preserves unrelated unknown fields.

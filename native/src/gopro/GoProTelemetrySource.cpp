@@ -41,6 +41,7 @@ struct ProbePacket {
 
 struct DecodeState {
     qsizetype recordCount = 0;
+    qsizetype packetIndex = 0;
     CancellationCheck cancelled;
 };
 
@@ -120,14 +121,21 @@ QJsonObject runProbe(
     return document.object();
 }
 
-QVector<Record> records(const QByteArray &bytes, DecodeState &state)
+QVector<Record> records(const QByteArray &bytes, DecodeState &state, const QString &context)
 {
     QVector<Record> result;
     qsizetype offset = 0;
     while (offset + 8 <= bytes.size()) {
         if ((state.recordCount & 0xff) == 0) throwIfCancelled(state.cancelled);
         if (++state.recordCount > GoProTelemetrySource::kMaximumRecordCount) {
-            throw ResourceLimitError("GPMF metadata contains too many records.");
+            throw ResourceLimitError(
+                QStringLiteral("GPMF metadata KLV header count %1 exceeds configured limit %2 "
+                               "while parsing packet %3 (%4).")
+                    .arg(state.recordCount)
+                    .arg(GoProTelemetrySource::kMaximumRecordCount)
+                    .arg(state.packetIndex + 1)
+                    .arg(context)
+                    .toStdString());
         }
         const char *header = bytes.constData() + offset;
         const int size = static_cast<unsigned char>(header[5]);
@@ -186,7 +194,7 @@ void appendGpsStream(
     QVector<GpsSample> &gps9,
     DecodeState &state)
 {
-    const QVector<Record> streamRecords = records(streamData, state);
+    const QVector<Record> streamRecords = records(streamData, state, QStringLiteral("STRM payload"));
     double streamPts = packetPts;
     const auto timestampIt =
         std::find_if(streamRecords.cbegin(), streamRecords.cend(), [](const Record &item) {
@@ -257,7 +265,9 @@ void visitContainers(
     if (depth > GoProTelemetrySource::kMaximumContainerDepth) {
         throw ResourceLimitError("GPMF metadata exceeds the supported container depth.");
     }
-    for (const Record &record : records(bytes, state)) {
+    for (const Record &record : records(bytes, state, depth == 0
+            ? QStringLiteral("packet root")
+            : QStringLiteral("container depth %1").arg(depth))) {
         if (record.key == "STRM") {
             appendGpsStream(record.data, pts, duration, gps5, gps9, state);
         } else if (record.type == 0) {
@@ -410,7 +420,7 @@ GoProTelemetryResult GoProTelemetrySource::decodeGpsPackets(
     qint64 totalBytes = 0;
     QVector<GpsSample> gps5;
     QVector<GpsSample> gps9;
-    DecodeState state{0, cancelled};
+    DecodeState state{0, 0, cancelled};
     for (qsizetype packetIndex = 0; packetIndex < packets.size(); ++packetIndex) {
         if ((packetIndex & 0x3f) == 0) throwIfCancelled(cancelled);
         const GpmfPacket &packet = packets[packetIndex];
@@ -421,6 +431,7 @@ GoProTelemetryResult GoProTelemetrySource::decodeGpsPackets(
             throw ResourceLimitError("GPMF metadata exceeds the supported 512 MiB limit.");
         }
         totalBytes += packet.data.size();
+        state.packetIndex = packetIndex;
         visitContainers(packet.data, packet.pts, packet.duration, gps5, gps9, state, 0);
     }
     const bool useGps9 = !gps9.isEmpty();
@@ -470,7 +481,7 @@ GoProTelemetryResult GoProTelemetrySource::decodeGpsPackets(
     session.aliases.insert("latitude", "GoPro latitude");
     session.aliases.insert("longitude", "GoPro longitude");
     session.aliases.insert("speed", "GoPro GPS speed");
-    return {std::move(session), packets.size(), streamName};
+    return {std::move(session), packets.size(), state.recordCount, streamName};
 }
 
 } // namespace FlappedEar
