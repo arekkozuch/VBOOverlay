@@ -680,6 +680,13 @@ QString WidgetModel::importTemplate(const QUrl &url)
     return item.value("id").toString();
 }
 
+void WidgetModel::reloadTemplates()
+{
+    m_userTemplates = {};
+    loadUserTemplates();
+    emit templatesChanged();
+}
+
 void WidgetModel::loadUserTemplates()
 {
     QFile file(templateStorePath());

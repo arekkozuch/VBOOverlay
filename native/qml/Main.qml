@@ -28,9 +28,6 @@ ApplicationWindow {
     property bool welcomeVisible: !appController.projectPath && !appController.videoName
     property int selectedWidgetIndex: -1
     property var selectedWidgetIndices: []
-    // A picker selection is only a candidate. This records the custom template whose
-    // layout was actually applied (or just created), so Save current cannot overwrite it by accident.
-    property string activeTemplateId: ""
     property var widgetCatalog: [
         {
             "label": "Speed",
@@ -421,15 +418,14 @@ ApplicationWindow {
         return names;
     }
     function templateIndexById(templateId) {
-        for (let index = 0; index < appController.widgetModel.templates.length; ++index) {
-            if (appController.widgetModel.templates[index].id === templateId)
-                return index;
-        }
-        return 0;
+        // Keep the ID-derived index binding live when the model order changes.
+        appController.widgetModel.templates;
+        return appController.templateIndexForId(templateId);
     }
     function selectedTemplate() {
         const templates = appController.widgetModel.templates;
-        return templatePicker.currentIndex >= 0 && templatePicker.currentIndex < templates.length ? templates[templatePicker.currentIndex] : null;
+        const index = window.templateIndexById(appController.selectedTemplateId);
+        return index >= 0 && index < templates.length ? templates[index] : null;
     }
     function selectedWidgetCues() {
         appController.widgetModel.revision;
@@ -583,7 +579,7 @@ ApplicationWindow {
         onAccepted: {
             const templateId = appController.widgetModel.importTemplate(selectedFile);
             if (templateId)
-                templatePicker.currentIndex = window.templateIndexById(templateId);
+                appController.selectTemplate(templateId);
         }
     }
     FileDialog {
@@ -1190,8 +1186,8 @@ ApplicationWindow {
                     onClicked: {
                         const templateId = appController.widgetModel.saveCurrentAsTemplate(templateName.text, templateDescription.text);
                         if (templateId) {
-                            templatePicker.currentIndex = window.templateIndexById(templateId);
-                            window.activeTemplateId = templateId;
+                            appController.selectTemplate(templateId);
+                            appController.markTemplateActive(templateId);
                             templateSavePopup.close();
                         }
                     }
@@ -1381,11 +1377,11 @@ ApplicationWindow {
                         id: templatePicker
                         Layout.fillWidth: true
                         model: window.templateNames()
-                        currentIndex: 0
+                        currentIndex: window.templateIndexById(appController.selectedTemplateId)
                         onActivated: {
-                            const item = window.selectedTemplate();
-                            if (!item || item.id !== window.activeTemplateId)
-                                window.activeTemplateId = "";
+                            const templates = appController.widgetModel.templates;
+                            if (currentIndex >= 0 && currentIndex < templates.length)
+                                appController.selectTemplate(templates[currentIndex].id);
                         }
                     }
                     Label {
@@ -1403,8 +1399,7 @@ ApplicationWindow {
                             const item = window.selectedTemplate();
                             if (item) {
                                 window.clearWidgetSelection();
-                                if (appController.widgetModel.applyTemplate(item.id))
-                                    window.activeTemplateId = item.builtIn ? "" : item.id;
+                                appController.applyTemplate(item.id);
                             }
                         }
                     }
@@ -1418,10 +1413,7 @@ ApplicationWindow {
                             compact: true
                             text: qsTr("Save current")
                             onClicked: {
-                                const item = window.selectedTemplate();
-                                if (item && !item.builtIn && item.id === window.activeTemplateId) {
-                                    appController.widgetModel.updateTemplate(item.id);
-                                } else {
+                                if (!appController.saveActiveTemplate()) {
                                     templateSavePopup.open();
                                 }
                             }
@@ -1453,11 +1445,8 @@ ApplicationWindow {
                             enabled: window.selectedTemplate() !== null && !window.selectedTemplate().builtIn
                             onClicked: {
                                 const item = window.selectedTemplate();
-                                if (item && appController.widgetModel.deleteTemplate(item.id)) {
-                                    if (window.activeTemplateId === item.id)
-                                        window.activeTemplateId = "";
-                                    templatePicker.currentIndex = 0;
-                                }
+                                if (item)
+                                    appController.widgetModel.deleteTemplate(item.id);
                             }
                         }
                     }

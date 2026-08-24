@@ -74,6 +74,7 @@ private slots:
     void providesCustomizableArchetypes();
     void persistsAndSharesCustomTemplates();
     void updatesCustomTemplatesInPlace();
+    void preservesTemplatePickerSelectionById();
     void preservesOptionalFontSettings();
     void preservesGForcePresentationSettings();
     void providesGForceVariants();
@@ -1275,6 +1276,92 @@ void TelemetryTests::updatesCustomTemplatesInPlace()
     qputenv("FLAPPEDEAR_TEMPLATE_STORE", storePath.toUtf8());
     QVERIFY(compatibleReload.applyTemplate(templateId));
     QCOMPARE(compatibleReload.widget(0).value("settings").toMap().value("fontSize").toDouble(), 60.0);
+}
+
+void TelemetryTests::preservesTemplatePickerSelectionById()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const bool hadOverride = qEnvironmentVariableIsSet("FLAPPEDEAR_TEMPLATE_STORE");
+    const QByteArray previousOverride = qgetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    const QString storePath = directory.filePath("layout-templates.json");
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", storePath.toUtf8());
+    const auto restoreEnvironment = qScopeGuard([hadOverride, previousOverride] {
+        if (hadOverride) {
+            qputenv("FLAPPEDEAR_TEMPLATE_STORE", previousOverride);
+        } else {
+            qunsetenv("FLAPPEDEAR_TEMPLATE_STORE");
+        }
+    });
+
+    QString templateA;
+    QString templateB;
+    QString templateC;
+    {
+        AppController controller(nullptr, directory.filePath("first-recovery.json"));
+        WidgetModel *model = controller.widgetModel();
+        templateA = model->saveCurrentAsTemplate("A", "unrelated");
+        templateB = model->saveCurrentAsTemplate("B", "selected and applied");
+        QVERIFY(!templateA.isEmpty());
+        QVERIFY(!templateB.isEmpty());
+
+        controller.selectTemplate(templateB);
+        QCOMPARE(controller.selectedTemplateId(), templateB);
+        model->reloadTemplates();
+        QCOMPARE(controller.selectedTemplateId(), templateB);
+
+        QVERIFY(controller.applyTemplate(templateB));
+        QCOMPARE(controller.selectedTemplateId(), templateB);
+        QCOMPARE(controller.activeTemplateId(), templateB);
+        model->setSetting(0, "fontSize", 47);
+        QCOMPARE(controller.selectedTemplateId(), templateB);
+        QCOMPARE(controller.activeTemplateId(), templateB);
+        QVERIFY(controller.saveActiveTemplate());
+        QCOMPARE(controller.selectedTemplateId(), templateB);
+        QCOMPARE(controller.activeTemplateId(), templateB);
+
+        templateC = model->saveCurrentAsTemplate("C", "saved as new");
+        QVERIFY(!templateC.isEmpty());
+        controller.selectTemplate(templateC);
+        controller.markTemplateActive(templateC);
+        QCOMPARE(controller.selectedTemplateId(), templateC);
+        QCOMPARE(controller.activeTemplateId(), templateC);
+    }
+
+    AppController restored(nullptr, directory.filePath("second-recovery.json"));
+    QCOMPARE(restored.selectedTemplateId(), templateC);
+    QVERIFY(restored.activeTemplateId().isEmpty());
+    QVERIFY(!restored.dirty());
+
+    restored.markTemplateActive(templateC);
+    const QString currentProject = directory.filePath("current.fetproject");
+    QVERIFY(restored.saveProject(QUrl::fromLocalFile(currentProject)));
+    const QString arbitraryProject = directory.filePath("arbitrary.fetproject");
+    QVERIFY(writeBytes(arbitraryProject, QJsonDocument(testProject(1.25)).toJson()));
+    restored.requestOpenProject(QUrl::fromLocalFile(arbitraryProject));
+    QTRY_VERIFY(!restored.projectLoading());
+    QVERIFY(restored.activeTemplateId().isEmpty());
+    QCOMPARE(restored.selectedTemplateId(), templateC);
+    QVERIFY(!restored.dirty());
+
+    restored.selectTemplate(templateB);
+    QCOMPARE(restored.selectedTemplateId(), templateB);
+    QVERIFY(!restored.dirty());
+    restored.selectTemplate(templateC);
+    QVERIFY(!restored.dirty());
+
+    QVERIFY(restored.widgetModel()->deleteTemplate(templateA));
+    QCOMPARE(restored.selectedTemplateId(), templateC);
+    QVERIFY(restored.widgetModel()->deleteTemplate(templateC));
+    const QVariantList remaining = restored.widgetModel()->templates();
+    QVERIFY(!remaining.isEmpty());
+    QCOMPARE(restored.selectedTemplateId(), remaining.constFirst().toMap().value("id").toString());
+
+    settings.clear();
+    settings.sync();
 }
 
 void TelemetryTests::preservesOptionalFontSettings()

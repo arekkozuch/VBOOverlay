@@ -79,6 +79,7 @@ public:
     Q_INVOKABLE bool deleteTemplate(const QString &templateId);
     Q_INVOKABLE bool exportTemplate(const QString &templateId, const QUrl &url) const;
     Q_INVOKABLE QString importTemplate(const QUrl &url);
+    Q_INVOKABLE void reloadTemplates();
 
     [[nodiscard]] QJsonArray toJson() const;
     bool fromJson(const QJsonArray &array);

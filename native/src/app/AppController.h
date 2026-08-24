@@ -84,6 +84,8 @@ class AppController final : public QObject {
     Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY recoveryChanged)
     Q_PROPERTY(QString sourceMismatchType READ sourceMismatchType NOTIFY sourceMismatchChanged)
     Q_PROPERTY(QString sourceMismatchCandidateName READ sourceMismatchCandidateName NOTIFY sourceMismatchChanged)
+    Q_PROPERTY(QString selectedTemplateId READ selectedTemplateId NOTIFY templateUiStateChanged)
+    Q_PROPERTY(QString activeTemplateId READ activeTemplateId NOTIFY templateUiStateChanged)
 
 public:
     explicit AppController(QObject *parent = nullptr, QString recoveryPath = {});
@@ -142,6 +144,8 @@ public:
     [[nodiscard]] bool recoveryPending() const;
     [[nodiscard]] QString sourceMismatchType() const;
     [[nodiscard]] QString sourceMismatchCandidateName() const;
+    [[nodiscard]] QString selectedTemplateId() const;
+    [[nodiscard]] QString activeTemplateId() const;
 
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
@@ -184,6 +188,12 @@ public:
     Q_INVOKABLE void saveWindowState(int x, int y, int width, int height);
     Q_INVOKABLE void saveAnalysisWindowState(
         int x, int y, int width, int height, int sidebarWidth, int videoHeight);
+    Q_INVOKABLE int templateIndexForId(const QString &templateId) const;
+    Q_INVOKABLE void selectTemplate(const QString &templateId);
+    Q_INVOKABLE void reconcileTemplateSelection();
+    Q_INVOKABLE bool applyTemplate(const QString &templateId);
+    Q_INVOKABLE void markTemplateActive(const QString &templateId);
+    Q_INVOKABLE bool saveActiveTemplate();
 
 public slots:
     void setPlaybackTime(double seconds);
@@ -209,6 +219,7 @@ signals:
     void projectLoadChanged();
     void recoveryChanged();
     void sourceMismatchChanged();
+    void templateUiStateChanged();
     void saveAsRequested();
     void quitApproved();
 
@@ -300,6 +311,7 @@ private:
     void beginDestructiveAction(ProjectDocumentState::DestructiveAction action, const QUrl &openUrl = {});
     void performPendingDestructiveAction();
     void reconcileAnalysisChannels();
+    void clearActiveTemplate();
     void handleExportOutput();
     void finishExport(int exitCode, QProcess::ExitStatus exitStatus);
     void appendExportDiagnostic(const QString &entry);
@@ -347,6 +359,8 @@ private:
     VideoProbeResult m_pendingMismatchVideo;
     VboLoadResult m_pendingMismatchVbo;
     QString m_sourceMismatchType;
+    QString m_selectedTemplateId;
+    QString m_activeTemplateId;
     bool m_projectLoading = false;
     QString m_projectLoadStage;
     QString m_projectLoadError;
