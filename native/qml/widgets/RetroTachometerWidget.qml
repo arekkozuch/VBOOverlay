@@ -64,6 +64,12 @@ Item {
                 ctx.arc(cx, cy, radius * ring, Math.PI * 0.5, Math.PI * 2);
                 ctx.stroke();
             }
+            ctx.strokeStyle = settings.warningColor || "#f05a43";
+            ctx.lineWidth = Math.max(4 * frame.sceneScale, radius * 0.065);
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * 1.16,
+                    Math.PI * 0.5 + Math.PI * 1.5 * 0.78, Math.PI * 2);
+            ctx.stroke();
             for (let step = 0; step <= steps; ++step) {
                 const angle = Math.PI * 0.5 + Math.PI * 1.5 * step / steps;
                 const highRpm = step / steps >= 0.78;
@@ -76,6 +82,12 @@ Item {
                 ctx.stroke();
                 ctx.fillText(String(Math.round((minimum + (maximum - minimum) * step / steps) / 1000)), cx + Math.cos(angle) * radius * 1.35, cy + Math.sin(angle) * radius * 1.35);
             }
+            ctx.fillStyle = settings.dialColor || "#f2f5f7";
+            ctx.font = "600 " + Math.max(9 * frame.sceneScale, radius * 0.13) + "px " + frame.family;
+            ctx.fillText(settings.label || "RPM", cx, cy - radius * 0.34);
+            ctx.fillStyle = settings.secondaryTextColor || "#b5c0ca";
+            ctx.font = "500 " + Math.max(8 * frame.sceneScale, radius * 0.10) + "px " + frame.family;
+            ctx.fillText(settings.scaleLabel || "x1000", cx, cy - radius * 0.20);
             if (hasValue) {
                 const angle = Math.PI * 0.5 + Math.PI * 1.5 * progress;
                 ctx.strokeStyle = settings.needleColor || "#e32636";
@@ -89,8 +101,8 @@ Item {
                 ctx.arc(cx, cy, Math.max(5 * frame.sceneScale, radius * 0.12), 0, Math.PI * 2);
                 ctx.fill();
             }
-            const plateWidth = radius * 1.15;
-            const plateHeight = Math.max(18 * frame.sceneScale, radius * 0.32);
+            const plateWidth = radius * 1.35;
+            const plateHeight = Math.max(22 * frame.sceneScale, radius * 0.42);
             const plateX = cx - plateWidth / 2;
             const plateY = cy + radius * 0.52;
             ctx.globalAlpha = Number(settings.backgroundOpacity ?? 0.90);
@@ -103,11 +115,8 @@ Item {
             roundedPath(ctx, plateX, plateY, plateWidth, plateHeight, Math.max(3 * frame.sceneScale, plateHeight * 0.18));
             ctx.stroke();
             ctx.fillStyle = settings.dialColor || "#f2f5f7";
-            ctx.font = "700 " + Math.max(11 * frame.sceneScale, plateHeight * 0.52) + "px " + frame.family;
-            ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.53);
-            ctx.font = "600 " + Math.max(8 * frame.sceneScale, plateHeight * 0.28) + "px " + frame.family;
-            ctx.fillStyle = "#c0c8d0";
-            ctx.fillText(settings.label || "RPM", cx, plateY + plateHeight * 0.84);
+            ctx.font = "700 " + Math.max(14 * frame.sceneScale, plateHeight * 0.63) + "px " + frame.family;
+            ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.54);
         }
     }
     Connections {

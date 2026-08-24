@@ -11,6 +11,7 @@ Item {
     property bool hasValue: adjustedValue !== undefined && adjustedValue !== null
         && Number.isFinite(Number(adjustedValue))
     property string displayUnit: frame.widgetSettings.unit || ""
+    property string displayIcon: frame.widgetSettings.icon || ""
     property string formattedValue: {
         if (!hasValue)
             return frame.widgetSettings.fallbackText ?? "—";
@@ -31,7 +32,20 @@ Item {
         anchors.margins: panel.innerPadding
         spacing: 8 * frame.sceneScale
         Label {
-            width: parent.width * 0.46
+            id: iconLabel
+            visible: root.displayIcon !== ""
+            width: visible ? 24 * frame.sceneScale : 0
+            anchors.verticalCenter: parent.verticalCenter
+            horizontalAlignment: Text.AlignHCenter
+            text: root.displayIcon
+            color: frame.widgetSettings.labelColor || frame.secondary
+            font.family: frame.family
+            font.weight: Font.DemiBold
+            font.pixelSize: Math.min(19 * frame.sceneScale, parent.height * 0.38)
+        }
+        Label {
+            id: valueLabel
+            width: parent.width * (iconLabel.visible ? 0.42 : 0.50)
             anchors.verticalCenter: parent.verticalCenter
             text: frame.widgetSettings.label || frame.widgetSettings.source || "VALUE"
             color: frame.widgetSettings.labelColor || frame.secondary
@@ -41,7 +55,8 @@ Item {
             elide: Text.ElideRight
         }
         Row {
-            width: parent.width - parent.children[0].width - parent.spacing
+            width: parent.width - iconLabel.width - valueLabel.width
+                - parent.spacing * (iconLabel.visible ? 2 : 1)
             height: parent.height
             spacing: 4 * frame.sceneScale
             layoutDirection: Qt.RightToLeft
@@ -66,5 +81,18 @@ Item {
                 elide: Text.ElideLeft
             }
         }
+    }
+    Rectangle {
+        visible: (frame.widgetSettings.showSeparator ?? true)
+            && (frame.widgetSettings.stackPosition === "middle"
+                || frame.widgetSettings.stackPosition === "bottom")
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: panel.innerPadding
+        anchors.rightMargin: panel.innerPadding
+        height: Math.max(1, frame.sceneScale)
+        color: frame.panelBorder
+        opacity: 0.42
     }
 }

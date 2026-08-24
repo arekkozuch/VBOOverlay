@@ -93,7 +93,7 @@ Item {
             property color gForceAccent: widgetSettings.barColor || "#f5a623"
             property color neutralTrack: widgetSettings.barBackgroundColor || "#24303d"
             property color panelBorder: widgetSettings.borderColor || "#8895a3"
-            property real panelRadius: Number(widgetSettings.cornerRadius ?? 12) * sceneScale
+            property real panelRadius: Number(widgetSettings.cornerRadius ?? 14) * sceneScale
             property real valueScale: Number(widgetSettings.valueFontScale ?? 1)
             property real labelScale: Number(widgetSettings.labelFontScale ?? 1)
             // These renderers own their surfaces through TelemetryPanel.qml.

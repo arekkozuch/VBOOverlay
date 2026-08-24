@@ -93,12 +93,13 @@ int renderStill(const QString &path)
     return EXIT_SUCCESS;
 }
 
-int renderVisualSmoke(const QString &path)
+int renderVisualSmoke(const QString &path, const bool darkBackground)
 {
     QQmlEngine engine;
     QQmlComponent component(
         &engine, QUrl(QStringLiteral("qrc:/qt/qml/FlappedEar/qml/VisualSmokeScene.qml")));
-    QQuickItem *scene = qobject_cast<QQuickItem *>(component.create());
+    QQuickItem *scene = qobject_cast<QQuickItem *>(component.createWithInitialProperties(
+        {{QStringLiteral("darkBackground"), darkBackground}}));
     if (!scene) {
         qCritical().noquote() << QStringLiteral("Could not create visual smoke scene: %1")
                                       .arg(component.errorString());
@@ -581,7 +582,9 @@ int exportWorker(const QString &configPath)
 int main(int argc, char *argv[])
 {
     const bool renderStillMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--render-still";
-    const bool renderVisualSmokeMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--render-visual-smoke";
+    const QString command = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QString{};
+    const bool renderVisualSmokeMode = argc == 3 && command == "--render-visual-smoke";
+    const bool renderVisualSmokeDarkMode = argc == 3 && command == "--render-visual-smoke-dark";
     const bool exportTestMode = argc == 4 && QString::fromLocal8Bit(argv[1]) == "--export-test";
     const bool exportWorkerMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--export-worker";
     const bool benchmarkRenderMode = argc == 5 && QString::fromLocal8Bit(argv[1]) == "--benchmark-render";
@@ -595,7 +598,8 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("FlappedEar");
     QCoreApplication::setOrganizationDomain("flappedear.com");
     QCoreApplication::setApplicationName("FlappedEar Telemetry");
-    const bool applicationMode = !renderStillMode && !renderVisualSmokeMode && !exportTestMode && !exportWorkerMode
+    const bool applicationMode = !renderStillMode && !renderVisualSmokeMode && !renderVisualSmokeDarkMode
+        && !exportTestMode && !exportWorkerMode
         && !benchmarkRenderMode && !startupSmokeMode;
     if (applicationMode) {
         static_cast<void>(FlappedEar::AppLog::initialize());
@@ -614,7 +618,10 @@ int main(int argc, char *argv[])
         return renderStill(QString::fromLocal8Bit(argv[2]));
     }
     if (renderVisualSmokeMode) {
-        return renderVisualSmoke(QString::fromLocal8Bit(argv[2]));
+        return renderVisualSmoke(QString::fromLocal8Bit(argv[2]), false);
+    }
+    if (renderVisualSmokeDarkMode) {
+        return renderVisualSmoke(QString::fromLocal8Bit(argv[2]), true);
     }
     if (exportTestMode) {
         return exportTest(QString::fromLocal8Bit(argv[2]), QString::fromLocal8Bit(argv[3]));

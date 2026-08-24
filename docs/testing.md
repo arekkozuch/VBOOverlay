@@ -9,6 +9,17 @@ ctest --test-dir build-native --output-on-failure
 
 Cloud CI is intentionally disabled. Run the local gate appropriate to the change before claiming a behavior works.
 
+For broadcast-HUD visual changes, render the same production QML acceptance composition against both supplied synthetic backgrounds:
+
+```bash
+"build-native/native/FlappedEar Telemetry.app/Contents/MacOS/FlappedEar Telemetry" \
+  --render-visual-smoke docs/assets/motorsport-broadcast-acceptance.png
+"build-native/native/FlappedEar Telemetry.app/Contents/MacOS/FlappedEar Telemetry" \
+  --render-visual-smoke-dark docs/assets/motorsport-broadcast-acceptance-dark.png
+```
+
+The capture refuses to save unless all nine production widget frames are visible. Inspect both images; a successful command alone is not a visual acceptance result.
+
 ## Private real fixtures
 
 Optional real-media tests read paths from environment variables:

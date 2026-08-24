@@ -15,13 +15,16 @@ Item {
     property real backgroundOpacity: frame ? Number(frame.widgetSettings.backgroundOpacity ?? 0.86) : 0.86
     property real borderOpacity: frame ? Number(frame.widgetSettings.borderOpacity ?? 0.55) : 0.55
     property real borderWidth: frame ? Number(frame.widgetSettings.borderWidth ?? 1) * frame.sceneScale : 1
-    property real cornerRadius: frame ? frame.panelRadius : 12
+    property real cornerRadius: frame ? frame.panelRadius : 14
     property real innerPadding: frame ? frame.pad : 12
+    property string stackPosition: frame ? String(frame.widgetSettings.stackPosition ?? "single") : "single"
+    readonly property bool squareTop: stackPosition === "middle" || stackPosition === "bottom"
+    readonly property bool squareBottom: stackPosition === "middle" || stackPosition === "top"
 
     // Canonical scene-pixel typography roles. Explicit widget font-size
     // settings still take precedence in the renderers that support them.
     readonly property real panelLabelSize: (frame ? 14 * frame.labelScale * frame.sceneScale : 14)
-    readonly property real panelValueSize: (frame ? 38 * frame.valueScale * frame.sceneScale : 38)
+    readonly property real panelValueSize: (frame ? 48 * frame.valueScale * frame.sceneScale : 48)
     readonly property real panelUnitSize: (frame ? 15 * frame.labelScale * frame.sceneScale : 15)
     readonly property real compactValueSize: (frame ? 24 * frame.valueScale * frame.sceneScale : 24)
 
@@ -29,6 +32,10 @@ Item {
         anchors.fill: parent
         visible: root.showBackground
         radius: root.cornerRadius
+        topLeftRadius: root.squareTop ? 0 : root.cornerRadius
+        topRightRadius: root.squareTop ? 0 : root.cornerRadius
+        bottomLeftRadius: root.squareBottom ? 0 : root.cornerRadius
+        bottomRightRadius: root.squareBottom ? 0 : root.cornerRadius
         color: root.panelColor
         opacity: root.backgroundOpacity
     }
@@ -36,6 +43,10 @@ Item {
         anchors.fill: parent
         visible: root.showBorder
         radius: root.cornerRadius
+        topLeftRadius: root.squareTop ? 0 : root.cornerRadius
+        topRightRadius: root.squareTop ? 0 : root.cornerRadius
+        bottomLeftRadius: root.squareBottom ? 0 : root.cornerRadius
+        bottomRightRadius: root.squareBottom ? 0 : root.cornerRadius
         color: "transparent"
         border.width: root.borderWidth
         border.color: root.panelBorder

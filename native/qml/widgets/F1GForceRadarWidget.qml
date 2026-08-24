@@ -47,6 +47,24 @@ Item {
             opacity: 0.42 + (index + 1) / Math.max(1, root.ringCount - 1) * 0.16
         }
     }
+    Repeater {
+        model: root.ringCount
+        Text {
+            required property int index
+            readonly property real ringValue: root.maxG - index * root.ringStepG
+            readonly property real ringRatio: ringValue / root.maxG
+            z: 2
+            visible: root.frame.widgetSettings.showRingLabels ?? true
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: parent.height / 2 - root.fieldRadius * ringRatio - height * 0.05
+            text: ringValue.toFixed(2)
+            color: root.frame.primary
+            opacity: 0.90
+            font.family: root.frame.family
+            font.weight: Font.Medium
+            font.pixelSize: Math.max(9 * root.frame.sceneScale, root.fieldDiameter * 0.037)
+        }
+    }
     Rectangle {
         visible: root.frame.widgetSettings.showCrosshair ?? true
         anchors.horizontalCenter: parent.horizontalCenter

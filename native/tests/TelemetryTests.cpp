@@ -1162,6 +1162,9 @@ void TelemetryTests::loadsVisualTemplates()
     QCOMPARE(model.widget(6).value("type").toString(), QString("heartRate"));
     QCOMPARE(model.widget(7).value("type").toString(), QString("f1GForceRadar"));
     QCOMPARE(model.widget(8).value("type").toString(), QString("gForceMagnitudeBar"));
+    QCOMPARE(model.widget(3).value("settings").toMap().value("stackPosition").toString(), QString("top"));
+    QCOMPARE(model.widget(4).value("settings").toMap().value("stackPosition").toString(), QString("middle"));
+    QCOMPARE(model.widget(5).value("settings").toMap().value("stackPosition").toString(), QString("bottom"));
     QVERIFY(!model.applyTemplate("missing-template"));
 }
 
@@ -1174,11 +1177,11 @@ void TelemetryTests::providesCustomizableArchetypes()
         {"heartRate", {"showIcon", "unit", "accentColor"}},
         {"pedals", {"acceleratorSource", "brakeSource", "acceleratorColor", "brakeColor"}},
         {"gForce", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "gRange", "gridColor"}},
-        {"f1GForceRadar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "ringStepG", "showCrosshair", "showCenterBox", "radarBackgroundColor", "dotColor", "gridColor"}},
+        {"f1GForceRadar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "ringStepG", "showCrosshair", "showCenterBox", "showRingLabels", "radarBackgroundColor", "dotColor", "gridColor"}},
         {"gForceMagnitudeBar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "labelText", "showLabel", "showValue", "barColor", "barBackgroundColor", "barRadius"}},
         {"track", {"lineColor", "lineWidth", "markerColor", "mirrorX", "mirrorY"}},
         {"customValue", {"label", "decimals", "multiplier"}},
-        {"retroCustomValue", {"source", "label", "fallbackText", "panelColor", "valueColor", "labelColor"}},
+        {"retroCustomValue", {"source", "label", "fallbackText", "panelColor", "valueColor", "labelColor", "icon", "stackPosition", "showSeparator"}},
         {"arcGauge", {"source", "startAngle", "endAngle", "arcWidth", "trackColor"}},
         {"dialGauge", {"source", "startAngle", "endAngle", "majorTicks", "needleColor"}},
         {"telemetryOverlay", {"source1", "source2", "source3", "source4", "columns"}},
@@ -1419,6 +1422,7 @@ void TelemetryTests::providesGForceVariants()
     const QVariantMap radarDefaults = source.widget(radar).value("settings").toMap();
     QCOMPARE(radarDefaults.value("maxG").toDouble(), 1.5);
     QCOMPARE(radarDefaults.value("ringStepG").toDouble(), 0.25);
+    QVERIFY(radarDefaults.value("showRingLabels").toBool());
     QVERIFY(!radarDefaults.value("showBackground").toBool());
     QVERIFY(!radarDefaults.value("showBorder").toBool());
     QCOMPARE(radarDefaults.value("radarBackgroundColor").toString(), QString("#111a22"));

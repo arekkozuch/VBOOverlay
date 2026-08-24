@@ -11,7 +11,7 @@
       "borderColor": "#8895a3",
       "borderOpacity": 0.55,
       "borderWidth": 1,
-      "cornerRadius": 12,
+      "cornerRadius": 14,
       "textColor": "#f2f5f7",
       "secondaryTextColor": "#b5c0ca",
       "accentColor": "#55d76a",
@@ -48,6 +48,7 @@
       "showBackground": false, "showBorder": false, "padding": 0,
       "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false,
       "maxG": 1.5, "ringStepG": 0.25, "showCrosshair": true, "showCenterBox": true,
+      "showRingLabels": true,
       "radarBackgroundColor": "#111a22", "backgroundOpacity": 0.86,
       "dotColor": "#f5a623", "gridColor": "#8895a3"
     },
@@ -62,7 +63,8 @@
     "customValue": { "label": "VALUE", "decimals": 1 },
     "retroCustomValue": {
       "showBackground": true, "showBorder": true, "padding": 12, "label": "VALUE", "decimals": 1,
-      "fallbackText": "—", "panelColor": "#111a22", "valueColor": "#f2f5f7", "labelColor": "#b5c0ca"
+      "fallbackText": "—", "panelColor": "#111a22", "valueColor": "#f2f5f7", "labelColor": "#b5c0ca",
+      "icon": "", "stackPosition": "single", "showSeparator": true
     },
     "arcGauge": {
       "label": "SPEED", "unit": "km/h", "minValue": 0, "maxValue": 300, "decimals": 0,
@@ -160,15 +162,15 @@
       "name": "Motorsport Broadcast HUD",
       "description": "Full modern motorsport broadcast HUD composition for visual review",
       "widgets": [
-        { "type": "retroTachometer", "x": 0.045, "y": 0.49, "width": 0.25, "height": 0.36, "settings": { "source": "rpm", "label": "RPM" } },
-        { "type": "speed", "x": 0.055, "y": 0.07, "width": 0.16, "height": 0.19, "settings": { "source": "speed", "label": "Speed", "unit": "km/h" } },
-        { "type": "pedals", "x": 0.72, "y": 0.06, "width": 0.23, "height": 0.17, "settings": { "acceleratorSource": "throttle", "brakeSource": "brake" } },
-        { "type": "retroCustomValue", "x": 0.73, "y": 0.28, "width": 0.22, "height": 0.055, "settings": { "source": "oil", "label": "OIL", "unit": "°C", "decimals": 0 } },
-        { "type": "retroCustomValue", "x": 0.73, "y": 0.335, "width": 0.22, "height": 0.055, "settings": { "source": "atf", "label": "ATF", "unit": "°C", "decimals": 0 } },
-        { "type": "retroCustomValue", "x": 0.73, "y": 0.39, "width": 0.22, "height": 0.055, "settings": { "source": "coolant", "label": "COOLANT", "unit": "°C", "decimals": 0 } },
-        { "type": "heartRate", "x": 0.39, "y": 0.07, "width": 0.13, "height": 0.20, "settings": { "source": "heartRate", "label": "HR", "unit": "bpm" } },
-        { "type": "f1GForceRadar", "x": 0.72, "y": 0.52, "width": 0.20, "height": 0.30, "settings": { "lateralSource": "lateralG", "longitudinalSource": "longitudinalG" } },
-        { "type": "gForceMagnitudeBar", "x": 0.36, "y": 0.78, "width": 0.28, "height": 0.10, "settings": { "lateralSource": "lateralG", "longitudinalSource": "longitudinalG", "labelText": "G-Force" } }
+        { "type": "retroTachometer", "x": 0.025, "y": 0.16, "width": 0.19, "height": 0.36, "settings": { "source": "rpm", "label": "RPM" } },
+        { "type": "speed", "x": 0.22, "y": 0.23, "width": 0.09, "height": 0.24, "settings": { "source": "speed", "label": "Speed", "unit": "km/h" } },
+        { "type": "pedals", "x": 0.32, "y": 0.23, "width": 0.15, "height": 0.24, "settings": { "acceleratorSource": "throttle", "brakeSource": "brake" } },
+        { "type": "retroCustomValue", "x": 0.48, "y": 0.23, "width": 0.18, "height": 0.08, "settings": { "source": "oil", "label": "OIL", "unit": "°C", "decimals": 0, "icon": "◒", "stackPosition": "top" } },
+        { "type": "retroCustomValue", "x": 0.48, "y": 0.31, "width": 0.18, "height": 0.08, "settings": { "source": "atf", "label": "ATF", "unit": "°C", "decimals": 0, "icon": "⚙", "stackPosition": "middle" } },
+        { "type": "retroCustomValue", "x": 0.48, "y": 0.39, "width": 0.18, "height": 0.08, "settings": { "source": "coolant", "label": "COOLANT", "unit": "°C", "decimals": 0, "icon": "♨", "stackPosition": "bottom" } },
+        { "type": "heartRate", "x": 0.675, "y": 0.23, "width": 0.10, "height": 0.24, "settings": { "source": "heartRate", "label": "HR", "unit": "bpm" } },
+        { "type": "f1GForceRadar", "x": 0.80, "y": 0.08, "width": 0.17, "height": 0.31, "settings": { "lateralSource": "lateralG", "longitudinalSource": "longitudinalG" } },
+        { "type": "gForceMagnitudeBar", "x": 0.80, "y": 0.40, "width": 0.17, "height": 0.09, "settings": { "lateralSource": "lateralG", "longitudinalSource": "longitudinalG", "labelText": "G-Force" } }
       ]
     },
     {
