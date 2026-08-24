@@ -26,7 +26,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [ ] Expand final-media validation across a broader real-media matrix.
 - [x] Make source/native raster characteristics authoritative, with no product-level 4K ceiling, continuous bitrate scaling, checked frame accounting, and runtime renderer/encoder capability preflight.
 - [x] Preserve 8-bit and 10-bit SDR through explicit HEVC Main/Main10 policy and deterministic composition validation.
-- [ ] Validate real HERO11 5.3K/10-bit fixtures and make targeted compatibility adjustments.
+- [x] Validate one real HERO11 5.3K Main10/BT.709 fixture at native 5312×2988 and 3840×2160 on macOS/Metal/VideoToolbox; audio validation now accepts a legitimately shorter source-audio timeline.
 - [ ] Implement and validate color-managed HDR/HLG/PQ/Log preservation; current export rejects these sources without silent conversion.
 - [ ] Validate production 8K on representative renderer/encoder hardware; deterministic model and capability-decision coverage is complete.
 - [ ] Preserve rotation and sample-aspect-ratio display transforms end to end (probe/model retention is complete).
@@ -38,7 +38,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [ ] Add native Windows ACL-denied filesystem coverage and validate multi-instance export-log safety.
 - [ ] Define the packaging, signing, and release gate.
 
-Development validation includes a successful private 3840×2160, `60000/1001`, 30→90 HEVC/AAC export on macOS with 3,597 final packets, plus restored real GoPro/VBO auto-sync at +90.217 s and 0.999575 correlation. It does not replace wider real-media or Windows runtime validation.
+Development validation includes a successful private 3840×2160, `60000/1001`, 30→90 HEVC/AAC export on macOS with 3,597 final packets; native and 3840×2160 exports of one 5312×2988 HERO11 Main10/BT.709 fixture (442 final packets each); plus restored real GoPro/VBO auto-sync at +90.217 s and 0.999575 correlation. It does not replace wider real-media or Windows runtime validation.
 
 ## Product work
 

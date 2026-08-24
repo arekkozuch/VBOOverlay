@@ -2622,6 +2622,14 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) < 150.0);
     QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) > 149.9);
     QCOMPARE(ExportEngine::exportRelativeTime(0, ntscRate), 0.0);
+
+    MediaInfo source;
+    source.audioStartTime = 0.0;
+    source.audioDuration = 7.317333;
+    QVERIFY(qAbs(ExportEngine::audioDurationForRange(source, 0.0, 7.374033)
+                 - source.audioDuration) < 0.000001);
+    QVERIFY(qAbs(ExportEngine::audioDurationForRange(source, 1.0, 8.0) - 6.317333) < 0.000001);
+    QCOMPARE(ExportEngine::audioDurationForRange(source, 8.0, 9.0), 0.0);
 }
 
 void TelemetryTests::resolvesExplicitExportFormats()

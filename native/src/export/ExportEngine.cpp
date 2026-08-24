@@ -302,6 +302,20 @@ qsizetype ExportEngine::frameCount(
                   / static_cast<double>(frameRate.denominator) - 1e-9));
 }
 
+double ExportEngine::audioDurationForRange(
+    const MediaInfo &source, const double sourceRangeStart, const double sourceRangeEnd)
+{
+    if (!std::isfinite(sourceRangeStart) || !std::isfinite(sourceRangeEnd)
+        || sourceRangeEnd <= sourceRangeStart || !std::isfinite(source.audioStartTime)
+        || !std::isfinite(source.audioDuration) || source.audioDuration <= 0.0) {
+        return 0.0;
+    }
+    const double audioEnd = source.audioStartTime + source.audioDuration;
+    if (!std::isfinite(audioEnd)) return 0.0;
+    return qMax(0.0, qMin(sourceRangeEnd, audioEnd)
+                     - qMax(sourceRangeStart, source.audioStartTime));
+}
+
 double ExportEngine::framePresentationTime(
     const double startTime, const qsizetype frameIndex, const MediaRational &frameRate)
 {
@@ -382,7 +396,6 @@ ExportResult ExportEngine::exportVideo(
                                .arg(source.duration, 0, 'f', 3);
             return result;
         }
-        const double requestedDuration = sourceRangeEnd - sourceRangeStart;
         const qsizetype expectedFrames = frameCount(
             sourceRangeStart, sourceRangeEnd, exportFrameRate);
         if (expectedFrames == 0 || !outputSize.isValid()) {
@@ -1195,6 +1208,10 @@ ExportResult ExportEngine::exportVideo(
             ? result.mediaInfo.videoDuration : result.mediaInfo.duration;
         const bool durationOk = qAbs(videoDuration - exportDuration) <= frameInterval;
         const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty();
+        // Audio can legitimately end before the video stream (as on real action-camera
+        // recordings). Validate against the selected audio-timeline intersection.
+        const double expectedAudioDuration = audioDurationForRange(
+            source, sourceRangeStart, sourceRangeEnd);
         const double audioFrameDuration = result.mediaInfo.audioSampleRate > 0
             ? 1024.0 / result.mediaInfo.audioSampleRate : frameInterval;
         const double audioTimingTolerance = qMax(
@@ -1205,7 +1222,7 @@ ExportResult ExportEngine::exportVideo(
             || qAbs(result.mediaInfo.audioStartTime - result.mediaInfo.videoStartTime)
                 <= audioTimingTolerance;
         const bool audioDurationOk = !audioExpected
-            || qAbs(result.mediaInfo.audioDuration - requestedDuration) <= audioTimingTolerance;
+            || qAbs(result.mediaInfo.audioDuration - expectedAudioDuration) <= audioTimingTolerance;
         const bool audioOk = !audioExpected || (audioPresent && audioStartOk && audioDurationOk);
         const auto finalValidationLog = [&](const QString &operation, const QString &name,
                                             const QVariant &expected, const QVariant &actual,
@@ -1268,7 +1285,7 @@ ExportResult ExportEngine::exportVideo(
                                                     - result.mediaInfo.videoStartTime), 'f', 9),
                                audioStartOk);
             finalValidationLog(QStringLiteral("checkAudioDuration"), QStringLiteral("Audio duration"),
-                               QString::number(requestedDuration, 'f', 6),
+                               QString::number(expectedAudioDuration, 'f', 6),
                                QString::number(result.mediaInfo.audioDuration, 'f', 6), audioDurationOk);
         }
         if (!packetCountOk) {

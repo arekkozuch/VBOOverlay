@@ -96,6 +96,8 @@ public:
         const ExportSettings &settings, TelemetryFrameRenderer &renderer);
     [[nodiscard]] static qsizetype frameCount(
         double sourceRangeStart, double sourceRangeEnd, const MediaRational &frameRate);
+    [[nodiscard]] static double audioDurationForRange(
+        const MediaInfo &source, double sourceRangeStart, double sourceRangeEnd);
     [[nodiscard]] static double exportRelativeTime(
         qsizetype frameIndex, const MediaRational &frameRate);
     [[nodiscard]] static double outputDuration(

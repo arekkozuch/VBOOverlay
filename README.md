@@ -73,7 +73,7 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 - Packaging and signing are pending.
 - A source currently contains one video file; multi-chapter timelines are not implemented.
 - Export requires external FFmpeg at runtime.
-- Rotation and sample-aspect-ratio display-transform preservation, real HERO11 5.3K/10-bit validation, HDR/Log color-managed preservation, and production 8K validation remain pending. Deterministic 10-bit SDR composition is validated.
+- Rotation and sample-aspect-ratio display-transform preservation, HDR/Log color-managed preservation, and production 8K validation remain pending. One real HERO11 5312×2988 10-bit SDR fixture has passed native and 3840×2160 macOS exports; this is not a broader hardware guarantee.
 - Real-media coverage remains limited.
 - Interactive map tiles are pending; the local GPS track view works without map tiles.
 
