@@ -10,6 +10,7 @@ Rectangle {
         return selectedIndex >= 0 ? appController.widgetModel.widget(selectedIndex) : ({});
     }
     property var settings: selectedWidget.settings || ({})
+    readonly property bool isGForceWidget: ["gForce", "f1GForceRadar", "gForceMagnitudeBar"].includes(selectedWidget.type)
     property int currentTab: 0
     signal selectionCleared
     signal selectionRequested(int index)
@@ -131,7 +132,7 @@ Rectangle {
                         }
 
                         RowLayout {
-                            visible: ["speed", "rpm", "heartRate", "customValue", "retroCustomValue", "arcGauge", "dialGauge", "retroGear", "retroPedal", "retroSpeedArc", "retroTachometer"].includes(root.selectedWidget.type)
+                            visible: ["speed", "rpm", "heartRate", "customValue", "retroCustomValue", "arcGauge", "dialGauge", "retroGear", "retroPedal", "retroSpeedArc", "retroTachometer", "retroNameplate", "gForceMagnitudeBar"].includes(root.selectedWidget.type)
                             Layout.fillWidth: true
                             Label {
                                 text: qsTr("Font size")
@@ -188,13 +189,13 @@ Rectangle {
                             text: qsTr("Telemetry & format")
                         }
                         Label {
-                            visible: root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             text: qsTr("Source channel")
                             color: "#8b98a8"
                             font.pixelSize: 11
                         }
                         FeComboBox {
-                            visible: root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             model: root.channelModel()
                             currentIndex: Math.max(0, model.indexOf(root.settings.source || qsTr("Automatic")))
@@ -202,7 +203,7 @@ Rectangle {
                         }
 
                         GridLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             columns: 2
                             columnSpacing: 8
@@ -300,7 +301,7 @@ Rectangle {
                             }
                         }
                         RowLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && root.selectedWidget.type !== "gForce" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             FeCheckBox {
                                 text: qsTr("Show unit")
                                 checked: root.settings.showUnit ?? true
@@ -530,6 +531,86 @@ Rectangle {
                                 checked: root.settings.showCombined ?? true
                                 onToggled: root.setSetting("showCombined", checked)
                             }
+                        }
+
+                        ColumnLayout {
+                            visible: root.selectedWidget.type === "f1GForceRadar"
+                            Layout.fillWidth: true
+                            spacing: 6
+                            SectionTitle { text: qsTr("F1 G-Force Radar") }
+                            Label { text: qsTr("Lateral channel"); color: "#8b98a8"; font.pixelSize: 11 }
+                            FeComboBox {
+                                Layout.fillWidth: true
+                                model: root.channelModel()
+                                currentIndex: Math.max(0, model.indexOf(root.settings.lateralSource || qsTr("Automatic")))
+                                onActivated: root.setSetting("lateralSource", currentIndex === 0 ? "" : currentText)
+                            }
+                            FeCheckBox { text: qsTr("Invert lateral axis"); checked: root.settings.invertLateral ?? false; onToggled: root.setSetting("invertLateral", checked) }
+                            Label { text: qsTr("Longitudinal channel"); color: "#8b98a8"; font.pixelSize: 11 }
+                            FeComboBox {
+                                Layout.fillWidth: true
+                                model: root.channelModel()
+                                currentIndex: Math.max(0, model.indexOf(root.settings.longitudinalSource || qsTr("Automatic")))
+                                onActivated: root.setSetting("longitudinalSource", currentIndex === 0 ? "" : currentText)
+                            }
+                            FeCheckBox { text: qsTr("Invert longitudinal axis"); checked: root.settings.invertLongitudinal ?? false; onToggled: root.setSetting("invertLongitudinal", checked) }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                Label { text: qsTr("Max G"); color: "#8b98a8"; font.pixelSize: 11 }
+                                FeTextField { Layout.fillWidth: true; text: Number(root.settings.maxG ?? 1.5).toString(); onEditingFinished: root.setSetting("maxG", Number(text)) }
+                                Label { text: qsTr("Ring step"); color: "#8b98a8"; font.pixelSize: 11 }
+                                FeTextField { Layout.fillWidth: true; text: Number(root.settings.ringStepG ?? 0.25).toString(); onEditingFinished: root.setSetting("ringStepG", Number(text)) }
+                            }
+                            FeCheckBox { text: qsTr("Show crosshair"); checked: root.settings.showCrosshair ?? true; onToggled: root.setSetting("showCrosshair", checked) }
+                            FeCheckBox { text: qsTr("Show center box"); checked: root.settings.showCenterBox ?? true; onToggled: root.setSetting("showCenterBox", checked) }
+                            Label { text: qsTr("Dot color"); color: "#8b98a8"; font.pixelSize: 11 }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.dotColor || "#55e6a5"; onEdited: value => root.setSetting("dotColor", value) }
+                            Label { text: qsTr("Grid color"); color: "#8b98a8"; font.pixelSize: 11 }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.gridColor || "#566477"; onEdited: value => root.setSetting("gridColor", value) }
+                        }
+
+                        ColumnLayout {
+                            visible: root.selectedWidget.type === "gForceMagnitudeBar"
+                            Layout.fillWidth: true
+                            spacing: 6
+                            SectionTitle { text: qsTr("G-Force Bar") }
+                            Label { text: qsTr("Lateral channel"); color: "#8b98a8"; font.pixelSize: 11 }
+                            FeComboBox {
+                                Layout.fillWidth: true
+                                model: root.channelModel()
+                                currentIndex: Math.max(0, model.indexOf(root.settings.lateralSource || qsTr("Automatic")))
+                                onActivated: root.setSetting("lateralSource", currentIndex === 0 ? "" : currentText)
+                            }
+                            FeCheckBox { text: qsTr("Invert lateral axis"); checked: root.settings.invertLateral ?? false; onToggled: root.setSetting("invertLateral", checked) }
+                            Label { text: qsTr("Longitudinal channel"); color: "#8b98a8"; font.pixelSize: 11 }
+                            FeComboBox {
+                                Layout.fillWidth: true
+                                model: root.channelModel()
+                                currentIndex: Math.max(0, model.indexOf(root.settings.longitudinalSource || qsTr("Automatic")))
+                                onActivated: root.setSetting("longitudinalSource", currentIndex === 0 ? "" : currentText)
+                            }
+                            FeCheckBox { text: qsTr("Invert longitudinal axis"); checked: root.settings.invertLongitudinal ?? false; onToggled: root.setSetting("invertLongitudinal", checked) }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                Label { text: qsTr("Max G"); color: "#8b98a8"; font.pixelSize: 11 }
+                                FeTextField { Layout.fillWidth: true; text: Number(root.settings.maxG ?? 1.5).toString(); onEditingFinished: root.setSetting("maxG", Number(text)) }
+                                Label { text: qsTr("Label"); color: "#8b98a8"; font.pixelSize: 11 }
+                                FeTextField { Layout.fillWidth: true; text: root.settings.labelText || "G-Force"; onEditingFinished: root.setSetting("labelText", text) }
+                                Label { text: qsTr("Decimals"); color: "#8b98a8"; font.pixelSize: 11 }
+                                FeSpinBox { from: 0; to: 6; value: Number(root.settings.decimals ?? 2); onValueModified: root.setSetting("decimals", value) }
+                                Label { text: qsTr("Bar radius"); color: "#8b98a8"; font.pixelSize: 11 }
+                                FeTextField { Layout.fillWidth: true; text: Number(root.settings.barRadius ?? 5).toString(); onEditingFinished: root.setSetting("barRadius", Number(text)) }
+                            }
+                            RowLayout {
+                                FeCheckBox { text: qsTr("Show label"); checked: root.settings.showLabel ?? true; onToggled: root.setSetting("showLabel", checked) }
+                                FeCheckBox { text: qsTr("Show value"); checked: root.settings.showValue ?? true; onToggled: root.setSetting("showValue", checked) }
+                            }
+                            Label { text: qsTr("Fill color"); color: "#8b98a8"; font.pixelSize: 11 }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.barColor || "#55e6a5"; onEdited: value => root.setSetting("barColor", value) }
+                            Label { text: qsTr("Bar background"); color: "#8b98a8"; font.pixelSize: 11 }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.barBackgroundColor || "#24303d"; onEdited: value => root.setSetting("barBackgroundColor", value) }
                         }
 
                         ColumnLayout {

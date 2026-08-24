@@ -56,6 +56,8 @@ Item {
         color: frame.widgetSettings.bottomColor || "#f4f4f4"
         font.family: frame.family
         font.weight: Font.Bold
-        font.pixelSize: Math.max(9 * frame.sceneScale, parent.height * 0.26)
+        font.pixelSize: frame.configuredFontSize() > 0
+            ? frame.configuredFontSize() * frame.sceneScale
+            : Math.max(9 * frame.sceneScale, parent.height * 0.26)
     }
 }

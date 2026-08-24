@@ -76,6 +76,7 @@ private slots:
     void updatesCustomTemplatesInPlace();
     void preservesOptionalFontSettings();
     void preservesGForcePresentationSettings();
+    void providesGForceVariants();
     void persistsWidgetAnimationCues();
     void groupsAndMovesWidgets();
     void constrainsWidgetGeometry();
@@ -1166,6 +1167,8 @@ void TelemetryTests::providesCustomizableArchetypes()
         {"heartRate", {"showIcon", "unit", "accentColor"}},
         {"pedals", {"acceleratorSource", "brakeSource", "acceleratorColor", "brakeColor"}},
         {"gForce", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "gRange", "gridColor"}},
+        {"f1GForceRadar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "ringStepG", "showCrosshair", "showCenterBox", "dotColor", "gridColor"}},
+        {"gForceMagnitudeBar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "labelText", "showLabel", "showValue", "barColor", "barBackgroundColor", "barRadius"}},
         {"track", {"lineColor", "lineWidth", "markerColor", "mirrorX", "mirrorY"}},
         {"customValue", {"label", "decimals", "multiplier"}},
         {"retroCustomValue", {"source", "label", "fallbackText", "panelColor", "valueColor", "labelColor"}},
@@ -1311,6 +1314,38 @@ void TelemetryTests::preservesGForcePresentationSettings()
     const QVariantMap settings = restored.widget(0).value("settings").toMap();
     QVERIFY(settings.value("invertLateral").toBool());
     QVERIFY(settings.value("invertLongitudinal").toBool());
+}
+
+void TelemetryTests::providesGForceVariants()
+{
+    WidgetModel source;
+    const int radar = source.addWidget("f1GForceRadar");
+    const int bar = source.addWidget("gForceMagnitudeBar");
+    QVERIFY(radar >= 0);
+    QVERIFY(bar >= 0);
+    const QVariantMap radarDefaults = source.widget(radar).value("settings").toMap();
+    QCOMPARE(radarDefaults.value("maxG").toDouble(), 1.5);
+    QCOMPARE(radarDefaults.value("ringStepG").toDouble(), 0.25);
+    QCOMPARE(static_cast<int>(std::floor(radarDefaults.value("maxG").toDouble()
+                                         / radarDefaults.value("ringStepG").toDouble())), 6);
+    source.setSetting(radar, "maxG", std::numeric_limits<double>::infinity());
+    source.setSetting(radar, "ringStepG", -3.0);
+    QCOMPARE(source.widget(radar).value("settings").toMap().value("maxG").toDouble(), 1.5);
+    QCOMPARE(source.widget(radar).value("settings").toMap().value("ringStepG").toDouble(), 0.01);
+
+    const QVariantMap barDefaults = source.widget(bar).value("settings").toMap();
+    QCOMPARE(barDefaults.value("maxG").toDouble(), 1.5);
+    QCOMPARE(barDefaults.value("labelText").toString(), QString("G-Force"));
+    QVERIFY(barDefaults.value("showLabel").toBool());
+    QVERIFY(barDefaults.value("showValue").toBool());
+
+    source.setSetting(bar, "invertLateral", true);
+    source.setSetting(bar, "fontSize", 40);
+    WidgetModel restored;
+    QVERIFY(restored.fromJson(source.toJson()));
+    const QVariantMap restoredBar = restored.widget(bar).value("settings").toMap();
+    QVERIFY(restoredBar.value("invertLateral").toBool());
+    QCOMPARE(restoredBar.value("fontSize").toDouble(), 40.0);
 }
 
 void TelemetryTests::persistsAndSharesCustomTemplates()

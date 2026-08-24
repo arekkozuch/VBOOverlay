@@ -143,6 +143,9 @@ qt_add_qml_module(flappedear_native
         qml/widgets/CustomValueWidget.qml
         qml/widgets/DialGaugeWidget.qml
         qml/widgets/GForceWidget.qml
+        qml/widgets/GForceData.qml
+        qml/widgets/F1GForceRadarWidget.qml
+        qml/widgets/GForceMagnitudeBarWidget.qml
         qml/widgets/HeartRateWidget.qml
         qml/widgets/PedalsWidget.qml
         qml/widgets/RetroGearWidget.qml

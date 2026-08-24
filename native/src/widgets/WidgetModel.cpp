@@ -50,7 +50,7 @@ QVariantMap defaultSettings(const QString &type)
 
 const QStringList widgetTypes = {
     "speed",          "rpm",       "heartRate",       "pedals", "gForce",
-    "track",          "customValue", "retroCustomValue", "arcGauge",       "dialGauge",
+    "f1GForceRadar",  "gForceMagnitudeBar", "track", "customValue", "retroCustomValue", "arcGauge", "dialGauge",
     "telemetryOverlay", "retroGrandPrix", "retroTachometer", "retroGear",
     "retroPedal", "retroSpeedArc", "retroNameplate", "brandLogo"};
 
@@ -64,6 +64,12 @@ QPair<double, double> defaultSize(const QString &type)
     }
     if (type == "gForce") {
         return {0.14, 0.19};
+    }
+    if (type == "f1GForceRadar") {
+        return {0.18, 0.24};
+    }
+    if (type == "gForceMagnitudeBar") {
+        return {0.24, 0.055};
     }
     if (type == "track") {
         return {0.20, 0.28};
@@ -356,6 +362,12 @@ void WidgetModel::setSetting(const int index, const QString &name, const QVarian
     if (name == "fontSize") {
         const double candidate = value.toDouble();
         cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.0, 200.0) : 0.0;
+    } else if (name == "maxG") {
+        const double candidate = value.toDouble();
+        cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.01, 20.0) : 1.5;
+    } else if (name == "ringStepG") {
+        const double candidate = value.toDouble();
+        cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.01, 10.0) : 0.25;
     }
     m_widgets[index].settings.insert(name, cleanValue);
     update(index);

@@ -44,6 +44,18 @@
       "brakeMin": 0, "brakeMax": 100, "showValues": true, "barRadius": 5
     },
     "gForce": { "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false, "gRange": 2, "gridColor": "#566477", "dotSize": 12, "showCombined": true, "decimals": 2 },
+    "f1GForceRadar": {
+      "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false,
+      "maxG": 1.5, "ringStepG": 0.25, "showCrosshair": true, "showCenterBox": true,
+      "dotColor": "#55e6a5", "gridColor": "#566477", "backgroundOpacity": 0
+    },
+    "gForceMagnitudeBar": {
+      "showBackground": false, "showBorder": false, "padding": 0,
+      "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false,
+      "maxG": 1.5, "labelText": "G-Force", "showLabel": true, "showValue": true, "decimals": 2,
+      "barColor": "#55e6a5", "barBackgroundColor": "#24303d", "textColor": "#f4f7fb",
+      "backgroundOpacity": 0.82, "barRadius": 5
+    },
     "track": { "lineColor": "#55e6a5", "lineWidth": 3, "markerColor": "#ffffff", "markerSize": 10, "trackPadding": 10, "mirrorX": false, "mirrorY": false },
     "customValue": { "label": "VALUE", "decimals": 1 },
     "retroCustomValue": {

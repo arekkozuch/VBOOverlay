@@ -568,6 +568,18 @@ int main(int argc, char *argv[])
     int result = EXIT_FAILURE;
     {
         FlappedEar::AppController controller;
+        if (startupSmokeMode) {
+            // Instantiate every newly added renderer under the normal QML application
+            // path. The widgets intentionally have no telemetry here: this also checks
+            // their no-data rendering contract.
+            FlappedEar::WidgetModel *widgets = controller.widgetModel();
+            widgets->addWidget(QStringLiteral("f1GForceRadar"));
+            widgets->addWidget(QStringLiteral("gForceMagnitudeBar"));
+            const int automaticGear = widgets->addWidget(QStringLiteral("retroGear"));
+            const int explicitGear = widgets->addWidget(QStringLiteral("retroGear"));
+            widgets->setSetting(automaticGear, QStringLiteral("fontSize"), 0);
+            widgets->setSetting(explicitGear, QStringLiteral("fontSize"), 42);
+        }
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("appController", &controller);
         QObject::connect(

@@ -163,6 +163,8 @@ Item {
                     case "heartRate": return "widgets/HeartRateWidget.qml";
                     case "pedals": return "widgets/PedalsWidget.qml";
                     case "gForce": return "widgets/GForceWidget.qml";
+                    case "f1GForceRadar": return "widgets/F1GForceRadarWidget.qml";
+                    case "gForceMagnitudeBar": return "widgets/GForceMagnitudeBarWidget.qml";
                     case "arcGauge": return "widgets/ArcGaugeWidget.qml";
                     case "dialGauge": return "widgets/DialGaugeWidget.qml";
                     case "telemetryOverlay": return "widgets/TelemetryOverlayWidget.qml";

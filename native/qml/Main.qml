@@ -58,6 +58,16 @@ ApplicationWindow {
             "icon": "G"
         },
         {
+            "label": "F1 G-Force Radar",
+            "type": "f1GForceRadar",
+            "icon": "G+"
+        },
+        {
+            "label": "G-Force Bar",
+            "type": "gForceMagnitudeBar",
+            "icon": "G="
+        },
+        {
             "label": "Track",
             "type": "track",
             "icon": "⌁"
