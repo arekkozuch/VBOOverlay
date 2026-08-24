@@ -88,6 +88,15 @@ struct ExportResult {
     bool cancelled = false;
 };
 
+// Stage B uses FFmpeg input seeking to avoid decoding an entire source prefix.
+// The requested range is expressed on the source's original FFmpeg timeline;
+// trim arguments are expressed on FFmpeg's zero-based, post-seek timeline.
+struct StageBSourceAccess {
+    double inputSeekSeconds = 0.0;
+    double localTrimStartSeconds = 0.0;
+    double localTrimEndSeconds = 0.0;
+};
+
 class ExportEngine final {
 public:
     [[nodiscard]] static MediaRational effectiveFrameRate(
@@ -106,6 +115,8 @@ public:
         double sourceRangeStart, qsizetype frameIndex, const MediaRational &frameRate);
     [[nodiscard]] static double framePresentationTime(
         double startTime, qsizetype frameIndex, const MediaRational &frameRate);
+    [[nodiscard]] static StageBSourceAccess stageBSourceAccess(
+        double sourceRangeStart, double sourceRangeEnd, double prerollSeconds = 5.0);
 };
 
 } // namespace FlappedEar

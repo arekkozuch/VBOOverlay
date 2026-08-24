@@ -54,13 +54,16 @@ The staging step exists because FFmpeg framesync can select the latest secondary
 
 ## Stage B: compose the final MP4
 
-Stage B trims the source video at the requested start and normalizes timestamps to zero, then applies FFmpeg's `fps` filter at the effective exact rational rate before framesync. The pre-`fps` stream intentionally retains end-boundary lookahead: at fractional rates an exact range endpoint can fall between source frames, and removing the following frame prevents `fps=round=near` from selecting the last scheduled pre-end frame. The authoritative `end_frame=expectedFrames` trim after cadence conversion enforces the `[start, end)` schedule without timeline drift. The CFR source and completed CFR overlay therefore enter framesync on the same deterministic cadence.
+Stage B uses a bounded five-second input preroll for every non-zero source range: it seeks the source input to `max(0, requestedStart - 5)`, then trims video and audio on FFmpeg's post-seek local timeline with `requestedStart - inputSeek` and `requestedEnd - inputSeek`. This prevents a late range from decoding the entire source prefix. The completed temporary overlay is deliberately not sought: it already begins at export-relative zero.
+
+The requested range remains on the original source timestamp timeline, including media whose streams have non-zero start PTS. FFmpeg rebases frames after the input seek, so source start timestamps are not subtracted a second time; only the absolute-to-local difference is passed to post-seek `trim` and `atrim`. Stage B then normalizes timestamps to zero and applies FFmpeg's `fps` filter at the effective exact rational rate before framesync. The pre-`fps` stream intentionally retains end-boundary lookahead: at fractional rates an exact range endpoint can fall between source frames, and removing the following frame prevents `fps=round=near` from selecting the last scheduled pre-end frame. The authoritative `end_frame=expectedFrames` trim after cadence conversion enforces the `[start, end)` schedule without timeline drift. The CFR source and completed CFR overlay therefore enter framesync on the same deterministic cadence.
 
 The output also uses the per-video-stream `-fps_mode:v cfr` control. The `fps` filter establishes the cadence before framesync; `-fps_mode:v cfr` makes the final output policy explicit without relying on deprecated global `-vsync`. Stage B then overlays telemetry, encodes HEVC, optionally trims/re-encodes source audio to AAC, and writes an MP4 staging target.
 
 Telemetry rendering still uses absolute source time: exporting source seconds 120–140 renders its first overlay at source time 120. The output audio/video timeline starts at zero.
 
-Progress and Very Verbose diagnostics report stage activity, FFmpeg progress,
+Progress and Very Verbose diagnostics report stage activity, Stage B source range,
+input-seek and local-trim values, time to the first Stage B output frame, FFmpeg progress,
 temporary-overlay size, frame-count source, reported rates/time base, metadata
 validation elapsed time, validation checks, and bounded diagnostic output.
 When an export is prepared, the controller also creates one flushed text log in

@@ -120,6 +120,7 @@ private slots:
     void validatesHighResolutionCapabilitiesAndCache();
     void preservesTenBitSdrThroughComposition();
     void preservesExactExportRateRationals();
+    void plansBoundedStageBSourceAccess();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
     void preservesAbsoluteExportTimestamps();
@@ -2840,6 +2841,32 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QCOMPARE(ExportEngine::audioDurationForRange(source, 8.0, 9.0), 0.0);
 }
 
+void TelemetryTests::plansBoundedStageBSourceAccess()
+{
+    const StageBSourceAccess nearStart = ExportEngine::stageBSourceAccess(0.0, 30.0);
+    QCOMPARE(nearStart.inputSeekSeconds, 0.0);
+    QCOMPARE(nearStart.localTrimStartSeconds, 0.0);
+    QCOMPARE(nearStart.localTrimEndSeconds, 30.0);
+
+    const StageBSourceAccess lateRange = ExportEngine::stageBSourceAccess(240.0, 270.0);
+    QCOMPARE(lateRange.inputSeekSeconds, 235.0);
+    QCOMPARE(lateRange.localTrimStartSeconds, 5.0);
+    QCOMPARE(lateRange.localTrimEndSeconds, 35.0);
+
+    const StageBSourceAccess shorterThanPreroll = ExportEngine::stageBSourceAccess(3.0, 4.0);
+    QCOMPARE(shorterThanPreroll.inputSeekSeconds, 0.0);
+    QCOMPARE(shorterThanPreroll.localTrimStartSeconds, 3.0);
+    QCOMPARE(shorterThanPreroll.localTrimEndSeconds, 4.0);
+
+    // Source streams may begin at non-zero PTS. Their timestamps remain on the
+    // absolute source timeline for -ss; the filter sees only the local delta.
+    const StageBSourceAccess nonZeroSourcePts = ExportEngine::stageBSourceAccess(3.0, 8.0, 1.0);
+    QCOMPARE(nonZeroSourcePts.inputSeekSeconds, 2.0);
+    QCOMPARE(nonZeroSourcePts.localTrimStartSeconds, 1.0);
+    QCOMPARE(nonZeroSourcePts.localTrimEndSeconds, 6.0);
+    QCOMPARE(ExportEngine::frameCount(240.0, 270.0, {60'000, 1'001}), qsizetype(1'799));
+}
+
 void TelemetryTests::resolvesExplicitExportFormats()
 {
     const QList<QSize> sizes = ExportFormat::resolutionOptions({3840, 2160});
@@ -3359,8 +3386,8 @@ void TelemetryTests::normalizesNonZeroStreamPtsForVideoAndAudio()
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
                QStringLiteral("color=c=black:s=%1:r=30:d=5").arg(size), "-frames:v", "150",
                "-an", "-c:v", "ffv1", "-pix_fmt", "bgra", overlay});
-    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", source, "-i", overlay,
-               "-filter_complex", "[0:v]trim=start=3:end=8,setpts=PTS-STARTPTS,fps=fps=30/1:start_time=0:round=near:eof_action=round,trim=end_frame=150,setpts=PTS-STARTPTS[source];[1:v]setpts=PTS-STARTPTS[telemetry];[source][telemetry]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall[video];[0:a]atrim=start=3:end=8,asetpts=PTS-STARTPTS[audio]",
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-ss", "2", "-i", source, "-i", overlay,
+               "-filter_complex", "[0:v]trim=start=1:end=6,setpts=PTS-STARTPTS,fps=fps=30/1:start_time=0:round=near:eof_action=round,trim=end_frame=150,setpts=PTS-STARTPTS[source];[1:v]setpts=PTS-STARTPTS[telemetry];[source][telemetry]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall[video];[0:a]atrim=start=1:end=6,asetpts=PTS-STARTPTS[audio]",
                "-map", "[video]", "-fps_mode:v", "cfr", "-map", "[audio]", "-c:v", "ffv1",
                "-pix_fmt", "bgra", "-c:a", "pcm_s16le", output});
     const MediaInfo outputInfo = MediaProbe::probe(output, {}, true, -1, {}, {}, true);

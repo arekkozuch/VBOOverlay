@@ -357,6 +357,25 @@ double ExportEngine::sourceVideoTime(
     return sourceRangeStart + exportRelativeTime(frameIndex, frameRate);
 }
 
+StageBSourceAccess ExportEngine::stageBSourceAccess(
+    const double sourceRangeStart, const double sourceRangeEnd, const double prerollSeconds)
+{
+    if (!std::isfinite(sourceRangeStart) || !std::isfinite(sourceRangeEnd)
+        || sourceRangeEnd <= sourceRangeStart || !std::isfinite(prerollSeconds)
+        || prerollSeconds < 0.0) {
+        return {};
+    }
+
+    // The existing Stage B trim receives original source timestamps, including
+    // streams whose first packet has a non-zero PTS. FFmpeg rebases timestamps
+    // after an input -ss, so retain those absolute values for seeking and use
+    // only their difference for all post-seek filters. Do not use a stream's
+    // start_time as another offset: that would select a different frame.
+    const double inputSeekSeconds = qMax(0.0, sourceRangeStart - prerollSeconds);
+    return {inputSeekSeconds, sourceRangeStart - inputSeekSeconds,
+            sourceRangeEnd - inputSeekSeconds};
+}
+
 ExportResult ExportEngine::exportVideo(
     const ExportSettings &settings, TelemetryFrameRenderer &renderer)
 {
@@ -992,6 +1011,9 @@ ExportResult ExportEngine::exportVideo(
         finalizing = false;
         const QString overlayFormat = result.mediaProfile.outputBitDepth == 10
             ? QStringLiteral("yuv420p10") : QStringLiteral("auto");
+        constexpr double stageBSeekPrerollSeconds = 5.0;
+        const StageBSourceAccess sourceAccess = stageBSourceAccess(
+            sourceRangeStart, sourceRangeEnd, stageBSeekPrerollSeconds);
         const QString timeRangeFilter = QStringLiteral(
             "[0:v]trim=start=%1,setpts=PTS-STARTPTS%4,"
             "fps=fps=%2:start_time=0:round=near:eof_action=round,"
@@ -999,7 +1021,7 @@ ExportResult ExportEngine::exportVideo(
             "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
             "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=%5[composited];"
             "[composited]format=pix_fmts=%6[video]")
-                                            .arg(sourceRangeStart, 0, 'f', 9)
+                                            .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)
                                             .arg(rateString(exportFrameRate))
                                             .arg(expectedFrames)
                                             .arg(source.videoSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
@@ -1008,6 +1030,7 @@ ExportResult ExportEngine::exportVideo(
                                             .arg(result.mediaProfile.outputPixelFormat);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
+            "-ss", QString::number(sourceAccess.inputSeekSeconds, 'f', 9),
             "-i", settings.inputPath, "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
@@ -1049,7 +1072,8 @@ ExportResult ExportEngine::exportVideo(
         if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
             compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
                 ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
-                .arg(sourceRangeStart, 0, 'f', 9).arg(sourceRangeEnd, 0, 'f', 9);
+                .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)
+                .arg(sourceAccess.localTrimEndSeconds, 0, 'f', 9);
             compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", QString::number(settings.audioBitrate)});
         } else {
             compositionArguments.append("-an");
@@ -1060,8 +1084,13 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("Starting final HEVC composition"));
         observe(settings, QStringLiteral("log"), QStringLiteral("encodingVideo"),
                 QStringLiteral("startFinalComposition"), QStringLiteral("Stage B started"),
-                QStringLiteral("ffmpeg"),
-                {{"executable", FfmpegTools::ffmpegPath()}, {"arguments", compositionArguments}});
+                QStringLiteral("ffmpeg"), {{"executable", FfmpegTools::ffmpegPath()},
+                                             {"arguments", compositionArguments},
+                                             {"sourceRangeStart", sourceRangeStart},
+                                             {"sourceRangeEnd", sourceRangeEnd},
+                                             {"inputSeekSeconds", sourceAccess.inputSeekSeconds},
+                                             {"localTrimStartSeconds", sourceAccess.localTrimStartSeconds},
+                                             {"localTrimEndSeconds", sourceAccess.localTrimEndSeconds}});
         compositor.setProcessChannelMode(QProcess::SeparateChannels);
         qInfo().noquote() << QStringLiteral("Stage B FFmpeg arguments: %1").arg(formatArgumentList(compositionArguments));
         if (!updateManifestState(settings, QStringLiteral("stageB"))) {
@@ -1073,6 +1102,9 @@ ExportResult ExportEngine::exportVideo(
             result.error = QStringLiteral("Could not start FFmpeg composition: %1").arg(compositor.errorString());
             return result;
         }
+        QElapsedTimer stageBTimer;
+        stageBTimer.start();
+        bool receivedFirstStageBOutputFrame = false;
         while (compositor.state() != QProcess::NotRunning) {
             if (isCancelled(settings)) {
                 cancelFfmpeg();
@@ -1080,6 +1112,18 @@ ExportResult ExportEngine::exportVideo(
             }
             compositor.waitForFinished(250);
             pumpFfmpeg();
+            if (!receivedFirstStageBOutputFrame && lastFfmpegProgress.encodedFrames > 0) {
+                receivedFirstStageBOutputFrame = true;
+                observe(settings, QStringLiteral("log"), QStringLiteral("encodingVideo"),
+                        QStringLiteral("firstStageBOutputFrame"),
+                        QStringLiteral("Stage B produced its first output frame in %1 ms")
+                            .arg(stageBTimer.elapsed()), QStringLiteral("ffmpeg"),
+                        {{"timeToFirstStageBOutputFrame", stageBTimer.elapsed()},
+                         {"inputSeekSeconds", sourceAccess.inputSeekSeconds},
+                         {"localTrimStartSeconds", sourceAccess.localTrimStartSeconds},
+                         {"sourceRangeStart", sourceRangeStart},
+                         {"sourceRangeEnd", sourceRangeEnd}});
+            }
             reportProgress();
             if (!checkTemporarySpace()) return result;
             if (lastFfmpegProgress.encodedFrames > result.renderedFrames) {
