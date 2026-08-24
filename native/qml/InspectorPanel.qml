@@ -564,10 +564,12 @@ Rectangle {
                             }
                             FeCheckBox { text: qsTr("Show crosshair"); checked: root.settings.showCrosshair ?? true; onToggled: root.setSetting("showCrosshair", checked) }
                             FeCheckBox { text: qsTr("Show center box"); checked: root.settings.showCenterBox ?? true; onToggled: root.setSetting("showCenterBox", checked) }
+                            Label { text: qsTr("Radar background"); color: "#8b98a8"; font.pixelSize: 11 }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.radarBackgroundColor || "#2b2d30"; onEdited: value => root.setSetting("radarBackgroundColor", value) }
                             Label { text: qsTr("Dot color"); color: "#8b98a8"; font.pixelSize: 11 }
-                            ColorField { Layout.fillWidth: true; colorValue: root.settings.dotColor || "#55e6a5"; onEdited: value => root.setSetting("dotColor", value) }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.dotColor || "#ffad32"; onEdited: value => root.setSetting("dotColor", value) }
                             Label { text: qsTr("Grid color"); color: "#8b98a8"; font.pixelSize: 11 }
-                            ColorField { Layout.fillWidth: true; colorValue: root.settings.gridColor || "#566477"; onEdited: value => root.setSetting("gridColor", value) }
+                            ColorField { Layout.fillWidth: true; colorValue: root.settings.gridColor || "#c5c7c9"; onEdited: value => root.setSetting("gridColor", value) }
                         }
 
                         ColumnLayout {

@@ -45,9 +45,11 @@
     },
     "gForce": { "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false, "gRange": 2, "gridColor": "#566477", "dotSize": 12, "showCombined": true, "decimals": 2 },
     "f1GForceRadar": {
+      "showBackground": false, "showBorder": false, "padding": 0,
       "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false,
       "maxG": 1.5, "ringStepG": 0.25, "showCrosshair": true, "showCenterBox": true,
-      "dotColor": "#55e6a5", "gridColor": "#566477", "backgroundOpacity": 0
+      "radarBackgroundColor": "#2b2d30", "backgroundOpacity": 0.72,
+      "dotColor": "#ffad32", "gridColor": "#c5c7c9"
     },
     "gForceMagnitudeBar": {
       "showBackground": false, "showBorder": false, "padding": 0,

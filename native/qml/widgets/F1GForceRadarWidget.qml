@@ -13,7 +13,8 @@ Item {
         return Number.isFinite(candidate) && candidate > 0 ? candidate : 0.25;
     }
     readonly property int ringCount: Math.max(1, Math.floor(maxG / ringStepG))
-    readonly property real fieldDiameter: Math.max(1, Math.min(width, height))
+    readonly property real fieldPadding: Math.max(5 * frame.sceneScale, Math.min(width, height) * 0.05)
+    readonly property real fieldDiameter: Math.max(1, Math.min(width, height) - fieldPadding * 2)
     readonly property real fieldRadius: fieldDiameter / 2
 
     GForceData {
@@ -26,9 +27,10 @@ Item {
         width: root.fieldDiameter
         height: width
         radius: width / 2
-        color: "transparent"
-        border.width: Math.max(1, root.frame.sceneScale)
-        border.color: root.frame.widgetSettings.gridColor || "#566477"
+        color: root.frame.widgetSettings.radarBackgroundColor || "#2b2d30"
+        opacity: Number(root.frame.widgetSettings.backgroundOpacity ?? 0.72)
+        border.width: Math.max(1.25, root.frame.sceneScale * 1.25)
+        border.color: root.frame.widgetSettings.gridColor || "#c5c7c9"
     }
     Repeater {
         model: root.ringCount - 1
@@ -40,9 +42,9 @@ Item {
             height: diameter
             radius: width / 2
             color: "transparent"
-            border.width: Math.max(1, root.frame.sceneScale * 0.75)
-            border.color: root.frame.widgetSettings.gridColor || "#566477"
-            opacity: 0.8
+            border.width: Math.max(1, root.frame.sceneScale)
+            border.color: root.frame.widgetSettings.gridColor || "#c5c7c9"
+            opacity: 0.72
         }
     }
     Rectangle {
@@ -51,7 +53,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: root.fieldDiameter
         height: Math.max(1, root.frame.sceneScale)
-        color: root.frame.widgetSettings.gridColor || "#566477"
+        color: root.frame.widgetSettings.gridColor || "#c5c7c9"
+        opacity: 0.38
     }
     Rectangle {
         visible: root.frame.widgetSettings.showCrosshair ?? true
@@ -59,19 +62,21 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(1, root.frame.sceneScale)
         height: root.fieldDiameter
-        color: root.frame.widgetSettings.gridColor || "#566477"
+        color: root.frame.widgetSettings.gridColor || "#c5c7c9"
+        opacity: 0.38
     }
     Rectangle {
         visible: root.frame.widgetSettings.showCenterBox ?? true
         anchors.centerIn: parent
-        width: Math.max(5 * root.frame.sceneScale, root.fieldDiameter * 0.09)
+        width: Math.max(4 * root.frame.sceneScale, root.fieldDiameter * 0.065)
         height: width
         color: "transparent"
-        border.width: Math.max(1, root.frame.sceneScale)
-        border.color: root.frame.widgetSettings.gridColor || "#566477"
+        border.width: Math.max(1, root.frame.sceneScale * 0.8)
+        border.color: root.frame.widgetSettings.gridColor || "#c5c7c9"
+        opacity: 0.6
     }
     Rectangle {
-        readonly property real dotDiameter: Math.max(6 * root.frame.sceneScale, root.fieldDiameter * 0.07)
+        readonly property real dotDiameter: Math.max(5 * root.frame.sceneScale, root.fieldDiameter * 0.055)
         readonly property real availableRadius: Math.max(0, root.fieldRadius - dotDiameter / 2)
         readonly property real ratio: gForce.hasValue ? Math.min(1, gForce.combinedG / root.maxG) : 0
         width: dotDiameter

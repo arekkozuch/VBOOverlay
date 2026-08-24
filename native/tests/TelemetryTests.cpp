@@ -1167,7 +1167,7 @@ void TelemetryTests::providesCustomizableArchetypes()
         {"heartRate", {"showIcon", "unit", "accentColor"}},
         {"pedals", {"acceleratorSource", "brakeSource", "acceleratorColor", "brakeColor"}},
         {"gForce", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "gRange", "gridColor"}},
-        {"f1GForceRadar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "ringStepG", "showCrosshair", "showCenterBox", "dotColor", "gridColor"}},
+        {"f1GForceRadar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "ringStepG", "showCrosshair", "showCenterBox", "radarBackgroundColor", "dotColor", "gridColor"}},
         {"gForceMagnitudeBar", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "maxG", "labelText", "showLabel", "showValue", "barColor", "barBackgroundColor", "barRadius"}},
         {"track", {"lineColor", "lineWidth", "markerColor", "mirrorX", "mirrorY"}},
         {"customValue", {"label", "decimals", "multiplier"}},
@@ -1326,6 +1326,12 @@ void TelemetryTests::providesGForceVariants()
     const QVariantMap radarDefaults = source.widget(radar).value("settings").toMap();
     QCOMPARE(radarDefaults.value("maxG").toDouble(), 1.5);
     QCOMPARE(radarDefaults.value("ringStepG").toDouble(), 0.25);
+    QVERIFY(!radarDefaults.value("showBackground").toBool());
+    QVERIFY(!radarDefaults.value("showBorder").toBool());
+    QCOMPARE(radarDefaults.value("radarBackgroundColor").toString(), QString("#2b2d30"));
+    QCOMPARE(radarDefaults.value("backgroundOpacity").toDouble(), 0.72);
+    QCOMPARE(radarDefaults.value("dotColor").toString(), QString("#ffad32"));
+    QCOMPARE(radarDefaults.value("gridColor").toString(), QString("#c5c7c9"));
     QCOMPARE(static_cast<int>(std::floor(radarDefaults.value("maxG").toDouble()
                                          / radarDefaults.value("ringStepG").toDouble())), 6);
     source.setSetting(radar, "maxG", std::numeric_limits<double>::infinity());
