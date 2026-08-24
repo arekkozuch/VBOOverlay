@@ -85,6 +85,11 @@ Item {
             property real valueScale: Number(widgetSettings.valueFontScale ?? 1)
             property real labelScale: Number(widgetSettings.labelFontScale ?? 1)
 
+            function configuredFontSize() {
+                const value = Number(widgetSettings.fontSize ?? 0);
+                return Number.isFinite(value) && value > 0 ? Math.min(200, value) : 0;
+            }
+
             function raw(key, fallback) {
                 root.renderContext.time;
                 return root.renderContext.telemetryValue(widgetSettings[key] || fallback);
@@ -168,6 +173,7 @@ Item {
                     case "retroSpeedArc": return "widgets/RetroSpeedArcWidget.qml";
                     case "retroNameplate": return "widgets/RetroNameplateWidget.qml";
                     case "customValue": return "widgets/CustomValueWidget.qml";
+                    case "retroCustomValue": return "widgets/RetroCustomValueWidget.qml";
                     case "track": return "widgets/TrackWidget.qml";
                     default: return "";
                     }

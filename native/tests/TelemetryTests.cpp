@@ -73,6 +73,9 @@ private slots:
     void loadsVisualTemplates();
     void providesCustomizableArchetypes();
     void persistsAndSharesCustomTemplates();
+    void updatesCustomTemplatesInPlace();
+    void preservesOptionalFontSettings();
+    void preservesGForcePresentationSettings();
     void persistsWidgetAnimationCues();
     void groupsAndMovesWidgets();
     void constrainsWidgetGeometry();
@@ -1161,9 +1164,10 @@ void TelemetryTests::providesCustomizableArchetypes()
         {"rpm", {"showBar", "warningValue", "maxValue"}},
         {"heartRate", {"showIcon", "unit", "accentColor"}},
         {"pedals", {"acceleratorSource", "brakeSource", "acceleratorColor", "brakeColor"}},
-        {"gForce", {"lateralSource", "longitudinalSource", "gRange", "gridColor"}},
+        {"gForce", {"lateralSource", "longitudinalSource", "invertLateral", "invertLongitudinal", "gRange", "gridColor"}},
         {"track", {"lineColor", "lineWidth", "markerColor", "mirrorX", "mirrorY"}},
         {"customValue", {"label", "decimals", "multiplier"}},
+        {"retroCustomValue", {"source", "label", "fallbackText", "panelColor", "valueColor", "labelColor"}},
         {"arcGauge", {"source", "startAngle", "endAngle", "arcWidth", "trackColor"}},
         {"dialGauge", {"source", "startAngle", "endAngle", "majorTicks", "needleColor"}},
         {"telemetryOverlay", {"source1", "source2", "source3", "source4", "columns"}},
@@ -1182,13 +1186,130 @@ void TelemetryTests::providesCustomizableArchetypes()
         for (const QString &common : {
                  "backgroundColor", "backgroundOpacity", "borderColor", "cornerRadius",
                  "textColor", "secondaryTextColor", "accentColor", "fontFamily",
-                 "fontWeight", "valueFontScale", "labelFontScale", "padding"}) {
+                 "fontWeight", "fontSize", "valueFontScale", "labelFontScale", "padding"}) {
             QVERIFY2(settings.contains(common), qPrintable(iterator.key() + ": " + common));
         }
         for (const QString &key : iterator.value()) {
             QVERIFY2(settings.contains(key), qPrintable(iterator.key() + ": " + key));
         }
     }
+}
+
+void TelemetryTests::updatesCustomTemplatesInPlace()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const bool hadOverride = qEnvironmentVariableIsSet("FLAPPEDEAR_TEMPLATE_STORE");
+    const QByteArray previousOverride = qgetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    const QString storePath = directory.filePath("layout-templates.json");
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", storePath.toUtf8());
+    const auto restoreEnvironment = qScopeGuard([hadOverride, previousOverride] {
+        if (hadOverride) {
+            qputenv("FLAPPEDEAR_TEMPLATE_STORE", previousOverride);
+        } else {
+            qunsetenv("FLAPPEDEAR_TEMPLATE_STORE");
+        }
+    });
+
+    WidgetModel source;
+    QVERIFY(source.applyTemplate("minimal"));
+    const QString templateId = source.saveCurrentAsTemplate("My layout", "Keep this description");
+    QVERIFY(!templateId.isEmpty());
+    const int templateCount = source.templates().size();
+    source.setSetting(0, "fontSize", 48);
+    source.setSetting(0, "futureCompatibleSetting", "preserve me");
+    QCOMPARE(source.addWidget("retroCustomValue"), 2);
+    QVERIFY(source.updateTemplate(templateId));
+    QCOMPARE(source.templates().size(), templateCount);
+    QVERIFY(!source.updateTemplate("minimal"));
+
+    WidgetModel restored;
+    const QVariantList restoredTemplates = restored.templates();
+    QVariantMap saved;
+    for (const QVariant &candidate : restoredTemplates) {
+        if (candidate.toMap().value("id").toString() == templateId) {
+            saved = candidate.toMap();
+            break;
+        }
+    }
+    QCOMPARE(saved.value("name").toString(), QString("My layout"));
+    QCOMPARE(saved.value("description").toString(), QString("Keep this description"));
+    QVERIFY(restored.applyTemplate(templateId));
+    QCOMPARE(restored.count(), 3);
+    QCOMPARE(restored.widget(0).value("settings").toMap().value("fontSize").toDouble(), 48.0);
+    QCOMPARE(restored.widget(0).value("settings").toMap().value("futureCompatibleSetting").toString(), QString("preserve me"));
+    QCOMPARE(restored.widget(2).value("type").toString(), QString("retroCustomValue"));
+
+    QFile stored(storePath);
+    QVERIFY(stored.open(QIODevice::ReadOnly));
+    QJsonObject root = QJsonDocument::fromJson(stored.readAll()).object();
+    QJsonArray templates = root.value("templates").toArray();
+    QJsonObject savedTemplate = templates.first().toObject();
+    savedTemplate.insert("futureTemplateField", "retain this");
+    templates[0] = savedTemplate;
+    root.insert("templates", templates);
+    stored.close();
+    const QByteArray rewrittenStore = QJsonDocument(root).toJson();
+    QVERIFY(stored.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(stored.write(rewrittenStore), qint64(rewrittenStore.size()));
+    stored.close();
+
+    WidgetModel compatibleReload;
+    QVERIFY(compatibleReload.applyTemplate(templateId));
+    compatibleReload.setSetting(0, "fontSize", 60);
+    QVERIFY(compatibleReload.updateTemplate(templateId));
+    QVERIFY(stored.open(QIODevice::ReadOnly));
+    const QJsonObject updatedRoot = QJsonDocument::fromJson(stored.readAll()).object();
+    QCOMPARE(updatedRoot.value("templates").toArray().first().toObject()
+                 .value("futureTemplateField").toString(), QString("retain this"));
+    stored.close();
+
+    const QString blockedStore = directory.path();
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", blockedStore.toUtf8());
+    compatibleReload.setSetting(0, "fontSize", 72);
+    QVERIFY(!compatibleReload.updateTemplate(templateId));
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", storePath.toUtf8());
+    QVERIFY(compatibleReload.applyTemplate(templateId));
+    QCOMPARE(compatibleReload.widget(0).value("settings").toMap().value("fontSize").toDouble(), 60.0);
+}
+
+void TelemetryTests::preservesOptionalFontSettings()
+{
+    WidgetModel source;
+    const int gear = source.addWidget("retroGear");
+    QVERIFY(gear >= 0);
+    QCOMPARE(source.widget(gear).value("settings").toMap().value("fontSize").toDouble(), 0.0);
+    source.setSetting(gear, "fontSize", 0);
+    QCOMPARE(source.widget(gear).value("settings").toMap().value("fontSize").toDouble(), 0.0);
+    source.setSetting(gear, "fontSize", 44);
+    QCOMPARE(source.widget(gear).value("settings").toMap().value("fontSize").toDouble(), 44.0);
+    const int duplicate = source.duplicateWidget(gear);
+    QCOMPARE(source.widget(duplicate).value("settings").toMap().value("fontSize").toDouble(), 44.0);
+    source.setSetting(gear, "fontSize", std::numeric_limits<double>::infinity());
+    QCOMPARE(source.widget(gear).value("settings").toMap().value("fontSize").toDouble(), 0.0);
+
+    WidgetModel restored;
+    QVERIFY(restored.fromJson(source.toJson()));
+    QCOMPARE(restored.widget(duplicate).value("settings").toMap().value("fontSize").toDouble(), 44.0);
+    const int retroCustom = restored.addWidget("retroCustomValue");
+    QCOMPARE(restored.widget(retroCustom).value("settings").toMap().value("fallbackText").toString(), QString("—"));
+}
+
+void TelemetryTests::preservesGForcePresentationSettings()
+{
+    WidgetModel source;
+    const int gForce = source.addWidget("gForce");
+    const QVariantMap defaults = source.widget(gForce).value("settings").toMap();
+    QVERIFY(!defaults.value("invertLateral").toBool());
+    QVERIFY(!defaults.value("invertLongitudinal").toBool());
+    source.setSetting(gForce, "invertLateral", true);
+    source.setSetting(gForce, "invertLongitudinal", true);
+
+    WidgetModel restored;
+    QVERIFY(restored.fromJson(source.toJson()));
+    const QVariantMap settings = restored.widget(0).value("settings").toMap();
+    QVERIFY(settings.value("invertLateral").toBool());
+    QVERIFY(settings.value("invertLongitudinal").toBool());
 }
 
 void TelemetryTests::persistsAndSharesCustomTemplates()

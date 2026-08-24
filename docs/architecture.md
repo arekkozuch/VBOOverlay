@@ -65,7 +65,11 @@ The floating Analysis window is transient UI state. It starts closed for applica
 
 `WidgetModel` owns persistent widgets, groups, appearance cues, and templates. `TelemetryScene.qml` is the render-only telemetry layer: it has a render context and widget model but no editor-selection or media-player dependency. Its shared frame owns normalized geometry, appearance cues, background, border, title, and formatting helpers; one `Loader` then instantiates only the renderer matching each widget type from `qml/widgets/`. Editor interaction remains in the surrounding QML components, while preview and export use the same scene definition.
 
+Custom templates are atomically persisted through the template store. Creating a template assigns a user ID; updating one replaces only its `widgets` snapshot after a successful store commit, retaining its ID, metadata, and compatible unknown fields. The editor records an applied custom template separately from the picker selection, so a passive picker change cannot redirect an in-place update.
+
 The scene uses 1920×1080 as its canonical visual canvas. Normalized widget geometry is resolved directly against the target canvas, while pixel-like typography, padding, borders, lines, and markers use one scene scale. Canvases use widget-relative geometry; the retro Grand Prix renderer is the exception and retains its explicit 440×420 design-space transform, so it must not receive a second scene transform.
+
+Optional widget `fontSize` values are canonical canvas pixels: zero or an absent/invalid value uses the renderer's established automatic expression, and a positive finite value is multiplied by the scene scale. This preserves old scenes and keeps explicit value typography proportional between preview, 720p, 1080p, 4K, and larger exports.
 
 `TrackWidget.qml` keeps the normalized polyline in a static Qt Quick `Shape`/`PathPolyline` layer. Its pixel path is derived only from a geometry revision, widget dimensions, scene-scaled track padding, or mirroring; line width and color remain direct static shape properties. The current-position marker is a separate QML rectangle bound to `currentTrackPoint`, so playback and export time changes never reconstruct or repaint the full path.
 

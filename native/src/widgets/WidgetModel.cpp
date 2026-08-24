@@ -50,7 +50,7 @@ QVariantMap defaultSettings(const QString &type)
 
 const QStringList widgetTypes = {
     "speed",          "rpm",       "heartRate",       "pedals", "gForce",
-    "track",          "customValue", "arcGauge",       "dialGauge",
+    "track",          "customValue", "retroCustomValue", "arcGauge",       "dialGauge",
     "telemetryOverlay", "retroGrandPrix", "retroTachometer", "retroGear",
     "retroPedal", "retroSpeedArc", "retroNameplate", "brandLogo"};
 
@@ -68,7 +68,7 @@ QPair<double, double> defaultSize(const QString &type)
     if (type == "track") {
         return {0.20, 0.28};
     }
-    if (type == "customValue") {
+    if (type == "customValue" || type == "retroCustomValue") {
         return {0.20, 0.13};
     }
     if (type == "arcGauge" || type == "dialGauge") {
@@ -352,7 +352,12 @@ void WidgetModel::setSetting(const int index, const QString &name, const QVarian
     if (index < 0 || index >= m_widgets.size() || name.isEmpty()) {
         return;
     }
-    m_widgets[index].settings.insert(name, value);
+    QVariant cleanValue = value;
+    if (name == "fontSize") {
+        const double candidate = value.toDouble();
+        cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.0, 200.0) : 0.0;
+    }
+    m_widgets[index].settings.insert(name, cleanValue);
     update(index);
 }
 
@@ -567,6 +572,30 @@ QString WidgetModel::saveCurrentAsTemplate(const QString &name, const QString &d
     }
     emit templatesChanged();
     return id;
+}
+
+bool WidgetModel::updateTemplate(const QString &templateId)
+{
+    if (templateId.isEmpty() || m_widgets.isEmpty()) {
+        return false;
+    }
+    for (qsizetype index = 0; index < m_userTemplates.size(); ++index) {
+        const QJsonObject previous = m_userTemplates[index].toObject();
+        if (previous.value("id").toString() != templateId) {
+            continue;
+        }
+        // Keep template identity, user-facing metadata, and unknown compatible fields intact.
+        QJsonObject updated = previous;
+        updated.insert("widgets", toJson());
+        m_userTemplates[index] = updated;
+        if (!saveUserTemplates()) {
+            m_userTemplates[index] = previous;
+            return false;
+        }
+        emit templatesChanged();
+        return true;
+    }
+    return false;
 }
 
 bool WidgetModel::deleteTemplate(const QString &templateId)

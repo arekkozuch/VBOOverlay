@@ -10,8 +10,9 @@ Item {
     property bool hasValue: lateralRaw !== undefined && lateralRaw !== null
         && longitudinalRaw !== undefined && longitudinalRaw !== null
         && Number.isFinite(Number(lateralRaw)) && Number.isFinite(Number(longitudinalRaw))
-    property real lateral: hasValue ? Number(lateralRaw) : 0
-    property real longitudinal: hasValue ? Number(longitudinalRaw) : 0
+    // Inversion is deliberately presentation-only: raw telemetry and combined magnitude stay intact.
+    property real lateral: hasValue ? Number(lateralRaw) * ((frame.widgetSettings.invertLateral ?? false) ? -1 : 1) : 0
+    property real longitudinal: hasValue ? Number(longitudinalRaw) * ((frame.widgetSettings.invertLongitudinal ?? false) ? -1 : 1) : 0
     property real range: Math.max(0.1, Number(frame.widgetSettings.gRange ?? 2))
     Rectangle {
         anchors.centerIn: parent

@@ -27,7 +27,9 @@ RowLayout {
                 color: frame.primary
                 font.family: frame.family
                 font.weight: frame.weight
-                font.pixelSize: Math.min(28 * frame.sceneScale, frame.height * 0.38) * frame.valueScale
+                font.pixelSize: frame.configuredFontSize() > 0
+                    ? frame.configuredFontSize() * frame.sceneScale
+                    : Math.min(28 * frame.sceneScale, frame.height * 0.38) * frame.valueScale
             }
             Label {
                 anchors.baseline: parent.children[0].baseline

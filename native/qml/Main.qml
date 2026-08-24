@@ -28,6 +28,9 @@ ApplicationWindow {
     property bool welcomeVisible: !appController.projectPath && !appController.videoName
     property int selectedWidgetIndex: -1
     property var selectedWidgetIndices: []
+    // A picker selection is only a candidate. This records the custom template whose
+    // layout was actually applied (or just created), so Save current cannot overwrite it by accident.
+    property string activeTemplateId: ""
     property var widgetCatalog: [
         {
             "label": "Speed",
@@ -63,6 +66,11 @@ ApplicationWindow {
             "label": "Custom",
             "type": "customValue",
             "icon": "123"
+        },
+        {
+            "label": "Retro Custom",
+            "type": "retroCustomValue",
+            "icon": "R+"
         },
         {
             "label": "Arc gauge",
@@ -1124,14 +1132,14 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             spacing: 10
             Label {
-                text: qsTr("Save custom template")
+                text: qsTr("Save as new custom template")
                 color: "#f1f5fa"
                 font.pixelSize: 17
                 font.weight: Font.DemiBold
             }
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Capture the complete current scene, including widget positions, bindings and styles.")
+                text: qsTr("Create a named custom template from the complete current scene, including widget positions, bindings and styles.")
                 color: "#778596"
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap
@@ -1173,6 +1181,7 @@ ApplicationWindow {
                         const templateId = appController.widgetModel.saveCurrentAsTemplate(templateName.text, templateDescription.text);
                         if (templateId) {
                             templatePicker.currentIndex = window.templateIndexById(templateId);
+                            window.activeTemplateId = templateId;
                             templateSavePopup.close();
                         }
                     }
@@ -1363,6 +1372,11 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         model: window.templateNames()
                         currentIndex: 0
+                        onActivated: {
+                            const item = window.selectedTemplate();
+                            if (!item || item.id !== window.activeTemplateId)
+                                window.activeTemplateId = "";
+                        }
                     }
                     Label {
                         Layout.fillWidth: true
@@ -1379,7 +1393,8 @@ ApplicationWindow {
                             const item = window.selectedTemplate();
                             if (item) {
                                 window.clearWidgetSelection();
-                                appController.widgetModel.applyTemplate(item.id);
+                                if (appController.widgetModel.applyTemplate(item.id))
+                                    window.activeTemplateId = item.builtIn ? "" : item.id;
                             }
                         }
                     }
@@ -1392,6 +1407,19 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             compact: true
                             text: qsTr("Save current")
+                            onClicked: {
+                                const item = window.selectedTemplate();
+                                if (item && !item.builtIn && item.id === window.activeTemplateId) {
+                                    appController.widgetModel.updateTemplate(item.id);
+                                } else {
+                                    templateSavePopup.open();
+                                }
+                            }
+                        }
+                        FeButton {
+                            Layout.fillWidth: true
+                            compact: true
+                            text: qsTr("Save as new")
                             onClicked: templateSavePopup.open()
                         }
                         FeButton {
@@ -1415,8 +1443,11 @@ ApplicationWindow {
                             enabled: window.selectedTemplate() !== null && !window.selectedTemplate().builtIn
                             onClicked: {
                                 const item = window.selectedTemplate();
-                                if (item && appController.widgetModel.deleteTemplate(item.id))
+                                if (item && appController.widgetModel.deleteTemplate(item.id)) {
+                                    if (window.activeTemplateId === item.id)
+                                        window.activeTemplateId = "";
                                     templatePicker.currentIndex = 0;
+                                }
                             }
                         }
                     }

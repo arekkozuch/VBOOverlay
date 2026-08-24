@@ -16,11 +16,20 @@ Column {
     }
     Label {
         anchors.horizontalCenter: parent.horizontalCenter
-        text: frame.numberText(frame.raw("source", ""), 1)
+        text: {
+            const adjusted = frame.adjusted(frame.raw("source", ""));
+            if (adjusted === undefined || !Number.isFinite(Number(adjusted)))
+                return frame.widgetSettings.fallbackText ?? "—";
+            return (frame.widgetSettings.prefix || "")
+                + Number(adjusted).toFixed(Number(frame.widgetSettings.decimals ?? 1))
+                + (frame.widgetSettings.suffix || "");
+        }
         color: frame.primary
         font.family: frame.family
         font.weight: frame.weight
-        font.pixelSize: Math.min(38 * frame.sceneScale, frame.height * 0.36) * frame.valueScale
+        font.pixelSize: frame.configuredFontSize() > 0
+            ? frame.configuredFontSize() * frame.sceneScale
+            : Math.min(38 * frame.sceneScale, frame.height * 0.36) * frame.valueScale
     }
     Label {
         anchors.horizontalCenter: parent.horizontalCenter

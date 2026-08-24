@@ -25,7 +25,9 @@ ColumnLayout {
                 color: hasValue && Number(rpmValue) >= Number(frame.widgetSettings.warningValue ?? 6500) ? "#ff6978" : frame.primary
                 font.family: frame.family
                 font.weight: frame.weight
-                font.pixelSize: Math.min(34 * frame.sceneScale, frame.height * 0.42) * frame.valueScale
+                font.pixelSize: frame.configuredFontSize() > 0
+                    ? frame.configuredFontSize() * frame.sceneScale
+                    : Math.min(34 * frame.sceneScale, frame.height * 0.42) * frame.valueScale
             }
         }
         Label {

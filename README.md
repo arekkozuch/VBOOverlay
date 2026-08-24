@@ -43,6 +43,12 @@ open "build-native/native/FlappedEar Telemetry.app"
 
 The application keeps telemetry parsing, synchronization, video/media handling, widgets, and QML presentation separate. Preview and export mount the same `TelemetryScene.qml` with independent render contexts. Track geometry is converted and painted as a static layer when its source or appearance changes; playback updates move only the independent position marker.
 
+## Widget editing
+
+G-Force widgets can invert lateral and longitudinal presentation axes independently, without changing imported telemetry. `Retro Custom` is a generic retro-styled numeric value widget with the usual channel, adjustment, formatting, unit, fallback, and palette settings. Text-bearing value widgets offer **Font size**: `Auto` retains their responsive legacy sizing, while a positive canonical size is scene-scaled consistently for preview and every export resolution.
+
+Templates have two explicit operations. **Save current** updates the custom template that was applied (or just created), preserving its ID, name, and description. Selecting a template alone does not make it editable, so Save current opens **Save as new** until that custom template is applied. Built-in templates are immutable and always use Save as new.
+
 A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup; QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
 
 Module details are in [docs/architecture.md](docs/architecture.md). The project source lives in [`native/src/project`](native/src/project).

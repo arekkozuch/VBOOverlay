@@ -146,6 +146,7 @@ qt_add_qml_module(flappedear_native
         qml/widgets/HeartRateWidget.qml
         qml/widgets/PedalsWidget.qml
         qml/widgets/RetroGearWidget.qml
+        qml/widgets/RetroCustomValueWidget.qml
         qml/widgets/RetroGrandPrixWidget.qml
         qml/widgets/RetroNameplateWidget.qml
         qml/widgets/RetroPedalWidget.qml

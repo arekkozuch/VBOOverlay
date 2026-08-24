@@ -23,7 +23,9 @@ Item {
             color: frame.primary
             font.family: frame.family
             font.weight: frame.weight
-            font.pixelSize: Math.min(frame.width * 0.36, frame.height * 0.43) * frame.valueScale
+            font.pixelSize: frame.configuredFontSize() > 0
+                ? frame.configuredFontSize() * frame.sceneScale
+                : Math.min(frame.width * 0.36, frame.height * 0.43) * frame.valueScale
         }
         Label {
             anchors.horizontalCenter: parent.horizontalCenter

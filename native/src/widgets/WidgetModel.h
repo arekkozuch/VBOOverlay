@@ -75,6 +75,7 @@ public:
     Q_INVOKABLE void resetDefaults();
     Q_INVOKABLE bool applyTemplate(const QString &templateId);
     Q_INVOKABLE QString saveCurrentAsTemplate(const QString &name, const QString &description);
+    Q_INVOKABLE bool updateTemplate(const QString &templateId);
     Q_INVOKABLE bool deleteTemplate(const QString &templateId);
     Q_INVOKABLE bool exportTemplate(const QString &templateId, const QUrl &url) const;
     Q_INVOKABLE QString importTemplate(const QUrl &url);

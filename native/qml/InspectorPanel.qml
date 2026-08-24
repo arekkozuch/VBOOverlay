@@ -130,6 +130,29 @@ Rectangle {
                             }
                         }
 
+                        RowLayout {
+                            visible: ["speed", "rpm", "heartRate", "customValue", "retroCustomValue", "arcGauge", "dialGauge", "retroGear", "retroPedal", "retroSpeedArc", "retroTachometer"].includes(root.selectedWidget.type)
+                            Layout.fillWidth: true
+                            Label {
+                                text: qsTr("Font size")
+                                color: "#8b98a8"
+                                font.pixelSize: 11
+                            }
+                            FeSpinBox {
+                                Layout.fillWidth: true
+                                from: 0
+                                to: 200
+                                value: {
+                                    const size = Number(root.settings.fontSize ?? 0);
+                                    return Number.isFinite(size) && size > 0 ? Math.min(200, Math.round(size)) : 0;
+                                }
+                                textFromValue: function(value, locale) {
+                                    return value === 0 ? qsTr("Auto") : value.toString();
+                                }
+                                onValueModified: root.setSetting("fontSize", value)
+                            }
+                        }
+
                         SectionTitle {
                             text: qsTr("Identity")
                         }
@@ -436,6 +459,11 @@ Rectangle {
                                 currentIndex: Math.max(0, model.indexOf(root.settings.lateralSource || qsTr("Automatic")))
                                 onActivated: root.setSetting("lateralSource", currentIndex === 0 ? "" : currentText)
                             }
+                            FeCheckBox {
+                                text: qsTr("Invert lateral axis")
+                                checked: root.settings.invertLateral ?? false
+                                onToggled: root.setSetting("invertLateral", checked)
+                            }
                             Label {
                                 text: qsTr("Longitudinal channel")
                                 color: "#8b98a8"
@@ -446,6 +474,11 @@ Rectangle {
                                 model: root.channelModel()
                                 currentIndex: Math.max(0, model.indexOf(root.settings.longitudinalSource || qsTr("Automatic")))
                                 onActivated: root.setSetting("longitudinalSource", currentIndex === 0 ? "" : currentText)
+                            }
+                            FeCheckBox {
+                                text: qsTr("Invert longitudinal axis")
+                                checked: root.settings.invertLongitudinal ?? false
+                                onToggled: root.setSetting("invertLongitudinal", checked)
                             }
                             GridLayout {
                                 Layout.fillWidth: true
@@ -1090,6 +1123,55 @@ Rectangle {
                                 Layout.fillWidth: true
                                 colorValue: root.settings.valueColor || "#111111"
                                 onEdited: value => root.setSetting("valueColor", value)
+                            }
+                        }
+
+                        ColumnLayout {
+                            visible: root.selectedWidget.type === "retroCustomValue"
+                            Layout.fillWidth: true
+                            spacing: 7
+                            SectionTitle {
+                                text: qsTr("Retro custom style")
+                            }
+                            Label {
+                                text: qsTr("Panel color")
+                                color: "#8b98a8"
+                                font.pixelSize: 10
+                            }
+                            ColorField {
+                                Layout.fillWidth: true
+                                colorValue: root.settings.panelColor || "#f4f4f4"
+                                onEdited: value => root.setSetting("panelColor", value)
+                            }
+                            Label {
+                                text: qsTr("Value color")
+                                color: "#8b98a8"
+                                font.pixelSize: 10
+                            }
+                            ColorField {
+                                Layout.fillWidth: true
+                                colorValue: root.settings.valueColor || "#111111"
+                                onEdited: value => root.setSetting("valueColor", value)
+                            }
+                            Label {
+                                text: qsTr("Label color")
+                                color: "#8b98a8"
+                                font.pixelSize: 10
+                            }
+                            ColorField {
+                                Layout.fillWidth: true
+                                colorValue: root.settings.labelColor || "#3d433c"
+                                onEdited: value => root.setSetting("labelColor", value)
+                            }
+                            Label {
+                                text: qsTr("Text when channel is unavailable")
+                                color: "#8b98a8"
+                                font.pixelSize: 10
+                            }
+                            FeTextField {
+                                Layout.fillWidth: true
+                                text: root.settings.fallbackText || "—"
+                                onEditingFinished: root.setSetting("fallbackText", text)
                             }
                         }
 

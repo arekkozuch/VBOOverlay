@@ -36,7 +36,9 @@ Item {
             ctx.fillStyle = settings.dialColor || "#f4f4f4";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.font = "700 " + Math.max(9 * frame.sceneScale, radius * 0.18) + "px " + frame.family;
+            ctx.font = "700 " + (frame.configuredFontSize() > 0
+                ? frame.configuredFontSize() * frame.sceneScale
+                : Math.max(9 * frame.sceneScale, radius * 0.18)) + "px " + frame.family;
             for (const ring of [0.92, 1.0]) {
                 ctx.lineWidth = Math.max(2 * frame.sceneScale, radius * 0.035);
                 ctx.beginPath();
