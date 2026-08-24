@@ -15,6 +15,20 @@ Item {
         property bool hasValue: parent.hasValue
         onValueChanged: requestPaint()
         onHasValueChanged: requestPaint()
+        function roundedPath(ctx, x, y, rectangleWidth, rectangleHeight, radius) {
+            const boundedRadius = Math.min(radius, rectangleWidth / 2, rectangleHeight / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + boundedRadius, y);
+            ctx.lineTo(x + rectangleWidth - boundedRadius, y);
+            ctx.quadraticCurveTo(x + rectangleWidth, y, x + rectangleWidth, y + boundedRadius);
+            ctx.lineTo(x + rectangleWidth, y + rectangleHeight - boundedRadius);
+            ctx.quadraticCurveTo(x + rectangleWidth, y + rectangleHeight, x + rectangleWidth - boundedRadius, y + rectangleHeight);
+            ctx.lineTo(x + boundedRadius, y + rectangleHeight);
+            ctx.quadraticCurveTo(x, y + rectangleHeight, x, y + rectangleHeight - boundedRadius);
+            ctx.lineTo(x, y + boundedRadius);
+            ctx.quadraticCurveTo(x, y, x + boundedRadius, y);
+            ctx.closePath();
+        }
         onPaint: {
             const ctx = getContext("2d");
             ctx.reset();
@@ -27,13 +41,13 @@ Item {
             const steps = Math.max(4, Math.min(16, Math.round((maximum - minimum) / 1000)));
             const progress = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
             ctx.globalAlpha = Number(settings.panelOpacity ?? 0.86);
-            ctx.fillStyle = settings.panelColor || "#101820";
+            ctx.fillStyle = settings.panelColor || "#111a22";
             ctx.beginPath();
             ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalAlpha = 1;
             ctx.lineWidth = Math.max(frame.sceneScale, radius * 0.025);
-            ctx.strokeStyle = settings.rimColor || "#91a1b1";
+            ctx.strokeStyle = settings.rimColor || "#8895a3";
             ctx.beginPath();
             ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
             ctx.stroke();
@@ -79,13 +93,15 @@ Item {
             const plateHeight = Math.max(18 * frame.sceneScale, radius * 0.32);
             const plateX = cx - plateWidth / 2;
             const plateY = cy + radius * 0.52;
-            ctx.globalAlpha = 0.92;
-            ctx.fillStyle = settings.valuePlateColor || "#0a1017";
-            ctx.fillRect(plateX, plateY, plateWidth, plateHeight);
+            ctx.globalAlpha = Number(settings.backgroundOpacity ?? 0.90);
+            roundedPath(ctx, plateX, plateY, plateWidth, plateHeight, Math.max(3 * frame.sceneScale, plateHeight * 0.18));
+            ctx.fillStyle = settings.valuePlateColor || "#111a22";
+            ctx.fill();
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = settings.rimColor || "#718397";
+            ctx.strokeStyle = settings.rimColor || "#8895a3";
             ctx.lineWidth = Math.max(1, frame.sceneScale * 0.75);
-            ctx.strokeRect(plateX, plateY, plateWidth, plateHeight);
+            roundedPath(ctx, plateX, plateY, plateWidth, plateHeight, Math.max(3 * frame.sceneScale, plateHeight * 0.18));
+            ctx.stroke();
             ctx.fillStyle = settings.dialColor || "#f2f5f7";
             ctx.font = "700 " + Math.max(11 * frame.sceneScale, plateHeight * 0.52) + "px " + frame.family;
             ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.53);
@@ -96,6 +112,7 @@ Item {
     }
     Connections {
         target: frame.widgetModel
+        ignoreUnknownSignals: true
         function onRevisionChanged() {
             retroTachometerCanvas.requestPaint();
         }

@@ -159,6 +159,7 @@ qt_add_qml_module(flappedear_native
         qml/widgets/RpmWidget.qml
         qml/widgets/SpeedWidget.qml
         qml/widgets/TelemetryOverlayWidget.qml
+        qml/widgets/TelemetryPanel.qml
         qml/widgets/TrackWidget.qml
 )
 

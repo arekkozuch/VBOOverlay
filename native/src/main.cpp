@@ -21,13 +21,19 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
 #include <QQmlContext>
+#include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQuickStyle>
+#include <QQuickWindow>
+#include <QEventLoop>
 #include <QMediaPlayer>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QThread>
+#include <QTimer>
 #include <cmath>
 #include <numbers>
 
@@ -84,6 +90,75 @@ int renderStill(const QString &path)
                               .arg(path)
                               .arg(image.width())
                               .arg(image.height());
+    return EXIT_SUCCESS;
+}
+
+int renderVisualSmoke(const QString &path)
+{
+    QQmlEngine engine;
+    QQmlComponent component(
+        &engine, QUrl(QStringLiteral("qrc:/qt/qml/FlappedEar/qml/VisualSmokeScene.qml")));
+    QQuickItem *scene = qobject_cast<QQuickItem *>(component.create());
+    if (!scene) {
+        qCritical().noquote() << QStringLiteral("Could not create visual smoke scene: %1")
+                                      .arg(component.errorString());
+        return EXIT_FAILURE;
+    }
+
+    QQuickWindow window;
+    window.setColor(Qt::black);
+    window.setGeometry(0, 0, 1920, 1080);
+    scene->setParentItem(window.contentItem());
+    scene->setSize(window.size());
+    window.show();
+
+    bool saved = false;
+    QEventLoop eventLoop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, &eventLoop, &QEventLoop::quit);
+    // VisualSmokeScene uses the same asynchronous Loader path as preview and
+    // export. Let that production component tree complete before its capture.
+    QTimer::singleShot(200, &window, [&] {
+        QQuickItem *telemetryScene = scene->findChild<QQuickItem *>(
+            QStringLiteral("visual-smoke-telemetry-scene"));
+        if (!telemetryScene) {
+            qCritical() << "Visual smoke capture could not find its telemetry scene";
+            eventLoop.quit();
+            return;
+        }
+        int visibleWidgetCount = 0;
+        for (QQuickItem *item : telemetryScene->childItems()) {
+            const bool visible = item->isVisible() && item->opacity() > 0.0
+                && item->width() > 0.0 && item->height() > 0.0;
+            if (visible)
+                ++visibleWidgetCount;
+        }
+        if (visibleWidgetCount != 9) {
+            qCritical() << "Visual smoke capture requires nine visible widget frames; found"
+                        << visibleWidgetCount;
+            eventLoop.quit();
+            return;
+        }
+        const QSharedPointer<QQuickItemGrabResult> result = scene->grabToImage();
+        if (!result) {
+            eventLoop.quit();
+            return;
+        }
+        QObject::connect(result.data(), &QQuickItemGrabResult::ready, &eventLoop, [&, result] {
+            saved = result->saveToFile(path);
+            eventLoop.quit();
+        });
+    });
+    timeout.start(10'000);
+    eventLoop.exec();
+    delete scene;
+    if (!saved) {
+        qCritical().noquote() << QStringLiteral("Could not capture visual smoke scene to %1").arg(path);
+        return EXIT_FAILURE;
+    }
+    qInfo().noquote() << QStringLiteral("Visual smoke scene rendered to %1 (1920×1080).")
+                              .arg(path);
     return EXIT_SUCCESS;
 }
 
@@ -506,6 +581,7 @@ int exportWorker(const QString &configPath)
 int main(int argc, char *argv[])
 {
     const bool renderStillMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--render-still";
+    const bool renderVisualSmokeMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--render-visual-smoke";
     const bool exportTestMode = argc == 4 && QString::fromLocal8Bit(argv[1]) == "--export-test";
     const bool exportWorkerMode = argc == 3 && QString::fromLocal8Bit(argv[1]) == "--export-worker";
     const bool benchmarkRenderMode = argc == 5 && QString::fromLocal8Bit(argv[1]) == "--benchmark-render";
@@ -519,7 +595,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("FlappedEar");
     QCoreApplication::setOrganizationDomain("flappedear.com");
     QCoreApplication::setApplicationName("FlappedEar Telemetry");
-    const bool applicationMode = !renderStillMode && !exportTestMode && !exportWorkerMode
+    const bool applicationMode = !renderStillMode && !renderVisualSmokeMode && !exportTestMode && !exportWorkerMode
         && !benchmarkRenderMode && !startupSmokeMode;
     if (applicationMode) {
         static_cast<void>(FlappedEar::AppLog::initialize());
@@ -536,6 +612,9 @@ int main(int argc, char *argv[])
     app.setWindowIcon(QIcon(QStringLiteral(":/flappedear/resources/branding/app-logo.png")));
     if (renderStillMode) {
         return renderStill(QString::fromLocal8Bit(argv[2]));
+    }
+    if (renderVisualSmokeMode) {
+        return renderVisualSmoke(QString::fromLocal8Bit(argv[2]));
     }
     if (exportTestMode) {
         return exportTest(QString::fromLocal8Bit(argv[2]), QString::fromLocal8Bit(argv[3]));

@@ -13,9 +13,16 @@ Item {
         id: gForce
         frame: root.frame
     }
+    TelemetryPanel {
+        id: panel
+        anchors.fill: parent
+        frame: root.frame
+        accentColor: root.frame.widgetSettings.barColor || root.frame.gForceAccent
+    }
     Column {
         anchors.fill: parent
-        spacing: Math.max(4 * root.frame.sceneScale, parent.height * 0.10)
+        anchors.margins: panel.innerPadding
+        spacing: Math.max(5 * root.frame.sceneScale, parent.height * 0.10)
         Row {
             width: parent.width
             height: parent.height * 0.46
@@ -29,7 +36,7 @@ Item {
                 font.weight: Font.DemiBold
                 font.pixelSize: root.frame.configuredFontSize() > 0
                     ? root.frame.configuredFontSize() * root.frame.sceneScale
-                    : Math.max(11 * root.frame.sceneScale, parent.height * 0.52)
+                    : panel.panelLabelSize
                 elide: Text.ElideRight
             }
             Label {
@@ -43,12 +50,12 @@ Item {
                 font.weight: Font.Bold
                 font.pixelSize: root.frame.configuredFontSize() > 0
                     ? root.frame.configuredFontSize() * root.frame.sceneScale
-                    : Math.max(11 * root.frame.sceneScale, parent.height * 0.55)
+                    : panel.compactValueSize
             }
         }
         Rectangle {
             width: parent.width
-            height: Math.max(6 * root.frame.sceneScale, parent.parent.height * 0.20)
+            height: Math.max(8 * root.frame.sceneScale, parent.parent.height * 0.20)
             radius: Number(root.frame.widgetSettings.barRadius ?? 5) * root.frame.sceneScale
             color: root.frame.neutralTrack
             Rectangle {

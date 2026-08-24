@@ -5,15 +5,21 @@ import QtQuick.Layouts
 Item {
     property var frame: parent.frame
 
+    TelemetryPanel {
+        id: panel
+        anchors.fill: parent
+        frame: parent.frame
+    }
     Column {
         anchors.fill: parent
+        anchors.margins: panel.innerPadding
         spacing: 2 * frame.sceneScale
         Label {
             text: frame.widgetSettings.label || "Speed"
             color: frame.secondary
             font.family: frame.family
             font.weight: Font.DemiBold
-            font.pixelSize: Math.max(12, 14 * frame.labelScale) * frame.sceneScale
+            font.pixelSize: panel.panelLabelSize
             font.letterSpacing: 0.35 * frame.sceneScale
         }
         Label {
@@ -24,7 +30,7 @@ Item {
             font.weight: frame.weight
             font.pixelSize: frame.configuredFontSize() > 0
                 ? frame.configuredFontSize() * frame.sceneScale
-                : Math.max(30 * frame.sceneScale, Math.min(frame.width * 0.54, frame.height * 0.48)) * frame.valueScale
+                : Math.max(30 * frame.sceneScale, Math.min(panel.panelValueSize, parent.height * 0.56))
         }
         Label {
             visible: frame.widgetSettings.showUnit ?? true
@@ -32,7 +38,7 @@ Item {
             color: frame.secondary
             font.family: frame.family
             font.weight: Font.DemiBold
-            font.pixelSize: Math.max(11, 13 * frame.labelScale) * frame.sceneScale
+            font.pixelSize: panel.panelUnitSize
         }
     }
 }

@@ -12,6 +12,13 @@ Item {
     readonly property var activeRenderContext: root.renderContext || sampleContext
     readonly property var activeWidgetModel: root.widgetModel || smokeWidgets
 
+    // Declare the stand-alone model before TelemetryScene binds to it. This is
+    // relevant only for the deterministic acceptance scene; application
+    // preview/export provide their WidgetModel explicitly.
+    ListModel {
+        id: smokeWidgets
+    }
+
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
@@ -51,6 +58,7 @@ Item {
     }
 
     TelemetryScene {
+        objectName: "visual-smoke-telemetry-scene"
         anchors.fill: parent
         renderContext: root.activeRenderContext
         widgetModel: root.activeWidgetModel
@@ -61,29 +69,27 @@ Item {
         property real time: 0
         function telemetryValue(source) {
             const samples = {
-                "speed": 50,
-                "rpm": 6240,
-                "throttle": 32,
-                "brake": 0,
+                "speed": 86,
+                "rpm": 4300,
+                "throttle": 63,
+                "brake": 18,
                 "oil": 97,
                 "atf": 84,
                 "coolant": 90,
-                "heartRate": 105,
-                "lateralG": 0.24,
-                "longitudinalG": 0.22
+                "heartRate": 145,
+                "lateralG": 0.48,
+                "longitudinalG": 0.64
             };
             return samples[source];
         }
     }
 
-    ListModel {
-        id: smokeWidgets
-        Component.onCompleted: {
+    Component.onCompleted: {
             const common = {
-                "backgroundColor": "#101820", "backgroundOpacity": 0.86,
-                "borderColor": "#718397", "borderOpacity": 0.55,
+                "backgroundColor": "#111a22", "backgroundOpacity": 0.86,
+                "borderColor": "#8895a3", "borderOpacity": 0.55,
                 "cornerRadius": 12, "padding": 14,
-                "textColor": "#f2f5f7", "secondaryTextColor": "#c0c8d0"
+                "textColor": "#f2f5f7", "secondaryTextColor": "#b5c0ca"
             };
             const add = function(type, x, y, width, height, settings) {
                 smokeWidgets.append({
@@ -98,8 +104,8 @@ Item {
             add("retroTachometer", 0.045, 0.49, 0.25, 0.36, {
                 "showBackground": false, "showBorder": false, "padding": 0,
                 "source": "rpm", "label": "RPM", "minValue": 0, "maxValue": 8000,
-                "panelColor": "#101820", "panelOpacity": 0.86, "dialColor": "#f2f5f7",
-                "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#718397"
+                "panelColor": "#111a22", "panelOpacity": 0.86, "dialColor": "#f2f5f7",
+                "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#8895a3"
             });
             add("speed", 0.055, 0.07, 0.16, 0.19, Object.assign({}, common, {
                 "source": "speed", "label": "Speed", "unit": "km/h", "decimals": 0
@@ -110,15 +116,12 @@ Item {
                 "acceleratorColor": "#55d76a", "brakeColor": "#e14b4b", "showValues": true
             }));
             add("retroCustomValue", 0.73, 0.28, 0.22, 0.055, {
-                "showBackground": false, "showBorder": false, "padding": 0,
                 "source": "oil", "label": "OIL", "unit": "°C", "decimals": 0
             });
             add("retroCustomValue", 0.73, 0.335, 0.22, 0.055, {
-                "showBackground": false, "showBorder": false, "padding": 0,
                 "source": "atf", "label": "ATF", "unit": "°C", "decimals": 0
             });
             add("retroCustomValue", 0.73, 0.39, 0.22, 0.055, {
-                "showBackground": false, "showBorder": false, "padding": 0,
                 "source": "coolant", "label": "COOLANT", "unit": "°C", "decimals": 0
             });
             add("heartRate", 0.39, 0.07, 0.13, 0.20, Object.assign({}, common, {
@@ -127,14 +130,13 @@ Item {
             add("f1GForceRadar", 0.72, 0.52, 0.20, 0.30, {
                 "showBackground": false, "showBorder": false, "padding": 0,
                 "lateralSource": "lateralG", "longitudinalSource": "longitudinalG",
-                "maxG": 1.5, "ringStepG": 0.25, "radarBackgroundColor": "#101820",
-                "backgroundOpacity": 0.86, "dotColor": "#f5a623", "gridColor": "#91a1b1"
+                "maxG": 1.5, "ringStepG": 0.25, "radarBackgroundColor": "#111a22",
+                "backgroundOpacity": 0.86, "dotColor": "#f5a623", "gridColor": "#8895a3"
             });
             add("gForceMagnitudeBar", 0.36, 0.78, 0.28, 0.10, Object.assign({}, common, {
                 "lateralSource": "lateralG", "longitudinalSource": "longitudinalG",
                 "maxG": 1.5, "labelText": "G-Force", "decimals": 2,
                 "barColor": "#f5a623", "barBackgroundColor": "#24303d"
             }));
-        }
     }
 }

@@ -6,14 +6,14 @@
       "showTitle": false,
       "showBackground": true,
       "showBorder": true,
-      "backgroundColor": "#101820",
+      "backgroundColor": "#111a22",
       "backgroundOpacity": 0.86,
-      "borderColor": "#718397",
+      "borderColor": "#8895a3",
       "borderOpacity": 0.55,
       "borderWidth": 1,
       "cornerRadius": 12,
       "textColor": "#f2f5f7",
-      "secondaryTextColor": "#c0c8d0",
+      "secondaryTextColor": "#b5c0ca",
       "accentColor": "#55d76a",
       "accentColor2": "#42a5ff",
       "fontFamily": "Helvetica Neue",
@@ -48,8 +48,8 @@
       "showBackground": false, "showBorder": false, "padding": 0,
       "lateralSource": "", "longitudinalSource": "", "invertLateral": false, "invertLongitudinal": false,
       "maxG": 1.5, "ringStepG": 0.25, "showCrosshair": true, "showCenterBox": true,
-      "radarBackgroundColor": "#101820", "backgroundOpacity": 0.86,
-      "dotColor": "#f5a623", "gridColor": "#91a1b1"
+      "radarBackgroundColor": "#111a22", "backgroundOpacity": 0.86,
+      "dotColor": "#f5a623", "gridColor": "#8895a3"
     },
     "gForceMagnitudeBar": {
       "showBackground": true, "showBorder": true, "padding": 14,
@@ -61,8 +61,8 @@
     "track": { "lineColor": "#55e6a5", "lineWidth": 3, "markerColor": "#ffffff", "markerSize": 10, "trackPadding": 10, "mirrorX": false, "mirrorY": false },
     "customValue": { "label": "VALUE", "decimals": 1 },
     "retroCustomValue": {
-      "showBackground": false, "showBorder": false, "padding": 0, "label": "VALUE", "decimals": 1,
-      "fallbackText": "—", "panelColor": "#101820", "valueColor": "#f2f5f7", "labelColor": "#c0c8d0"
+      "showBackground": true, "showBorder": true, "padding": 12, "label": "VALUE", "decimals": 1,
+      "fallbackText": "—", "panelColor": "#111a22", "valueColor": "#f2f5f7", "labelColor": "#b5c0ca"
     },
     "arcGauge": {
       "label": "SPEED", "unit": "km/h", "minValue": 0, "maxValue": 300, "decimals": 0,
@@ -94,8 +94,8 @@
     "retroTachometer": {
       "showBackground": false, "showBorder": false, "padding": 0, "source": "rpm-obd",
       "label": "RPM", "minValue": 0, "maxValue": 8000, "dialColor": "#f2f5f7",
-      "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#718397",
-      "valuePlateColor": "#0a1017", "panelColor": "#101820", "panelOpacity": 0.86
+      "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#8895a3",
+      "valuePlateColor": "#111a22", "panelColor": "#111a22", "panelOpacity": 0.86
     },
     "retroGear": {
       "showBackground": false, "showBorder": false, "padding": 0, "source": "",

@@ -27,10 +27,10 @@ Item {
         width: root.fieldDiameter
         height: width
         radius: width / 2
-        color: root.frame.widgetSettings.radarBackgroundColor || "#101820"
+        color: root.frame.widgetSettings.radarBackgroundColor || "#111a22"
         opacity: Number(root.frame.widgetSettings.backgroundOpacity ?? 0.86)
         border.width: Math.max(1.25, root.frame.sceneScale * 1.25)
-        border.color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        border.color: root.frame.widgetSettings.gridColor || "#8895a3"
     }
     Repeater {
         model: root.ringCount - 1
@@ -43,7 +43,7 @@ Item {
             radius: width / 2
             color: "transparent"
             border.width: Math.max(1, root.frame.sceneScale)
-            border.color: root.frame.widgetSettings.gridColor || "#91a1b1"
+            border.color: root.frame.widgetSettings.gridColor || "#8895a3"
             opacity: 0.42 + (index + 1) / Math.max(1, root.ringCount - 1) * 0.16
         }
     }
@@ -53,7 +53,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: root.fieldDiameter
         height: Math.max(1, root.frame.sceneScale)
-        color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        color: root.frame.widgetSettings.gridColor || "#8895a3"
         opacity: 0.24
     }
     Rectangle {
@@ -62,7 +62,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(1, root.frame.sceneScale)
         height: root.fieldDiameter
-        color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        color: root.frame.widgetSettings.gridColor || "#8895a3"
         opacity: 0.24
     }
     Rectangle {
@@ -72,7 +72,7 @@ Item {
         height: width
         color: "transparent"
         border.width: Math.max(1, root.frame.sceneScale * 0.8)
-        border.color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        border.color: root.frame.widgetSettings.gridColor || "#8895a3"
         opacity: 0.52
     }
     Rectangle {

@@ -40,10 +40,13 @@ Item {
             rotation: widgetRotation
             scale: cueScale
             opacity: widgetOpacity * cueOpacity
-            visible: widgetVisible && (widgetCues.length === 0 || cueOpacity > 0)
+            property bool hasCues: widgetCues !== undefined && widgetCues !== null && widgetCues.length > 0
+            visible: widgetVisible && (!hasCues || cueOpacity > 0)
 
             property var activeCue: {
                 root.renderContext.time;
+                if (!hasCues)
+                    return null;
                 let best = null;
                 let bestOpacity = 0;
                 for (let index = 0; index < widgetCues.length; ++index) {
@@ -72,7 +75,7 @@ Item {
                 }
                 return best;
             }
-            property real cueOpacity: widgetCues.length === 0 ? 1 : (activeCue ? activeCue.amount : 0)
+            property real cueOpacity: !hasCues ? 1 : (activeCue ? activeCue.amount : 0)
             property real cueScale: activeCue && activeCue.cue.effect === "pop" ? 0.86 + 0.14 * (activeCue.fadeIn > 0 ? Math.min(1, activeCue.elapsed / activeCue.fadeIn) : 1) : 1
             property real cueYOffset: activeCue && activeCue.cue.effect === "slideUp" ? height * 0.14 * (1 - (activeCue.fadeIn > 0 ? Math.min(1, activeCue.elapsed / activeCue.fadeIn) : 1)) : 0
 
@@ -81,18 +84,24 @@ Item {
             property int weight: Number(widgetSettings.fontWeight ?? 600)
             // Shared modern-motorsport broadcast HUD palette. Individual widgets use
             // these semantic tokens rather than inventing their own panel treatment.
-            property color panel: widgetSettings.backgroundColor || "#101820"
+            property color panel: widgetSettings.backgroundColor || "#111a22"
             property color primary: widgetSettings.textColor || "#f2f5f7"
-            property color secondary: widgetSettings.secondaryTextColor || "#c0c8d0"
+            property color secondary: widgetSettings.secondaryTextColor || "#b5c0ca"
             property color accent: widgetSettings.accentColor || "#55d76a"
             property color throttle: widgetSettings.acceleratorColor || "#55d76a"
             property color brake: widgetSettings.brakeColor || "#e14b4b"
             property color gForceAccent: widgetSettings.barColor || "#f5a623"
             property color neutralTrack: widgetSettings.barBackgroundColor || "#24303d"
-            property color panelBorder: widgetSettings.borderColor || "#718397"
+            property color panelBorder: widgetSettings.borderColor || "#8895a3"
             property real panelRadius: Number(widgetSettings.cornerRadius ?? 12) * sceneScale
             property real valueScale: Number(widgetSettings.valueFontScale ?? 1)
             property real labelScale: Number(widgetSettings.labelFontScale ?? 1)
+            // These renderers own their surfaces through TelemetryPanel.qml.
+            // Keeping the generic wrapper out of their path avoids duplicate
+            // panels while preserving legacy transparent settings.
+            property bool rendererOwnsPanel: ["speed", "pedals", "heartRate",
+                                               "retroCustomValue", "gForceMagnitudeBar",
+                                               "f1GForceRadar", "retroTachometer"].indexOf(widgetType) >= 0
 
             function configuredFontSize() {
                 const value = Number(widgetSettings.fontSize ?? 0);
@@ -125,14 +134,14 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                visible: widgetItem.widgetSettings.showBackground ?? true
+                visible: !widgetItem.rendererOwnsPanel && (widgetItem.widgetSettings.showBackground ?? true)
                 radius: widgetItem.panelRadius
                 color: widgetItem.panel
                 opacity: Number(widgetItem.widgetSettings.backgroundOpacity ?? 0.86)
             }
             Rectangle {
                 anchors.fill: parent
-                visible: widgetItem.widgetSettings.showBorder ?? true
+                visible: !widgetItem.rendererOwnsPanel && (widgetItem.widgetSettings.showBorder ?? true)
                 radius: widgetItem.panelRadius
                 color: "transparent"
                 border.width: Number(widgetItem.widgetSettings.borderWidth ?? 1) * widgetItem.sceneScale
@@ -162,7 +171,7 @@ Item {
             Loader {
                 id: rendererLoader
                 anchors.fill: parent
-                anchors.margins: widgetItem.pad
+                anchors.margins: widgetItem.rendererOwnsPanel ? 0 : widgetItem.pad
                 property var frame: widgetItem
                 readonly property string rendererSource: {
                     switch (widgetItem.widgetType) {

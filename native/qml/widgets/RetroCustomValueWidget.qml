@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
+    id: root
     property var frame: parent.frame
     anchors.fill: parent
     property var rawValue: frame.raw("source", "")
@@ -18,19 +19,16 @@ Item {
             + (frame.widgetSettings.suffix || "");
     }
 
-    // This renderer owns its panel so independently placed values still form
-    // the same visual family when stacked directly against one another.
-    Rectangle {
+    // Independently placed values retain the exact same surface when stacked.
+    TelemetryPanel {
+        id: panel
         anchors.fill: parent
-        radius: 12 * frame.sceneScale
-        color: frame.panel
-        opacity: Number(frame.widgetSettings.backgroundOpacity ?? 0.86)
-        border.width: Math.max(1, frame.sceneScale)
-        border.color: frame.panelBorder
-        border.opacity: 0.55
+        frame: parent.frame
+        panelColor: frame.widgetSettings.panelColor || frame.panel
     }
     Row {
         anchors.fill: parent
+        anchors.margins: panel.innerPadding
         spacing: 8 * frame.sceneScale
         Label {
             width: parent.width * 0.46
@@ -39,7 +37,7 @@ Item {
             color: frame.widgetSettings.labelColor || frame.secondary
             font.family: frame.family
             font.weight: Font.DemiBold
-            font.pixelSize: Math.max(12 * frame.sceneScale, parent.parent.height * 0.22)
+            font.pixelSize: Math.min(panel.panelLabelSize, parent.parent.height * 0.34)
             elide: Text.ElideRight
         }
         Row {
@@ -49,12 +47,12 @@ Item {
             layoutDirection: Qt.RightToLeft
             Label {
                 anchors.verticalCenter: parent.verticalCenter
-                visible: parent.parent.displayUnit !== "" ? frame.widgetSettings.showUnit !== false : false
-                text: parent.parent.displayUnit
+                visible: root.displayUnit !== "" ? frame.widgetSettings.showUnit !== false : false
+                text: root.displayUnit
                 color: frame.widgetSettings.labelColor || frame.secondary
                 font.family: frame.family
                 font.weight: Font.DemiBold
-                font.pixelSize: Math.max(11 * frame.sceneScale, parent.parent.height * 0.20)
+                font.pixelSize: Math.min(panel.panelUnitSize, parent.parent.height * 0.31)
             }
             Label {
                 anchors.verticalCenter: parent.verticalCenter
@@ -64,7 +62,7 @@ Item {
                 font.weight: Font.Bold
                 font.pixelSize: frame.configuredFontSize() > 0
                     ? frame.configuredFontSize() * frame.sceneScale
-                    : Math.max(16 * frame.sceneScale, Math.min(parent.parent.height * 0.46, parent.parent.width * 0.20))
+                    : Math.max(16 * frame.sceneScale, Math.min(panel.compactValueSize, parent.parent.height * 0.56))
                 elide: Text.ElideLeft
             }
         }
