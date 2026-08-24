@@ -23,8 +23,9 @@ target_compile_definitions(flappedear_native_tests PRIVATE
     TRACK_WIDGET_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/widgets/TrackWidget.qml"
     RAW_TRANSPORT_CONSUMER_PATH="$<TARGET_FILE:flappedear_raw_transport_consumer>"
     PROBE_TEST_HELPER_PATH="$<TARGET_FILE:flappedear_probe_test_helper>"
+    FLAPPEDEAR_NATIVE_PATH="$<TARGET_FILE:flappedear_native>"
 )
-add_dependencies(flappedear_native_tests flappedear_raw_transport_consumer flappedear_probe_test_helper)
+add_dependencies(flappedear_native_tests flappedear_native flappedear_raw_transport_consumer flappedear_probe_test_helper)
 add_test(NAME flappedear_native_tests COMMAND flappedear_native_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES

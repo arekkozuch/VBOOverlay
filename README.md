@@ -53,7 +53,7 @@ Telemetry has strict no-data semantics: missing is distinct from a measured nume
 
 ## Export
 
-Export stages a frame-cadenced telemetry overlay, converts the source onto that same CFR cadence before composition, and validates the staged overlay and final MP4 before committing the target file. Source raster and bit depth remain authoritative rather than being reduced to presets; HDR/Log is explicitly rejected until a color-managed compositor is validated. Each prepared export writes a separate support log in the app-data `exports` directory; failures and cancellations keep their logs. See [docs/export-pipeline.md](docs/export-pipeline.md), [docs/media-color-policy.md](docs/media-color-policy.md), and [docs/export-output-safety.md](docs/export-output-safety.md).
+Export stages a frame-cadenced telemetry overlay, converts the source onto that same CFR cadence before composition, and validates the staged overlay and final MP4 before committing the target file. Qt Quick offscreen pixels retain an explicit premultiplied-alpha contract through QRhi readback, FFV1 staging, and FFmpeg composition. Source raster and bit depth remain authoritative rather than being reduced to presets; HDR/Log is explicitly rejected until a color-managed compositor is validated. Each prepared export writes a separate support log in the app-data `exports` directory; failures and cancellations keep their logs. See [docs/export-pipeline.md](docs/export-pipeline.md), [docs/media-color-policy.md](docs/media-color-policy.md), and [docs/export-output-safety.md](docs/export-output-safety.md).
 
 ## Private integration tests
 

@@ -272,22 +272,30 @@ int exportWorker(const QString &configPath)
     try {
         emitEvent({{"type", "log"}, {"level", "info"}, {"component", "export"},
                    {"message", "Export worker started"}});
+        const QString cancellationPath = config.value("cancelPath").toString();
+        const auto cancelled = [cancellationPath] {
+            return !cancellationPath.isEmpty() && QFileInfo::exists(cancellationPath);
+        };
+        currentOperation = QStringLiteral("parseTelemetry");
+        currentMessage = QStringLiteral("Reading telemetry data");
+        emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
         const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parseFile(
-            config.value("vboPath").toString());
+            config.value("vboPath").toString(), cancelled);
         FlappedEar::WidgetModel widgets;
         if (!widgets.fromJson(config.value("widgets").toArray())) {
             writeExportEvent({{"state", "failed"}, {"error", "Widget scene is invalid."}});
             return EXIT_FAILURE;
         }
-        const FlappedEar::TrackGeometry geometry = FlappedEar::buildTrackGeometry(session);
+        currentOperation = QStringLiteral("buildTrackGeometry");
+        currentMessage = QStringLiteral("Preparing track geometry");
+        emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
+        const FlappedEar::TrackGeometry geometry = FlappedEar::buildTrackGeometry(session, cancelled);
         const QJsonObject syncJson = config.value("sync").toObject();
         const FlappedEar::SyncTransform sync{
             syncJson.value("offset").toDouble(), syncJson.value("timeScale").toDouble(1.0)};
         currentOperation = QStringLiteral("probeInput");
         currentMessage = QStringLiteral("Reading input metadata with ffprobe");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
-        const QString cancellationPath = config.value("cancelPath").toString();
-        const auto cancelled = [cancellationPath] { return !cancellationPath.isEmpty() && QFileInfo::exists(cancellationPath); };
         const FlappedEar::MediaInfo input = FlappedEar::MediaProbe::probe(
             config.value("inputPath").toString(), {}, false, -1, emitProbeEvent, cancelled);
         emitEvent({{"type", "log"}, {"level", "info"}, {"component", "ffprobe"},
@@ -480,6 +488,10 @@ int exportWorker(const QString &configPath)
                           {"outputAudioCodecs", result.mediaInfo.audioCodecs.join(", ")},
                           {"outputAudioStart", result.mediaInfo.audioStartTime},
                           {"outputAudioDuration", result.mediaInfo.audioDuration}});
+        return EXIT_SUCCESS;
+    } catch (const FlappedEar::OperationCancelled &) {
+        emitEvent({{"type", "log"}, {"state", "cancelled"}, {"level", "warning"},
+                   {"operation", "cancelled"}, {"message", "Export cancelled"}});
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         emitEvent({{"type", "log"}, {"state", "failed"}, {"level", "error"},

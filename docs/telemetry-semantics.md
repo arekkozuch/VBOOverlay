@@ -50,7 +50,7 @@ Light, recency-weighted trailing smoothing uses finite values only, with older s
 
 These short windows reduce frame-to-frame jitter without delaying pedal events with a large average. Missing channels remain unavailable; in particular, absent G-force channels hide the moving dot instead of placing it at fake `0 g`.
 
-For a finite timestamp jump, three times the channel's median positive sample interval defines the normal-cadence tolerance. Overlay presentation uses the larger of that tolerance and its stale interval. Across a larger jump it stops interpolation, briefly holds the preceding value, then becomes stale. This distinguishes ordinary sparse sampling from a real gap deterministically.
+For a finite timestamp jump, three times the channel's median positive sample interval defines the normal-cadence tolerance. The interval statistic is cached with the immutable channel after its first use, so repeated presentation lookups do not rescan timestamps or allocate. Overlay presentation uses the larger of that tolerance and its stale interval. Across a larger jump it stops interpolation, briefly holds the preceding value, then becomes stale. This distinguishes ordinary sparse sampling from a real gap deterministically.
 
 ## Analysis ranges
 

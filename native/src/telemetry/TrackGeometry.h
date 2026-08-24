@@ -1,6 +1,7 @@
 #pragma once
 
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/SourceOperation.h"
 
 #include <QPointF>
 #include <QRectF>
@@ -19,7 +20,8 @@ struct TrackGeometry {
     bool valid = false;
 };
 
-[[nodiscard]] TrackGeometry buildTrackGeometry(const TelemetrySession &session);
+[[nodiscard]] TrackGeometry buildTrackGeometry(
+    const TelemetrySession &session, const CancellationCheck &cancelled = {});
 [[nodiscard]] std::optional<QPointF> currentTrackPoint(
     const TelemetrySession &session, double time, const TrackGeometry &geometry);
 

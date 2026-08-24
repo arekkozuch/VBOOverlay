@@ -52,6 +52,8 @@
   playback markers must update independently from static geometry.
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
   safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
+- Qt Quick offscreen frames use an explicit premultiplied-alpha contract from QRhi readback through
+  Stage A and Stage B composition. Do not rely on implicit alpha interpretation.
 - Raw-frame transport into encoder processes uses bounded byte-oriented backpressure. Never assume
   `QProcess` can buffer complete raw frames. Partial, rejected, or timed-out writes must never be
   treated as successful frame submission.

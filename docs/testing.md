@@ -23,9 +23,9 @@ Private VBO and GoPro media are ignored by Git and must remain local. A VBO-only
 
 ## Current test coverage
 
-- VBO parsing, deterministic mid-parse cancellation, file/line/row/column/field limits, malformed input, text time formats, monotonic/rollover behavior, coordinate conversion, and optional real VBO parsing.
+- VBO parsing, deterministic mid-parse/export-preparation cancellation, cancellable track construction, file/line/row/column/field limits, malformed input, text time formats, monotonic/rollover behavior, coordinate conversion, and optional real VBO parsing.
 - Missing-versus-zero raw and overlay presentation semantics, bounded stale holding, and channel availability.
-- Segmented raw analysis ranges, cadence-relative timestamp gaps, and bounded min/max decimation that retains short peaks.
+- Segmented raw analysis ranges, cadence-relative timestamp gaps with one cached cadence statistic per channel, bounded min/max decimation that retains short peaks, and an optional real-VBO 10,000-lookups cache benchmark.
 - Deterministic, ambiguous, and cooperatively cancelled GPS-speed synchronization, plus optional real GoPro/VBO synchronization.
 - GPS9 GPMF decoding, malformed packet extents, container-depth and KLV-header-count limits with count/limit/context diagnostics, and deterministic sorting/deduplication of timestamps.
 - A portable native fake ffprobe covers prompt cancellation/reaping and bounded stdout without shell dependencies or long real inputs.
@@ -36,7 +36,7 @@ Private VBO and GoPro media are ignored by Git and must remain local. A VBO-only
 - Portable storage resolution coverage for existing files/directories, future files, nested future paths, and unavailable inputs; injectable multi-volume preflight and measured-sample/fallback/margin/overflow regressions.
 - Portable raw-frame transport helper coverage for exact 1920×1080 and 3840×2160 RGBA frame transfers to a slow consumer, early consumer exit, sustained stall, prompt cancellation, and bounded queue size.
 - Malformed/owned/live/idempotent manifest recovery rules and a macOS/Unix helper child/grandchild process-tree shutdown integration test. Windows Job Object setup errors are explicit. Windows runtime/export is validated on one known Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; native Windows ACL-denied coverage remains pending because `QFile::setPermissions()` does not model Windows ACL denial reliably.
-- Synthetic FFmpeg integrations for non-zero-range video/audio timelines, the exact `60000/1001` 30→90 boundary schedule (3,597 packets), non-zero source stream PTS, VFR-to-CFR conversion, CFR packet/frame counts, completed-overlay frame identity, and full decoded FFV1 staged-overlay frame counts.
+- Synthetic FFmpeg integrations for non-zero-range video/audio timelines, the exact `60000/1001` 30→90 boundary schedule (3,597 packets), non-zero source stream PTS, VFR-to-CFR conversion, CFR packet/frame counts, completed-overlay frame identity, full decoded FFV1 staged-overlay frame counts, and premultiplied-alpha source-over samples including a translucent antialiased edge.
 - Temporary-overlay validation regressions for `60000/1001` cadence represented by Matroska's 1 ms timestamp quantization (`19001/317`), while rejecting a meaningful `30/1` mismatch. Production uses metadata plus producer/encoder frame invariants; the decoded count is retained by the integration test.
 - The startup QML smoke rejects `ReferenceError`, `TypeError`, and binding-loop diagnostics and verifies one primary decoder while Analysis is closed, two while open, and release back to one after close.
 

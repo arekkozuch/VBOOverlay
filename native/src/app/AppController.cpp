@@ -520,7 +520,8 @@ void AppController::startVboLoad(
                 result.error = QStringLiteral("Telemetry loading was cancelled.");
                 return result;
             }
-            result.geometry = buildTrackGeometry(result.session);
+            result.geometry = buildTrackGeometry(
+                result.session, [cancellation] { return cancellation->load(); });
             result.fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(
                 path, result.session);
             result.success = !cancellation->load();

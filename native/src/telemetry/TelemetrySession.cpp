@@ -7,16 +7,24 @@ namespace FlappedEar {
 
 double telemetryGapThreshold(const TelemetryChannel &channel, const double minimumSeconds)
 {
-    QVector<double> intervals;
-    intervals.reserve(std::max<qsizetype>(0, channel.timestamps.size() - 1));
-    for (qsizetype index = 1; index < channel.timestamps.size(); ++index) {
-        const double interval = channel.timestamps[index] - channel.timestamps[index - 1];
-        if (std::isfinite(interval) && interval > 0.0) intervals.append(interval);
+    if (!channel.cadenceStatisticsValid) {
+        QVector<double> intervals;
+        intervals.reserve(std::max<qsizetype>(0, channel.timestamps.size() - 1));
+        for (qsizetype index = 1; index < channel.timestamps.size(); ++index) {
+            const double interval = channel.timestamps[index] - channel.timestamps[index - 1];
+            if (std::isfinite(interval) && interval > 0.0) intervals.append(interval);
+        }
+        if (!intervals.isEmpty()) {
+            const auto middle = intervals.begin() + intervals.size() / 2;
+            std::nth_element(intervals.begin(), middle, intervals.end());
+            channel.cachedBaseIntervalSeconds = *middle;
+        } else {
+            channel.cachedBaseIntervalSeconds = 0.0;
+        }
+        channel.cadenceStatisticsValid = true;
+        ++channel.cadenceStatisticComputationCount;
     }
-    if (intervals.isEmpty()) return std::max(0.0, minimumSeconds);
-    const auto middle = intervals.begin() + intervals.size() / 2;
-    std::nth_element(intervals.begin(), middle, intervals.end());
-    return std::max(std::max(0.0, minimumSeconds), *middle * 3.0);
+    return std::max(std::max(0.0, minimumSeconds), channel.cachedBaseIntervalSeconds * 3.0);
 }
 
 std::optional<double> TelemetrySession::valueAt(

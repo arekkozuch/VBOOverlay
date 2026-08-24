@@ -16,6 +16,13 @@ struct TelemetryChannel {
     QString unit;
     QVector<double> timestamps;
     QVector<float> values;
+
+    // Telemetry sessions are immutable after source loading. Cache the cadence
+    // statistic with its channel rather than recomputing a full timestamp
+    // median for every presentation lookup.
+    mutable bool cadenceStatisticsValid = false;
+    mutable double cachedBaseIntervalSeconds = 0.0;
+    mutable qsizetype cadenceStatisticComputationCount = 0;
 };
 
 struct SyncTransform {

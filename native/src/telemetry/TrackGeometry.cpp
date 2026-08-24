@@ -23,8 +23,9 @@ QPointF toLocal(
 
 } // namespace
 
-TrackGeometry buildTrackGeometry(const TelemetrySession &session)
+TrackGeometry buildTrackGeometry(const TelemetrySession &session, const CancellationCheck &cancelled)
 {
+    throwIfCancelled(cancelled);
     TrackGeometry geometry;
     const auto latitude = session.channels.constFind(session.aliases.value("latitude"));
     const auto longitude = session.channels.constFind(session.aliases.value("longitude"));
@@ -36,6 +37,7 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session)
     QVector<QPointF> localPoints;
     localPoints.reserve(count);
     for (qsizetype index = 0; index < count; ++index) {
+        if ((index & 0xff) == 0) throwIfCancelled(cancelled);
         const double lat = latitude->values[index];
         const double lon = longitude->values[index];
         if (!std::isfinite(lat) || !std::isfinite(lon) || std::abs(lat) > 90.0
@@ -59,7 +61,9 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session)
     double minimumY = std::numeric_limits<double>::infinity();
     double maximumX = -std::numeric_limits<double>::infinity();
     double maximumY = -std::numeric_limits<double>::infinity();
-    for (const QPointF &point : localPoints) {
+    for (qsizetype index = 0; index < localPoints.size(); ++index) {
+        if ((index & 0xff) == 0) throwIfCancelled(cancelled);
+        const QPointF &point = localPoints[index];
         minimumX = std::min(minimumX, point.x());
         minimumY = std::min(minimumY, point.y());
         maximumX = std::max(maximumX, point.x());
@@ -70,7 +74,9 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session)
     geometry.normalizationScale = std::max(
         1.0, std::max(geometry.localBounds.width(), geometry.localBounds.height()));
     geometry.points.reserve(localPoints.size());
-    for (const QPointF &point : localPoints) {
+    for (qsizetype index = 0; index < localPoints.size(); ++index) {
+        if ((index & 0xff) == 0) throwIfCancelled(cancelled);
+        const QPointF &point = localPoints[index];
         geometry.points.append(
             {(point.x() - geometry.localCenter.x()) / geometry.normalizationScale + 0.5,
              (point.y() - geometry.localCenter.y()) / geometry.normalizationScale + 0.5});

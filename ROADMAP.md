@@ -26,6 +26,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [ ] Expand final-media validation across a broader real-media matrix.
 - [x] Make source/native raster characteristics authoritative, with no product-level 4K ceiling, continuous bitrate scaling, checked frame accounting, and runtime renderer/encoder capability preflight.
 - [x] Preserve 8-bit and 10-bit SDR through explicit HEVC Main/Main10 policy and deterministic composition validation.
+- [x] Establish explicit QRhi-to-FFmpeg premultiplied-alpha composition, including conditional framebuffer-Y normalization and pixel-level regression coverage.
 - [x] Validate one real HERO11 5.3K Main10/BT.709 fixture at native 5312×2988 and 3840×2160 on macOS/Metal/VideoToolbox; audio validation now accepts a legitimately shorter source-audio timeline.
 - [ ] Implement and validate color-managed HDR/HLG/PQ/Log preservation; current export rejects these sources without silent conversion.
 - [ ] Validate production 8K on representative renderer/encoder hardware; deterministic model and capability-decision coverage is complete.

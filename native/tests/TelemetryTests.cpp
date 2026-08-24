@@ -42,6 +42,7 @@
 #include <QtTest>
 #include <cmath>
 #include <atomic>
+#include <array>
 #include <limits>
 #include <numbers>
 #include <thread>
@@ -63,9 +64,11 @@ private slots:
     void parsesTextFirstVboTimeFormats();
     void keepsVboTimestampsStrictlyMonotonic();
     void cancelsVboParsingDeterministically();
+    void cachesTelemetryChannelCadence();
     void enforcesVboResourceLimits();
     void convertsArcMinuteCoordinates();
     void parsesOptionalRealVbo();
+    void benchmarksCachedOptionalRealVboPresentationLookups();
     void persistsWidgetScenes();
     void loadsVisualTemplates();
     void providesCustomizableArchetypes();
@@ -74,6 +77,7 @@ private slots:
     void groupsAndMovesWidgets();
     void constrainsWidgetGeometry();
     void buildsTrackGeometry();
+    void cancelsTrackGeometryConstruction();
     void cachesStaticTrackGeometry();
     void keepsStaticTrackIndependentFromTime();
     void decodesGps9Gpmf();
@@ -130,6 +134,8 @@ private slots:
     void parsesStructuredFfmpegProgress();
     void calculatesEncodedOutputProgress();
     void preservesFrameIdentityThroughCompletedOverlayComposition();
+    void preservesPremultipliedAlphaThroughOverlayComposition();
+    void cancelsExportWorkerDuringTelemetryPreparation();
     void rejectsUnsafeExportPaths();
     void capturesExportTargetIdentity();
     void rejectsChangedExportTargets();
@@ -985,6 +991,28 @@ void TelemetryTests::cancelsVboParsingDeterministically()
     QVERIFY(checks >= 4);
 }
 
+void TelemetryTests::cachesTelemetryChannelCadence()
+{
+    TelemetryChannel regular;
+    regular.timestamps = {0.0, 0.1, 0.2, 0.3, 0.4};
+    QCOMPARE(telemetryGapThreshold(regular, 0.0), 0.3);
+    QCOMPARE(telemetryGapThreshold(regular, 0.75), 0.75);
+    QCOMPARE(regular.cadenceStatisticComputationCount, qsizetype(1));
+
+    TelemetryChannel sparse;
+    sparse.timestamps = {0.0, 0.5, 2.0, 3.5};
+    QCOMPARE(telemetryGapThreshold(sparse, 0.0), 4.5);
+    QCOMPARE(sparse.cadenceStatisticComputationCount, qsizetype(1));
+
+    TelemetryChannel guarded;
+    guarded.timestamps = {0.0, 0.2, 0.2, std::numeric_limits<double>::quiet_NaN(), 0.8};
+    QCOMPARE(telemetryGapThreshold(guarded, 0.4), 0.6);
+    for (int lookup = 0; lookup < 10'000; ++lookup) {
+        QCOMPARE(telemetryGapThreshold(guarded, 0.4), 0.6);
+    }
+    QCOMPARE(guarded.cadenceStatisticComputationCount, qsizetype(1));
+}
+
 void TelemetryTests::enforcesVboResourceLimits()
 {
     QTemporaryDir directory;
@@ -1051,6 +1079,36 @@ void TelemetryTests::parsesOptionalRealVbo()
         }
     }
     QCOMPARE(nonFiniteSamples, 0);
+}
+
+void TelemetryTests::benchmarksCachedOptionalRealVboPresentationLookups()
+{
+    const QString path = qEnvironmentVariable("FLAPPEDEAR_REAL_VBO");
+    if (path.isEmpty()) QSKIP("FLAPPEDEAR_REAL_VBO is not set");
+    const TelemetrySession session = VboParser::parseFile(path);
+    const QString channelName = session.aliases.value(QStringLiteral("speed"), QStringLiteral("speed"));
+    const auto channel = session.channels.constFind(channelName);
+    QVERIFY(channel != session.channels.cend());
+    QVERIFY(channel->timestamps.size() >= 2);
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    context.setTime((channel->timestamps.front() + channel->timestamps[1]) / 2.0);
+    QVERIFY(context.telemetryValue(QStringLiteral("speed")).isValid());
+    QCOMPARE(channel->cadenceStatisticComputationCount, qsizetype(1));
+    constexpr int lookups = 10'000;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    for (int lookup = 0; lookup < lookups; ++lookup) {
+        const double progress = static_cast<double>(lookup) / static_cast<double>(lookups - 1);
+        context.setTime(channel->timestamps.front()
+                        + (channel->timestamps.back() - channel->timestamps.front()) * progress);
+        QVERIFY(context.telemetryValue(QStringLiteral("speed")).isValid());
+    }
+    qInfo().noquote() << QStringLiteral(
+        "real VBO cached presentation benchmark: %1 lookups in %2 ms, cadence computations=%3")
+                             .arg(lookups).arg(elapsed.elapsed())
+                             .arg(channel->cadenceStatisticComputationCount);
+    QCOMPARE(channel->cadenceStatisticComputationCount, qsizetype(1));
 }
 
 void TelemetryTests::persistsWidgetScenes()
@@ -1248,6 +1306,35 @@ void TelemetryTests::buildsTrackGeometry()
     QVERIFY2(
         qAbs(current->y() - 0.5) < 0.01,
         qPrintable(QStringLiteral("y=%1").arg(current->y(), 0, 'g', 12)));
+}
+
+void TelemetryTests::cancelsTrackGeometryConstruction()
+{
+    TelemetrySession session;
+    TelemetryChannel latitude;
+    latitude.name = QStringLiteral("latitude");
+    TelemetryChannel longitude;
+    longitude.name = QStringLiteral("longitude");
+    constexpr qsizetype count = 50'000;
+    latitude.timestamps.reserve(count);
+    latitude.values.reserve(count);
+    longitude.timestamps.reserve(count);
+    longitude.values.reserve(count);
+    for (qsizetype index = 0; index < count; ++index) {
+        latitude.timestamps.append(static_cast<double>(index) / 10.0);
+        longitude.timestamps.append(static_cast<double>(index) / 10.0);
+        latitude.values.append(static_cast<float>(52.0 + index * 0.000001));
+        longitude.values.append(static_cast<float>(21.0 + index * 0.000001));
+    }
+    session.channels.insert(latitude.name, latitude);
+    session.channels.insert(longitude.name, longitude);
+    session.aliases.insert(QStringLiteral("latitude"), latitude.name);
+    session.aliases.insert(QStringLiteral("longitude"), longitude.name);
+    int checks = 0;
+    QVERIFY_THROWS_EXCEPTION(
+        OperationCancelled,
+        (void) buildTrackGeometry(session, [&checks] { return ++checks == 8; }));
+    QVERIFY(checks >= 8);
 }
 
 void TelemetryTests::cachesStaticTrackGeometry()
@@ -3055,7 +3142,7 @@ void TelemetryTests::composesNonZeroExportRangeWithZeroBasedOutput()
     QVERIFY(qAbs(summaryInfo.duration - 5.0) < 0.05);
     QVERIFY(!summaryInfo.audioCodecs.isEmpty());
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", composed, "-f", "rawvideo",
-               "-pixel_format", "rgba", decoded});
+               "-pix_fmt", "rgba", decoded});
     QFile decodedFile(decoded);
     QVERIFY(decodedFile.open(QIODevice::ReadOnly));
     const QByteArray output = decodedFile.readAll();
@@ -3357,6 +3444,134 @@ void TelemetryTests::preservesFrameIdentityThroughCompletedOverlayComposition()
         }
         QCOMPARE(identity, frame);
     }
+}
+
+void TelemetryTests::preservesPremultipliedAlphaThroughOverlayComposition()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the alpha-composition integration test.");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    constexpr int width = 8;
+    constexpr int height = 8;
+    const QString primaryRaw = directory.filePath("primary.rgba");
+    const QString overlayRaw = directory.filePath("overlay.rgba");
+    const QString primary = directory.filePath("primary.mkv");
+    const QString overlay = directory.filePath("overlay.mkv");
+    const QString composed = directory.filePath("composed.mkv");
+    const QString decoded = directory.filePath("decoded.rgba");
+    const std::array<uchar, 4> background{20, 40, 80, 255};
+    QByteArray primaryPixels(width * height * 4, '\0');
+    QByteArray overlayPixels(width * height * 4, '\0');
+    const auto setPixel = [&primaryPixels, &overlayPixels](const int x, const int y,
+                                                                   const std::array<uchar, 4> rgba,
+                                                                   const bool overlayPixel) {
+        QByteArray &pixels = overlayPixel ? overlayPixels : primaryPixels;
+        const qsizetype offset = (y * width + x) * 4;
+        for (int component = 0; component < 4; ++component) {
+            pixels[offset + component] = static_cast<char>(rgba[component]);
+        }
+    };
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) setPixel(x, y, background, false);
+    }
+    // Premultiplied 50% red fill, translucent green border, an alpha-ramped
+    // edge representative of antialiasing, and an opaque reference swatch.
+    setPixel(2, 2, {128, 0, 0, 128}, true);
+    setPixel(1, 2, {0, 96, 0, 96}, true);
+    setPixel(2, 1, {64, 0, 0, 64}, true);
+    setPixel(4, 4, {0, 0, 255, 255}, true);
+    QVERIFY(writeBytes(primaryRaw, primaryPixels));
+    QVERIFY(writeBytes(overlayRaw, overlayPixels));
+    const auto runFfmpeg = [&ffmpeg](const QStringList &arguments) {
+        QProcess process;
+        process.start(ffmpeg, arguments);
+        QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+        QVERIFY2(process.waitForFinished(30'000), qPrintable(process.errorString()));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    };
+    const QString size = QStringLiteral("%1x%2").arg(width).arg(height);
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format",
+               "rgba", "-video_size", size, "-framerate", "30", "-i", primaryRaw, "-frames:v", "1",
+               "-c:v", "ffv1", "-pix_fmt", "bgra", primary});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format",
+               "rgba", "-video_size", size, "-framerate", "30", "-i", overlayRaw, "-frames:v", "1",
+               "-an", "-c:v", "ffv1", "-pix_fmt", "bgra", overlay});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", primary, "-i", overlay,
+               "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=rgb[v]",
+               "-map", "[v]", "-c:v", "ffv1", "-pix_fmt", "bgra", composed});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", composed, "-f", "rawvideo",
+               "-pix_fmt", "rgba", decoded});
+    QFile decodedFile(decoded);
+    QVERIFY(decodedFile.open(QIODevice::ReadOnly));
+    const QByteArray output = decodedFile.readAll();
+    QCOMPARE(output.size(), primaryPixels.size());
+    const auto expected = [&background](const std::array<uchar, 4> foreground) {
+        std::array<uchar, 4> value{};
+        for (int component = 0; component < 3; ++component) {
+            value[component] = static_cast<uchar>(foreground[component]
+                + (background[component] * (255 - foreground[3]) + 127) / 255);
+        }
+        value[3] = 255;
+        return value;
+    };
+    const auto verifyPixel = [&output](const int x, const int y,
+                                               const std::array<uchar, 4> expectedPixel) {
+        const qsizetype offset = (y * width + x) * 4;
+        for (int component = 0; component < 4; ++component) {
+            const int actual = static_cast<uchar>(output[offset + component]);
+            QVERIFY2(std::abs(actual - expectedPixel[component]) <= 3,
+                     qPrintable(QStringLiteral("pixel (%1,%2), component %3: expected %4, actual %5")
+                                    .arg(x).arg(y).arg(component).arg(expectedPixel[component]).arg(actual)));
+        }
+    };
+    verifyPixel(0, 0, background);
+    verifyPixel(2, 2, expected({128, 0, 0, 128}));
+    verifyPixel(1, 2, expected({0, 96, 0, 96}));
+    verifyPixel(2, 1, expected({64, 0, 0, 64}));
+    verifyPixel(4, 4, expected({0, 0, 255, 255}));
+    QVERIFY(TelemetryFrameRenderer::readbackRequiresVerticalFlip(true));
+    QVERIFY(!TelemetryFrameRenderer::readbackRequiresVerticalFlip(false));
+}
+
+void TelemetryTests::cancelsExportWorkerDuringTelemetryPreparation()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString vboPath = directory.filePath("large.vbo");
+    QFile vbo(vboPath);
+    QVERIFY(vbo.open(QIODevice::WriteOnly | QIODevice::Text));
+    QVERIFY(vbo.write("[column names]\ntime speed latitude longitude\n[data]\n") > 0);
+    for (int row = 0; row < 300'000; ++row) {
+        QVERIFY(vbo.write(QStringLiteral("%1 %2 3120 -1260\n").arg(row).arg(row % 200).toUtf8()) > 0);
+    }
+    vbo.close();
+    const QString cancelPath = directory.filePath("cancel");
+    const QString configPath = directory.filePath("export.json");
+    QVERIFY(writeBytes(configPath, QJsonDocument(QJsonObject{{"vboPath", vboPath}, {"cancelPath", cancelPath}}).toJson()));
+    QProcess worker;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    worker.setProcessEnvironment(environment);
+    worker.start(QStringLiteral(FLAPPEDEAR_NATIVE_PATH), {"--export-worker", configPath});
+    QVERIFY2(worker.waitForStarted(), qPrintable(worker.errorString()));
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QByteArray events;
+    while (!events.contains("parseTelemetry") && elapsed.elapsed() < 15'000) {
+        worker.waitForReadyRead(100);
+        events += worker.readAllStandardOutput();
+    }
+    QVERIFY2(events.contains("parseTelemetry"),
+             qPrintable(QString::fromUtf8(events + worker.readAllStandardError())));
+    QVERIFY(writeBytes(cancelPath, "cancel"));
+    QVERIFY2(worker.waitForFinished(3'000), qPrintable(worker.errorString()));
+    events += worker.readAllStandardOutput();
+    QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(worker.exitCode(), 0);
+    QVERIFY(events.contains("\"state\":\"cancelled\""));
+    QVERIFY(!events.contains("encodeTemporaryOverlay"));
 }
 
 void TelemetryTests::decodesGps9Gpmf()
