@@ -32,12 +32,14 @@ QByteArray rgbaBytes(const QImage &image, const QSize &size)
     const qint64 bytesPerRow = static_cast<qint64>(size.width()) * 4;
     if (!expectedBytes || *expectedBytes > std::numeric_limits<qsizetype>::max()
         || bytesPerRow > std::numeric_limits<int>::max()) return {};
-    if (image.format() == QImage::Format_RGBA8888 && image.size() == size
+    if ((image.format() == QImage::Format_RGBA8888
+         || image.format() == QImage::Format_RGBA8888_Premultiplied)
+        && image.size() == size
         && image.bytesPerLine() == bytesPerRow) {
         return QByteArray::fromRawData(
             reinterpret_cast<const char *>(image.constBits()), static_cast<qsizetype>(*expectedBytes));
     }
-    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
     QByteArray packed(static_cast<qsizetype>(*expectedBytes), Qt::Uninitialized);
     char *destination = packed.data();
     for (int row = 0; row < size.height(); ++row) {
@@ -995,7 +997,7 @@ ExportResult ExportEngine::exportVideo(
             "fps=fps=%2:start_time=0:round=near:eof_action=round,"
             "trim=end_frame=%3,setpts=PTS-STARTPTS[sourceVideo];"
             "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
-            "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:format=%5[composited];"
+            "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=%5[composited];"
             "[composited]format=pix_fmts=%6[video]")
                                             .arg(sourceRangeStart, 0, 'f', 9)
                                             .arg(rateString(exportFrameRate))

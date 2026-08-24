@@ -57,6 +57,7 @@ public:
     [[nodiscard]] TimingMetrics timingMetrics() const;
     [[nodiscard]] static RendererCapabilityResult evaluateCapability(
         const QSize &size, int maximumTextureSize, const QString &backend);
+    [[nodiscard]] static bool readbackRequiresVerticalFlip(bool yUpInFramebuffer);
 
 private:
     class Impl;

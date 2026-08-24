@@ -214,9 +214,15 @@ QImage TelemetryFrameRenderer::renderFrame(const double sourceVideoTime)
     // full-frame CPU copy while keeping the pixels alive independently of the
     // next render call.
     auto *pixels = new QByteArray(std::move(readback.data));
-    return QImage(reinterpret_cast<const uchar *>(pixels->constData()), m_outputSize.width(),
-                  m_outputSize.height(), m_outputSize.width() * 4, QImage::Format_RGBA8888,
-                  [](void *data) { delete static_cast<QByteArray *>(data); }, pixels);
+    QImage image(reinterpret_cast<const uchar *>(pixels->constData()), m_outputSize.width(),
+                 m_outputSize.height(), m_outputSize.width() * 4,
+                 QImage::Format_RGBA8888_Premultiplied,
+                 [](void *data) { delete static_cast<QByteArray *>(data); }, pixels);
+    // QRhi reports whether readback rows are bottom-to-top for the active
+    // backend. Normalize that once at the renderer boundary; Stage A and B
+    // always receive conventional top-to-bottom image rows.
+    return readbackRequiresVerticalFlip(m_impl->renderControl->rhi()->isYUpInFramebuffer())
+        ? image.flipped(Qt::Vertical) : image;
 }
 
 QString TelemetryFrameRenderer::errorString() const { return m_error; }
@@ -259,6 +265,11 @@ RendererCapabilityResult TelemetryFrameRenderer::evaluateCapability(
     }
     result.supported = true;
     return result;
+}
+
+bool TelemetryFrameRenderer::readbackRequiresVerticalFlip(const bool yUpInFramebuffer)
+{
+    return yUpInFramebuffer;
 }
 TelemetryFrameRenderer::TimingMetrics TelemetryFrameRenderer::timingMetrics() const
 {
