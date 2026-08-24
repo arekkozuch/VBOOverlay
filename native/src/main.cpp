@@ -592,11 +592,21 @@ int main(int argc, char *argv[])
             },
             Qt::QueuedConnection);
         engine.loadFromModule("FlappedEar", "Main");
+        if (startupSmokeMode && !engine.rootObjects().isEmpty()) {
+            // Load the all-in-one broadcast composition as well as the normal
+            // application window. This catches QML binding/Loader regressions
+            // across the widget family in one deterministic scene.
+            engine.loadFromModule("FlappedEar", "VisualSmokeScene");
+        }
         if (!engine.rootObjects().isEmpty()) {
             FlappedEar::AppLog::info(QStringLiteral("Main QML loaded"));
         }
-        if (startupSmokeMode && !engine.rootObjects().isEmpty()) {
-            QObject *root = engine.rootObjects().constFirst();
+        if (startupSmokeMode) {
+            if (engine.rootObjects().size() < 2) {
+                qCritical() << "Startup smoke failed: broadcast HUD composition did not load";
+                result = EXIT_FAILURE;
+            } else {
+                QObject *root = engine.rootObjects().constFirst();
             QCoreApplication::processEvents();
             const qsizetype closedPlayers = root->findChildren<QMediaPlayer *>().size();
             controller.setAnalysisVisible(true);
@@ -612,8 +622,9 @@ int main(int argc, char *argv[])
                                              .arg(closedPlayers).arg(openPlayers).arg(releasedPlayers);
                 result = EXIT_FAILURE;
             } else {
-                qInfo() << "Startup smoke passed: Analysis decoder lifecycle is lazy";
+                qInfo() << "Startup smoke passed: Analysis decoder lifecycle is lazy and broadcast HUD composition loaded";
                 result = EXIT_SUCCESS;
+            }
             }
         } else {
             result = app.exec();

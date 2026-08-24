@@ -137,6 +137,7 @@ qt_add_qml_module(flappedear_native
         qml/SectionTitle.qml
         qml/TrackMapPanel.qml
         qml/TelemetryScene.qml
+        qml/VisualSmokeScene.qml
         qml/WidgetOverlay.qml
         qml/widgets/ArcGaugeWidget.qml
         qml/widgets/BrandLogoWidget.qml

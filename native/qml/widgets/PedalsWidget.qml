@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     property var frame: parent.frame
     anchors.fill: parent
-    spacing: 7 * frame.sceneScale
+    spacing: 8 * frame.sceneScale
     Repeater {
         model: [
             {
@@ -29,7 +29,7 @@ ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 3 * frame.sceneScale
+            spacing: 5 * frame.sceneScale
             property var pedalRaw: frame.raw(modelData.sourceKey, modelData.fallback)
             property bool hasValue: pedalRaw !== undefined && pedalRaw !== null && Number.isFinite(Number(pedalRaw))
             property real pedalValue: hasValue ? Number(pedalRaw) : 0
@@ -37,11 +37,11 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Label {
                     Layout.fillWidth: true
-                    text: frame.widgetSettings[modelData.labelKey] || modelData.fallback.toUpperCase()
+                    text: frame.widgetSettings[modelData.labelKey] || (modelData.fallback === "throttle" ? "Throttle" : "Brake")
                     color: frame.secondary
                     font.family: frame.family
-                    font.pixelSize: 9 * frame.labelScale * frame.sceneScale
-                    font.letterSpacing: 0.8 * frame.sceneScale
+                    font.weight: Font.DemiBold
+                    font.pixelSize: Math.max(11, 13 * frame.labelScale) * frame.sceneScale
                 }
                 Label {
                     visible: frame.widgetSettings.showValues ?? true
@@ -49,21 +49,22 @@ ColumnLayout {
                     color: frame.primary
                     font.family: frame.family
                     font.weight: Font.DemiBold
-                    font.pixelSize: 10 * frame.labelScale * frame.sceneScale
+                    font.pixelSize: Math.max(11, 13 * frame.labelScale) * frame.sceneScale
                 }
             }
             Rectangle {
                 Layout.fillWidth: true
-                height: 8 * frame.sceneScale
+                height: Math.max(6 * frame.sceneScale, parent.parent.height * 0.16)
                 radius: Number(frame.widgetSettings.barRadius ?? 5) * frame.sceneScale
-                color: "#24303d"
+                color: frame.neutralTrack
                 Rectangle {
                     property real low: Number(frame.widgetSettings[modelData.minKey] ?? 0)
                     property real high: Number(frame.widgetSettings[modelData.maxKey] ?? 100)
                     width: parent.parent.hasValue ? parent.width * Math.max(0, Math.min(1, (parent.parent.pedalValue - low) / Math.max(0.001, high - low))) : 0
                     height: parent.height
                     radius: parent.radius
-                    color: frame.widgetSettings[modelData.colorKey] || frame.accent
+                    color: frame.widgetSettings[modelData.colorKey]
+                        || (modelData.fallback === "throttle" ? frame.throttle : frame.brake)
                 }
             }
         }

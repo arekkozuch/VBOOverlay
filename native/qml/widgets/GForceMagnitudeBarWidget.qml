@@ -13,43 +13,50 @@ Item {
         id: gForce
         frame: root.frame
     }
-    Rectangle {
+    Column {
         anchors.fill: parent
-        radius: Number(root.frame.widgetSettings.barRadius ?? 5) * root.frame.sceneScale
-        color: root.frame.widgetSettings.barBackgroundColor || "#24303d"
-        opacity: Number(root.frame.widgetSettings.backgroundOpacity ?? 0.82)
-        Rectangle {
-            width: gForce.hasValue ? parent.width * Math.min(1, gForce.combinedG / root.maxG) : 0
-            height: parent.height
-            radius: parent.radius
-            color: root.frame.widgetSettings.barColor || root.frame.accent
+        spacing: Math.max(4 * root.frame.sceneScale, parent.height * 0.10)
+        Row {
+            width: parent.width
+            height: parent.height * 0.46
+            Label {
+                width: parent.width * 0.62
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.frame.widgetSettings.showLabel ?? true
+                text: root.frame.widgetSettings.labelText || "G-Force"
+                color: root.frame.widgetSettings.textColor || root.frame.secondary
+                font.family: root.frame.family
+                font.weight: Font.DemiBold
+                font.pixelSize: root.frame.configuredFontSize() > 0
+                    ? root.frame.configuredFontSize() * root.frame.sceneScale
+                    : Math.max(11 * root.frame.sceneScale, parent.height * 0.52)
+                elide: Text.ElideRight
+            }
+            Label {
+                width: parent.width * 0.38
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                visible: root.frame.widgetSettings.showValue ?? true
+                text: gForce.hasValue ? gForce.combinedG.toFixed(Number(root.frame.widgetSettings.decimals ?? 2)) : "—"
+                color: root.frame.widgetSettings.textColor || root.frame.primary
+                font.family: root.frame.family
+                font.weight: Font.Bold
+                font.pixelSize: root.frame.configuredFontSize() > 0
+                    ? root.frame.configuredFontSize() * root.frame.sceneScale
+                    : Math.max(11 * root.frame.sceneScale, parent.height * 0.55)
+            }
         }
-    }
-    Label {
-        anchors.left: parent.left
-        anchors.leftMargin: Math.max(6 * root.frame.sceneScale, parent.width * 0.05)
-        anchors.verticalCenter: parent.verticalCenter
-        visible: root.frame.widgetSettings.showLabel ?? true
-        text: root.frame.widgetSettings.labelText || "G-Force"
-        color: root.frame.widgetSettings.textColor || root.frame.primary
-        font.family: root.frame.family
-        font.weight: Font.DemiBold
-        font.pixelSize: root.frame.configuredFontSize() > 0
-            ? root.frame.configuredFontSize() * root.frame.sceneScale
-            : Math.max(9 * root.frame.sceneScale, parent.height * 0.45)
-        elide: Text.ElideRight
-    }
-    Label {
-        anchors.right: parent.right
-        anchors.rightMargin: Math.max(6 * root.frame.sceneScale, parent.width * 0.05)
-        anchors.verticalCenter: parent.verticalCenter
-        visible: root.frame.widgetSettings.showValue ?? true
-        text: gForce.hasValue ? gForce.combinedG.toFixed(Number(root.frame.widgetSettings.decimals ?? 2)) : "—"
-        color: root.frame.widgetSettings.textColor || root.frame.primary
-        font.family: root.frame.family
-        font.weight: Font.Bold
-        font.pixelSize: root.frame.configuredFontSize() > 0
-            ? root.frame.configuredFontSize() * root.frame.sceneScale
-            : Math.max(9 * root.frame.sceneScale, parent.height * 0.48)
+        Rectangle {
+            width: parent.width
+            height: Math.max(6 * root.frame.sceneScale, parent.parent.height * 0.20)
+            radius: Number(root.frame.widgetSettings.barRadius ?? 5) * root.frame.sceneScale
+            color: root.frame.neutralTrack
+            Rectangle {
+                width: gForce.hasValue ? parent.width * Math.min(1, gForce.combinedG / root.maxG) : 0
+                height: parent.height
+                radius: parent.radius
+                color: root.frame.widgetSettings.barColor || "#f5a623"
+            }
+        }
     }
 }

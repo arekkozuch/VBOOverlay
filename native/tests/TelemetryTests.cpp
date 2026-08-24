@@ -1156,6 +1156,12 @@ void TelemetryTests::loadsVisualTemplates()
     QCOMPARE(model.widget(1).value("type").toString(), QString("retroGear"));
     QCOMPARE(model.widget(2).value("type").toString(), QString("retroPedal"));
     QCOMPARE(model.widget(3).value("settings").toMap().value("source").toString(), QString("brake_pos-obd"));
+    QVERIFY(model.applyTemplate("motorsport-broadcast-smoke"));
+    QCOMPARE(model.count(), 9);
+    QCOMPARE(model.widget(0).value("type").toString(), QString("retroTachometer"));
+    QCOMPARE(model.widget(6).value("type").toString(), QString("heartRate"));
+    QCOMPARE(model.widget(7).value("type").toString(), QString("f1GForceRadar"));
+    QCOMPARE(model.widget(8).value("type").toString(), QString("gForceMagnitudeBar"));
     QVERIFY(!model.applyTemplate("missing-template"));
 }
 
@@ -1415,10 +1421,10 @@ void TelemetryTests::providesGForceVariants()
     QCOMPARE(radarDefaults.value("ringStepG").toDouble(), 0.25);
     QVERIFY(!radarDefaults.value("showBackground").toBool());
     QVERIFY(!radarDefaults.value("showBorder").toBool());
-    QCOMPARE(radarDefaults.value("radarBackgroundColor").toString(), QString("#2b2d30"));
-    QCOMPARE(radarDefaults.value("backgroundOpacity").toDouble(), 0.72);
-    QCOMPARE(radarDefaults.value("dotColor").toString(), QString("#ffad32"));
-    QCOMPARE(radarDefaults.value("gridColor").toString(), QString("#c5c7c9"));
+    QCOMPARE(radarDefaults.value("radarBackgroundColor").toString(), QString("#101820"));
+    QCOMPARE(radarDefaults.value("backgroundOpacity").toDouble(), 0.86);
+    QCOMPARE(radarDefaults.value("dotColor").toString(), QString("#f5a623"));
+    QCOMPARE(radarDefaults.value("gridColor").toString(), QString("#91a1b1"));
     QCOMPARE(static_cast<int>(std::floor(radarDefaults.value("maxG").toDouble()
                                          / radarDefaults.value("ringStepG").toDouble())), 6);
     source.setSetting(radar, "maxG", std::numeric_limits<double>::infinity());
@@ -1431,6 +1437,8 @@ void TelemetryTests::providesGForceVariants()
     QCOMPARE(barDefaults.value("labelText").toString(), QString("G-Force"));
     QVERIFY(barDefaults.value("showLabel").toBool());
     QVERIFY(barDefaults.value("showValue").toBool());
+    QVERIFY(barDefaults.value("showBackground").toBool());
+    QCOMPARE(barDefaults.value("barColor").toString(), QString("#f5a623"));
 
     source.setSetting(bar, "invertLateral", true);
     source.setSetting(bar, "fontSize", 40);

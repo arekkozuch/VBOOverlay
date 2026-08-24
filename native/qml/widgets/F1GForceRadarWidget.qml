@@ -27,10 +27,10 @@ Item {
         width: root.fieldDiameter
         height: width
         radius: width / 2
-        color: root.frame.widgetSettings.radarBackgroundColor || "#2b2d30"
-        opacity: Number(root.frame.widgetSettings.backgroundOpacity ?? 0.72)
+        color: root.frame.widgetSettings.radarBackgroundColor || "#101820"
+        opacity: Number(root.frame.widgetSettings.backgroundOpacity ?? 0.86)
         border.width: Math.max(1.25, root.frame.sceneScale * 1.25)
-        border.color: root.frame.widgetSettings.gridColor || "#c5c7c9"
+        border.color: root.frame.widgetSettings.gridColor || "#91a1b1"
     }
     Repeater {
         model: root.ringCount - 1
@@ -43,8 +43,8 @@ Item {
             radius: width / 2
             color: "transparent"
             border.width: Math.max(1, root.frame.sceneScale)
-            border.color: root.frame.widgetSettings.gridColor || "#c5c7c9"
-            opacity: 0.72
+            border.color: root.frame.widgetSettings.gridColor || "#91a1b1"
+            opacity: 0.42 + (index + 1) / Math.max(1, root.ringCount - 1) * 0.16
         }
     }
     Rectangle {
@@ -53,8 +53,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: root.fieldDiameter
         height: Math.max(1, root.frame.sceneScale)
-        color: root.frame.widgetSettings.gridColor || "#c5c7c9"
-        opacity: 0.38
+        color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        opacity: 0.24
     }
     Rectangle {
         visible: root.frame.widgetSettings.showCrosshair ?? true
@@ -62,8 +62,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(1, root.frame.sceneScale)
         height: root.fieldDiameter
-        color: root.frame.widgetSettings.gridColor || "#c5c7c9"
-        opacity: 0.38
+        color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        opacity: 0.24
     }
     Rectangle {
         visible: root.frame.widgetSettings.showCenterBox ?? true
@@ -72,8 +72,8 @@ Item {
         height: width
         color: "transparent"
         border.width: Math.max(1, root.frame.sceneScale * 0.8)
-        border.color: root.frame.widgetSettings.gridColor || "#c5c7c9"
-        opacity: 0.6
+        border.color: root.frame.widgetSettings.gridColor || "#91a1b1"
+        opacity: 0.52
     }
     Rectangle {
         readonly property real dotDiameter: Math.max(5 * root.frame.sceneScale, root.fieldDiameter * 0.055)
@@ -83,7 +83,7 @@ Item {
         height: dotDiameter
         radius: width / 2
         visible: gForce.hasValue
-        color: root.frame.widgetSettings.dotColor || root.frame.accent
+        color: root.frame.widgetSettings.dotColor || "#f5a623"
         x: parent.width / 2 - width / 2 + (gForce.combinedG > 0 ? gForce.lateral / gForce.combinedG : 0) * ratio * availableRadius
         y: parent.height / 2 - height / 2 - (gForce.combinedG > 0 ? gForce.longitudinal / gForce.combinedG : 0) * ratio * availableRadius
     }

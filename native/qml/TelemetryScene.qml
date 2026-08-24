@@ -79,9 +79,18 @@ Item {
             property real pad: Number(widgetSettings.padding ?? 12) * sceneScale
             property string family: widgetSettings.fontFamily || "Helvetica Neue"
             property int weight: Number(widgetSettings.fontWeight ?? 600)
-            property color primary: widgetSettings.textColor || "#f4f7fb"
-            property color secondary: widgetSettings.secondaryTextColor || "#8d9aaa"
-            property color accent: widgetSettings.accentColor || "#55e6a5"
+            // Shared modern-motorsport broadcast HUD palette. Individual widgets use
+            // these semantic tokens rather than inventing their own panel treatment.
+            property color panel: widgetSettings.backgroundColor || "#101820"
+            property color primary: widgetSettings.textColor || "#f2f5f7"
+            property color secondary: widgetSettings.secondaryTextColor || "#c0c8d0"
+            property color accent: widgetSettings.accentColor || "#55d76a"
+            property color throttle: widgetSettings.acceleratorColor || "#55d76a"
+            property color brake: widgetSettings.brakeColor || "#e14b4b"
+            property color gForceAccent: widgetSettings.barColor || "#f5a623"
+            property color neutralTrack: widgetSettings.barBackgroundColor || "#24303d"
+            property color panelBorder: widgetSettings.borderColor || "#718397"
+            property real panelRadius: Number(widgetSettings.cornerRadius ?? 12) * sceneScale
             property real valueScale: Number(widgetSettings.valueFontScale ?? 1)
             property real labelScale: Number(widgetSettings.labelFontScale ?? 1)
 
@@ -117,18 +126,18 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 visible: widgetItem.widgetSettings.showBackground ?? true
-                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14) * widgetItem.sceneScale
-                color: widgetItem.widgetSettings.backgroundColor || "#0b1018"
-                opacity: Number(widgetItem.widgetSettings.backgroundOpacity ?? 0.82)
+                radius: widgetItem.panelRadius
+                color: widgetItem.panel
+                opacity: Number(widgetItem.widgetSettings.backgroundOpacity ?? 0.86)
             }
             Rectangle {
                 anchors.fill: parent
                 visible: widgetItem.widgetSettings.showBorder ?? true
-                radius: Number(widgetItem.widgetSettings.cornerRadius ?? 14) * widgetItem.sceneScale
+                radius: widgetItem.panelRadius
                 color: "transparent"
                 border.width: Number(widgetItem.widgetSettings.borderWidth ?? 1) * widgetItem.sceneScale
-                border.color: widgetItem.widgetSettings.borderColor || "#314052"
-                opacity: Number(widgetItem.widgetSettings.borderOpacity ?? 0.75)
+                border.color: widgetItem.panelBorder
+                opacity: Number(widgetItem.widgetSettings.borderOpacity ?? 0.55)
             }
 
             Label {

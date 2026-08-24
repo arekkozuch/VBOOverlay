@@ -26,14 +26,19 @@ Item {
             const maximum = Math.max(minimum + 1, Number(settings.maxValue ?? 8000));
             const steps = Math.max(4, Math.min(16, Math.round((maximum - minimum) / 1000)));
             const progress = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
-            ctx.globalAlpha = Number(settings.panelOpacity ?? 0.58);
-            ctx.fillStyle = settings.panelColor || "#111111";
+            ctx.globalAlpha = Number(settings.panelOpacity ?? 0.86);
+            ctx.fillStyle = settings.panelColor || "#101820";
             ctx.beginPath();
             ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = settings.dialColor || "#f4f4f4";
-            ctx.fillStyle = settings.dialColor || "#f4f4f4";
+            ctx.lineWidth = Math.max(frame.sceneScale, radius * 0.025);
+            ctx.strokeStyle = settings.rimColor || "#91a1b1";
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = settings.dialColor || "#f2f5f7";
+            ctx.fillStyle = settings.dialColor || "#f2f5f7";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.font = "700 " + (frame.configuredFontSize() > 0
@@ -47,6 +52,9 @@ Item {
             }
             for (let step = 0; step <= steps; ++step) {
                 const angle = Math.PI * 0.5 + Math.PI * 1.5 * step / steps;
+                const highRpm = step / steps >= 0.78;
+                ctx.strokeStyle = highRpm ? (settings.warningColor || "#e14b4b") : (settings.dialColor || "#f2f5f7");
+                ctx.fillStyle = ctx.strokeStyle;
                 ctx.lineWidth = Math.max(frame.sceneScale, radius * 0.025);
                 ctx.beginPath();
                 ctx.moveTo(cx + Math.cos(angle) * radius * 1.03, cy + Math.sin(angle) * radius * 1.03);
@@ -62,11 +70,28 @@ Item {
                 ctx.moveTo(cx - Math.cos(angle) * radius * 0.13, cy - Math.sin(angle) * radius * 0.13);
                 ctx.lineTo(cx + Math.cos(angle) * radius * 0.86, cy + Math.sin(angle) * radius * 0.86);
                 ctx.stroke();
-                ctx.fillStyle = settings.dialColor || "#f4f4f4";
+                ctx.fillStyle = settings.dialColor || "#f2f5f7";
                 ctx.beginPath();
                 ctx.arc(cx, cy, Math.max(5 * frame.sceneScale, radius * 0.12), 0, Math.PI * 2);
                 ctx.fill();
             }
+            const plateWidth = radius * 1.15;
+            const plateHeight = Math.max(18 * frame.sceneScale, radius * 0.32);
+            const plateX = cx - plateWidth / 2;
+            const plateY = cy + radius * 0.52;
+            ctx.globalAlpha = 0.92;
+            ctx.fillStyle = settings.valuePlateColor || "#0a1017";
+            ctx.fillRect(plateX, plateY, plateWidth, plateHeight);
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = settings.rimColor || "#718397";
+            ctx.lineWidth = Math.max(1, frame.sceneScale * 0.75);
+            ctx.strokeRect(plateX, plateY, plateWidth, plateHeight);
+            ctx.fillStyle = settings.dialColor || "#f2f5f7";
+            ctx.font = "700 " + Math.max(11 * frame.sceneScale, plateHeight * 0.52) + "px " + frame.family;
+            ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.53);
+            ctx.font = "600 " + Math.max(8 * frame.sceneScale, plateHeight * 0.28) + "px " + frame.family;
+            ctx.fillStyle = "#c0c8d0";
+            ctx.fillText(settings.label || "RPM", cx, plateY + plateHeight * 0.84);
         }
     }
     Connections {
