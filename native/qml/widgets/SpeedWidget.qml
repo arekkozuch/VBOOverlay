@@ -11,9 +11,12 @@ Item {
         frame: parent.frame
     }
     Column {
-        anchors.fill: parent
-        anchors.margins: panel.innerPadding
-        spacing: 2 * frame.sceneScale
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: panel.innerPadding
+        anchors.rightMargin: panel.innerPadding
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 1 * frame.sceneScale
         Label {
             text: frame.widgetSettings.label || "Speed"
             color: frame.secondary
@@ -30,7 +33,7 @@ Item {
             font.weight: frame.weight
             font.pixelSize: frame.configuredFontSize() > 0
                 ? frame.configuredFontSize() * frame.sceneScale
-                : Math.max(30 * frame.sceneScale, Math.min(panel.panelValueSize, parent.height * 0.56))
+                : Math.max(34 * frame.sceneScale, Math.min(panel.panelValueSize, parent.height * 0.62))
         }
         Label {
             visible: frame.widgetSettings.showUnit ?? true

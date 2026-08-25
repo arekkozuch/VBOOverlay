@@ -79,21 +79,23 @@ Item {
             property real cueScale: activeCue && activeCue.cue.effect === "pop" ? 0.86 + 0.14 * (activeCue.fadeIn > 0 ? Math.min(1, activeCue.elapsed / activeCue.fadeIn) : 1) : 1
             property real cueYOffset: activeCue && activeCue.cue.effect === "slideUp" ? height * 0.14 * (1 - (activeCue.fadeIn > 0 ? Math.min(1, activeCue.elapsed / activeCue.fadeIn) : 1)) : 0
 
-            property real pad: Number(widgetSettings.padding ?? 12) * sceneScale
+            // Modern broadcast panels are deliberately dense: padding is a
+            // framing detail, not unused dashboard-card real estate.
+            property real pad: Number(widgetSettings.padding ?? 10) * sceneScale
             property string family: widgetSettings.fontFamily || "Helvetica Neue"
             property int weight: Number(widgetSettings.fontWeight ?? 600)
             // Shared modern-motorsport broadcast HUD palette. Individual widgets use
             // these semantic tokens rather than inventing their own panel treatment.
-            property color panel: widgetSettings.backgroundColor || "#111a22"
+            property color panel: widgetSettings.backgroundColor || "#16232d"
             property color primary: widgetSettings.textColor || "#f2f5f7"
-            property color secondary: widgetSettings.secondaryTextColor || "#b5c0ca"
+            property color secondary: widgetSettings.secondaryTextColor || "#c0cad2"
             property color accent: widgetSettings.accentColor || "#55d76a"
             property color throttle: widgetSettings.acceleratorColor || "#55d76a"
             property color brake: widgetSettings.brakeColor || "#e14b4b"
             property color gForceAccent: widgetSettings.barColor || "#f5a623"
-            property color neutralTrack: widgetSettings.barBackgroundColor || "#24303d"
-            property color panelBorder: widgetSettings.borderColor || "#8895a3"
-            property real panelRadius: Number(widgetSettings.cornerRadius ?? 14) * sceneScale
+            property color neutralTrack: widgetSettings.barBackgroundColor || "#2b3a46"
+            property color panelBorder: widgetSettings.borderColor || "#96a8b8"
+            property real panelRadius: Number(widgetSettings.cornerRadius ?? 12) * sceneScale
             property real valueScale: Number(widgetSettings.valueFontScale ?? 1)
             property real labelScale: Number(widgetSettings.labelFontScale ?? 1)
             // These renderers own their surfaces through TelemetryPanel.qml.
@@ -137,7 +139,7 @@ Item {
                 visible: !widgetItem.rendererOwnsPanel && (widgetItem.widgetSettings.showBackground ?? true)
                 radius: widgetItem.panelRadius
                 color: widgetItem.panel
-                opacity: Number(widgetItem.widgetSettings.backgroundOpacity ?? 0.86)
+                opacity: Number(widgetItem.widgetSettings.backgroundOpacity ?? 0.78)
             }
             Rectangle {
                 anchors.fill: parent
@@ -146,7 +148,7 @@ Item {
                 color: "transparent"
                 border.width: Number(widgetItem.widgetSettings.borderWidth ?? 1) * widgetItem.sceneScale
                 border.color: widgetItem.panelBorder
-                opacity: Number(widgetItem.widgetSettings.borderOpacity ?? 0.55)
+                opacity: Number(widgetItem.widgetSettings.borderOpacity ?? 0.45)
             }
 
             Label {

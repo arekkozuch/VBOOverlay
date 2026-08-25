@@ -13,7 +13,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: panel.innerPadding
-        spacing: Math.max(6 * frame.sceneScale, height * 0.06)
+        spacing: Math.max(5 * frame.sceneScale, height * 0.045)
         Repeater {
             model: [
             {
@@ -37,13 +37,13 @@ Item {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 4 * frame.sceneScale
+                spacing: 3 * frame.sceneScale
                 property var pedalRaw: frame.raw(modelData.sourceKey, modelData.fallback)
                 property bool hasValue: pedalRaw !== undefined && pedalRaw !== null && Number.isFinite(Number(pedalRaw))
                 property real pedalValue: hasValue ? Number(pedalRaw) : 0
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.max(panel.panelLabelSize, parent.height * 0.34)
+                    Layout.preferredHeight: Math.max(panel.panelLabelSize * 1.12, parent.height * 0.38)
                     Label {
                         Layout.fillWidth: true
                         text: frame.widgetSettings[modelData.labelKey] || (modelData.fallback === "throttle" ? "Throttle" : "Brake")
@@ -63,7 +63,7 @@ Item {
                 }
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.max(10 * frame.sceneScale, parent.parent.height * 0.26)
+                    Layout.preferredHeight: Math.max(11 * frame.sceneScale, parent.parent.height * 0.28)
                     radius: Number(frame.widgetSettings.barRadius ?? 5) * frame.sceneScale
                     color: frame.neutralTrack
                     Rectangle {

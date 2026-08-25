@@ -56,8 +56,11 @@ const QStringList widgetTypes = {
 
 QPair<double, double> defaultSize(const QString &type)
 {
-    if (type == "rpm" || type == "heartRate") {
+    if (type == "rpm") {
         return {0.20, 0.09};
+    }
+    if (type == "heartRate") {
+        return {0.12, 0.13};
     }
     if (type == "pedals") {
         return {0.25, 0.13};
@@ -66,10 +69,10 @@ QPair<double, double> defaultSize(const QString &type)
         return {0.14, 0.19};
     }
     if (type == "f1GForceRadar") {
-        return {0.18, 0.24};
+        return {0.15, 0.20};
     }
     if (type == "gForceMagnitudeBar") {
-        return {0.24, 0.055};
+        return {0.24, 0.10};
     }
     if (type == "track") {
         return {0.20, 0.28};

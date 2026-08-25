@@ -77,16 +77,16 @@ Item {
         property real time: 0
         function telemetryValue(source) {
             const samples = {
-                "speed": 50,
-                "rpm": 1273,
-                "throttle": 32,
-                "brake": 0,
+                "speed": 86,
+                "rpm": 4300,
+                "throttle": 63,
+                "brake": 18,
                 "oil": 97,
                 "atf": 84,
                 "coolant": 90,
-                "heartRate": 105,
-                "lateralG": 0.18,
-                "longitudinalG": 0.276
+                "heartRate": 145,
+                "lateralG": 0.48,
+                "longitudinalG": 0.64
             };
             return samples[source];
         }
@@ -94,10 +94,10 @@ Item {
 
     Component.onCompleted: {
             const common = {
-                "backgroundColor": "#111a22", "backgroundOpacity": 0.86,
-                "borderColor": "#8895a3", "borderOpacity": 0.55,
-                "cornerRadius": 14, "padding": 14,
-                "textColor": "#f2f5f7", "secondaryTextColor": "#b5c0ca"
+                "backgroundColor": "#16232d", "backgroundOpacity": 0.78,
+                "borderColor": "#96a8b8", "borderOpacity": 0.45,
+                "cornerRadius": 12, "padding": 10,
+                "textColor": "#f2f5f7", "secondaryTextColor": "#c0cad2"
             };
             const add = function(type, x, y, width, height, settings) {
                 smokeWidgets.append({
@@ -109,45 +109,45 @@ Item {
                     "widgetCues": [], "widgetGroupId": ""
                 });
             };
-            add("retroTachometer", 0.025, 0.16, 0.19, 0.36, {
+            add("retroTachometer", 0.025, 0.17, 0.18, 0.32, {
                 "showBackground": false, "showBorder": false, "padding": 0,
                 "source": "rpm", "label": "RPM", "minValue": 0, "maxValue": 8000,
-                "panelColor": "#111a22", "panelOpacity": 0.86, "dialColor": "#f2f5f7",
+                "panelColor": "#16232d", "panelOpacity": 0.78, "dialColor": "#f2f5f7",
                 "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#8895a3"
             });
-            add("speed", 0.22, 0.23, 0.09, 0.24, Object.assign({}, common, {
+            add("speed", 0.21, 0.26, 0.09, 0.15, Object.assign({}, common, {
                 "source": "speed", "label": "Speed", "unit": "km/h", "decimals": 0
             }));
-            add("pedals", 0.32, 0.23, 0.15, 0.24, Object.assign({}, common, {
+            add("pedals", 0.31, 0.26, 0.16, 0.135, Object.assign({}, common, {
                 "acceleratorSource": "throttle", "brakeSource": "brake",
                 "acceleratorLabel": "Throttle", "brakeLabel": "Brake",
                 "acceleratorColor": "#55d76a", "brakeColor": "#e14b4b", "showValues": true
             }));
-            add("retroCustomValue", 0.48, 0.23, 0.18, 0.08, Object.assign({}, common, {
+            add("retroCustomValue", 0.48, 0.26, 0.18, 0.045, Object.assign({}, common, {
                 "source": "oil", "label": "OIL", "unit": "°C", "decimals": 0,
                 "icon": "◒", "stackPosition": "top"
             }));
-            add("retroCustomValue", 0.48, 0.31, 0.18, 0.08, Object.assign({}, common, {
+            add("retroCustomValue", 0.48, 0.305, 0.18, 0.045, Object.assign({}, common, {
                 "source": "atf", "label": "ATF", "unit": "°C", "decimals": 0,
                 "icon": "⚙", "stackPosition": "middle"
             }));
-            add("retroCustomValue", 0.48, 0.39, 0.18, 0.08, Object.assign({}, common, {
+            add("retroCustomValue", 0.48, 0.35, 0.18, 0.045, Object.assign({}, common, {
                 "source": "coolant", "label": "COOLANT", "unit": "°C", "decimals": 0,
                 "icon": "♨", "stackPosition": "bottom"
             }));
-            add("heartRate", 0.675, 0.23, 0.10, 0.24, Object.assign({}, common, {
+            add("heartRate", 0.675, 0.26, 0.095, 0.15, Object.assign({}, common, {
                 "source": "heartRate", "label": "HR", "unit": "bpm", "accentColor": "#e14b4b"
             }));
-            add("f1GForceRadar", 0.80, 0.08, 0.17, 0.31, {
+            add("f1GForceRadar", 0.815, 0.105, 0.145, 0.265, {
                 "showBackground": false, "showBorder": false, "padding": 0,
                 "lateralSource": "lateralG", "longitudinalSource": "longitudinalG",
-                "maxG": 1.5, "ringStepG": 0.25, "radarBackgroundColor": "#111a22",
-                "backgroundOpacity": 0.86, "dotColor": "#f5a623", "gridColor": "#8895a3"
+                "maxG": 1.5, "ringStepG": 0.25, "radarBackgroundColor": "#16232d",
+                "backgroundOpacity": 0.78, "dotColor": "#f5a623", "gridColor": "#96a8b8"
             });
-            add("gForceMagnitudeBar", 0.80, 0.40, 0.17, 0.09, Object.assign({}, common, {
+            add("gForceMagnitudeBar", 0.80, 0.385, 0.17, 0.105, Object.assign({}, common, {
                 "lateralSource": "lateralG", "longitudinalSource": "longitudinalG",
                 "maxG": 1.5, "labelText": "G-Force", "decimals": 2,
-                "barColor": "#f5a623", "barBackgroundColor": "#24303d"
+                "barColor": "#f5a623", "barBackgroundColor": "#2b3a46"
             }));
     }
 }

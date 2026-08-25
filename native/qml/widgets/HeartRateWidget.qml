@@ -12,15 +12,18 @@ Item {
         accentColor: frame.widgetSettings.accentColor || frame.accent
     }
     Column {
-        anchors.fill: parent
-        anchors.margins: panel.innerPadding
-        spacing: 1 * frame.sceneScale
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: panel.innerPadding
+        anchors.rightMargin: panel.innerPadding
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 0
         Label {
             anchors.horizontalCenter: parent.horizontalCenter
         visible: frame.widgetSettings.showIcon ?? true
         text: "♡"
         color: frame.accent
-            font.pixelSize: Math.min(22 * frame.sceneScale, parent.height * 0.20)
+            font.pixelSize: Math.min(20 * frame.sceneScale, parent.height * 0.17)
         }
         Label {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -39,7 +42,7 @@ Item {
         font.weight: frame.weight
         font.pixelSize: frame.configuredFontSize() > 0
             ? frame.configuredFontSize() * frame.sceneScale
-                : Math.max(26 * frame.sceneScale, Math.min(panel.panelValueSize, parent.height * 0.34))
+                : Math.max(32 * frame.sceneScale, Math.min(panel.panelValueSize, parent.height * 0.48))
         }
         Label {
             anchors.horizontalCenter: parent.horizontalCenter

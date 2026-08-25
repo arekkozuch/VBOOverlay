@@ -22,10 +22,10 @@ Item {
     Column {
         anchors.fill: parent
         anchors.margins: panel.innerPadding
-        spacing: Math.max(5 * root.frame.sceneScale, parent.height * 0.10)
+        spacing: Math.max(5 * root.frame.sceneScale, parent.height * 0.08)
         Row {
             width: parent.width
-            height: parent.height * 0.46
+            height: parent.height * 0.44
             Label {
                 width: parent.width * 0.62
                 anchors.verticalCenter: parent.verticalCenter
@@ -55,7 +55,7 @@ Item {
         }
         Rectangle {
             width: parent.width
-            height: Math.max(8 * root.frame.sceneScale, parent.parent.height * 0.20)
+            height: Math.max(11 * root.frame.sceneScale, parent.parent.height * 0.25)
             radius: Number(root.frame.widgetSettings.barRadius ?? 5) * root.frame.sceneScale
             color: root.frame.neutralTrack
             Rectangle {

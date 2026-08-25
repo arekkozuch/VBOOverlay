@@ -1425,10 +1425,10 @@ void TelemetryTests::providesGForceVariants()
     QVERIFY(radarDefaults.value("showRingLabels").toBool());
     QVERIFY(!radarDefaults.value("showBackground").toBool());
     QVERIFY(!radarDefaults.value("showBorder").toBool());
-    QCOMPARE(radarDefaults.value("radarBackgroundColor").toString(), QString("#111a22"));
-    QCOMPARE(radarDefaults.value("backgroundOpacity").toDouble(), 0.86);
+    QCOMPARE(radarDefaults.value("radarBackgroundColor").toString(), QString("#16232d"));
+    QCOMPARE(radarDefaults.value("backgroundOpacity").toDouble(), 0.78);
     QCOMPARE(radarDefaults.value("dotColor").toString(), QString("#f5a623"));
-    QCOMPARE(radarDefaults.value("gridColor").toString(), QString("#8895a3"));
+    QCOMPARE(radarDefaults.value("gridColor").toString(), QString("#96a8b8"));
     QCOMPARE(static_cast<int>(std::floor(radarDefaults.value("maxG").toDouble()
                                          / radarDefaults.value("ringStepG").toDouble())), 6);
     source.setSetting(radar, "maxG", std::numeric_limits<double>::infinity());
