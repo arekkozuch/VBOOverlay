@@ -15,20 +15,6 @@ Item {
         property bool hasValue: parent.hasValue
         onValueChanged: requestPaint()
         onHasValueChanged: requestPaint()
-        function roundedPath(ctx, x, y, rectangleWidth, rectangleHeight, radius) {
-            const boundedRadius = Math.min(radius, rectangleWidth / 2, rectangleHeight / 2);
-            ctx.beginPath();
-            ctx.moveTo(x + boundedRadius, y);
-            ctx.lineTo(x + rectangleWidth - boundedRadius, y);
-            ctx.quadraticCurveTo(x + rectangleWidth, y, x + rectangleWidth, y + boundedRadius);
-            ctx.lineTo(x + rectangleWidth, y + rectangleHeight - boundedRadius);
-            ctx.quadraticCurveTo(x + rectangleWidth, y + rectangleHeight, x + rectangleWidth - boundedRadius, y + rectangleHeight);
-            ctx.lineTo(x + boundedRadius, y + rectangleHeight);
-            ctx.quadraticCurveTo(x, y + rectangleHeight, x, y + rectangleHeight - boundedRadius);
-            ctx.lineTo(x, y + boundedRadius);
-            ctx.quadraticCurveTo(x, y, x + boundedRadius, y);
-            ctx.closePath();
-        }
         onPaint: {
             const ctx = getContext("2d");
             ctx.reset();
@@ -40,7 +26,7 @@ Item {
             const maximum = Math.max(minimum + 1, Number(settings.maxValue ?? 8000));
             const steps = Math.max(4, Math.min(16, Math.round((maximum - minimum) / 1000)));
             const progress = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
-            const startAngle = Math.PI * 0.84;
+            const startAngle = Math.PI * 0.76;
             const sweep = Math.PI * 1.33;
             const endAngle = startAngle + sweep;
             const dialColor = settings.dialColor || "#f2f5f7";
@@ -98,11 +84,9 @@ Item {
                     ctx.font = "700 " + (frame.configuredFontSize() > 0
                         ? frame.configuredFontSize() * frame.sceneScale
                         : Math.max(12 * frame.sceneScale, radius * 0.16)) + "px " + frame.family;
-                    const edgeLabel = tick === 0 || tick === tickCount;
-                    const labelRadius = edgeLabel ? 0.95 : 0.64;
                     ctx.fillText(String(Math.round((minimum + (maximum - minimum) * ratio) / 1000)),
-                                 cx + Math.cos(angle) * radius * labelRadius,
-                                 cy + Math.sin(angle) * radius * labelRadius);
+                                 cx + Math.cos(angle) * radius * 0.64,
+                                 cy + Math.sin(angle) * radius * 0.64);
                 }
             }
 
@@ -138,18 +122,9 @@ Item {
             ctx.stroke();
             ctx.globalAlpha = 1;
 
-            const plateWidth = radius * 1.28;
-            const plateHeight = Math.max(26 * frame.sceneScale, radius * 0.39);
-            const plateX = cx - plateWidth / 2;
-            const plateY = cy + radius * 0.34;
-            ctx.globalAlpha = 0.94;
-            roundedPath(ctx, plateX, plateY, plateWidth, plateHeight, Math.max(3 * frame.sceneScale, plateHeight * 0.18));
-            ctx.fillStyle = settings.valuePlateColor || "#111a22";
-            ctx.fill();
-            ctx.globalAlpha = 1;
             ctx.fillStyle = dialColor;
-            ctx.font = "700 " + Math.max(17 * frame.sceneScale, plateHeight * 0.68) + "px " + frame.family;
-            ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.54);
+            ctx.font = "700 " + Math.max(18 * frame.sceneScale, radius * 0.26) + "px " + frame.family;
+            ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, cy + radius * 0.63);
         }
     }
     Connections {

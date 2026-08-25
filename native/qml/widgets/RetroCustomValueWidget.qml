@@ -22,6 +22,14 @@ Item {
             return "coolant";
         return "";
     }
+    readonly property url temperatureIconSource: {
+        switch (temperatureIcon) {
+        case "oil": return Qt.resolvedUrl("../assets/temperature-oil.svg");
+        case "transmission": return Qt.resolvedUrl("../assets/temperature-transmission.svg");
+        case "coolant": return Qt.resolvedUrl("../assets/temperature-coolant.svg");
+        default: return "";
+        }
+    }
     property string formattedValue: {
         if (!hasValue)
             return frame.widgetSettings.fallbackText ?? "—";
@@ -43,105 +51,21 @@ Item {
         spacing: 8 * frame.sceneScale
         Item {
             id: iconSlot
-            visible: root.displayIcon !== "" || root.temperatureIcon !== ""
+            visible: root.displayIcon !== "" || root.temperatureIconSource.toString() !== ""
             width: visible ? 30 * frame.sceneScale : 0
             height: parent.height
             anchors.verticalCenter: parent.verticalCenter
-            Canvas {
-                id: temperatureIconCanvas
+            Image {
                 anchors.fill: parent
-                visible: root.temperatureIcon !== ""
-                onVisibleChanged: requestPaint()
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                onPaint: {
-                    const ctx = getContext("2d");
-                    ctx.reset();
-                    const color = root.frame.widgetSettings.labelColor || root.frame.secondary;
-                    const line = Math.max(1.25 * root.frame.sceneScale, width * 0.070);
-                    ctx.strokeStyle = color;
-                    ctx.fillStyle = color;
-                    ctx.lineWidth = line;
-                    ctx.lineCap = "round";
-                    ctx.lineJoin = "round";
-
-                    if (root.temperatureIcon === "oil") {
-                        ctx.beginPath();
-                        ctx.moveTo(width * 0.16, height * 0.43);
-                        ctx.lineTo(width * 0.23, height * 0.29);
-                        ctx.lineTo(width * 0.47, height * 0.29);
-                        ctx.lineTo(width * 0.55, height * 0.41);
-                        ctx.lineTo(width * 0.67, height * 0.41);
-                        ctx.lineTo(width * 0.82, height * 0.24);
-                        ctx.lineTo(width * 0.91, height * 0.30);
-                        ctx.lineTo(width * 0.82, height * 0.55);
-                        ctx.lineTo(width * 0.65, height * 0.55);
-                        ctx.lineTo(width * 0.65, height * 0.68);
-                        ctx.lineTo(width * 0.20, height * 0.68);
-                        ctx.lineTo(width * 0.20, height * 0.43);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(width * 0.29, height * 0.31);
-                        ctx.lineTo(width * 0.29, height * 0.20);
-                        ctx.lineTo(width * 0.46, height * 0.20);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(width * 0.85, height * 0.62);
-                        ctx.quadraticCurveTo(width * 0.77, height * 0.54, width * 0.85, height * 0.46);
-                        ctx.quadraticCurveTo(width * 0.93, height * 0.54, width * 0.85, height * 0.62);
-                        ctx.fill();
-                    } else if (root.temperatureIcon === "transmission") {
-                        const cx = width * 0.50;
-                        const cy = height * 0.50;
-                        const radius = Math.min(width, height) * 0.29;
-                        for (let tooth = 0; tooth < 8; ++tooth) {
-                            const angle = tooth * Math.PI / 4;
-                            ctx.beginPath();
-                            ctx.moveTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
-                            ctx.lineTo(cx + Math.cos(angle) * radius * 1.34,
-                                       cy + Math.sin(angle) * radius * 1.34);
-                            ctx.stroke();
-                        }
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, radius * 0.30, 0, Math.PI * 2);
-                        ctx.stroke();
-                    } else if (root.temperatureIcon === "coolant") {
-                        const stemX = width * 0.48;
-                        const tubeRadius = width * 0.10;
-                        const bulbY = height * 0.57;
-                        ctx.beginPath();
-                        ctx.moveTo(stemX - tubeRadius, height * 0.18);
-                        ctx.lineTo(stemX - tubeRadius, bulbY);
-                        ctx.arc(stemX, bulbY, tubeRadius, Math.PI, 0);
-                        ctx.lineTo(stemX + tubeRadius, height * 0.18);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(stemX, height * 0.28);
-                        ctx.lineTo(stemX, bulbY + height * 0.04);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.arc(stemX, bulbY + height * 0.06, width * 0.11, 0, Math.PI * 2);
-                        ctx.stroke();
-                        for (let wave = 0; wave < 2; ++wave) {
-                            const y = height * (0.75 + wave * 0.12);
-                            ctx.beginPath();
-                            ctx.moveTo(width * 0.15, y);
-                            ctx.quadraticCurveTo(width * 0.28, y - height * 0.065, width * 0.41, y);
-                            ctx.quadraticCurveTo(width * 0.54, y + height * 0.065, width * 0.67, y);
-                            ctx.quadraticCurveTo(width * 0.80, y - height * 0.065, width * 0.90, y);
-                            ctx.stroke();
-                        }
-                    }
-                    ctx.lineCap = "butt";
-                    ctx.lineJoin = "miter";
-                }
+                visible: root.temperatureIconSource.toString() !== ""
+                source: root.temperatureIconSource
+                fillMode: Image.PreserveAspectFit
+                sourceSize.width: Math.round(width)
+                sourceSize.height: Math.round(height)
             }
             Label {
                 anchors.fill: parent
-                visible: root.temperatureIcon === ""
+                visible: root.temperatureIconSource.toString() === ""
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 text: root.displayIcon
