@@ -2,6 +2,7 @@
 
 #include "export/FfmpegTools.h"
 #include "export/ExportProcessSupervisor.h"
+#include "export/BoundedProcessOutput.h"
 
 #include <QElapsedTimer>
 #include <QProcess>
@@ -28,18 +29,24 @@ constexpr KnownEncoder kKnownHevcEncoders[] = {
 };
 
 bool waitForFinished(QProcess &process, ExportProcessSupervisor &supervisor,
-                     const std::function<bool()> &cancelled, const int timeoutMilliseconds)
+                     const std::function<bool()> &cancelled, const int timeoutMilliseconds,
+                     BoundedProcessOutput *stdoutOutput = nullptr,
+                     BoundedProcessOutput *stderrOutput = nullptr)
 {
     QElapsedTimer elapsed;
     elapsed.start();
     while (process.state() != QProcess::NotRunning && elapsed.elapsed() < timeoutMilliseconds) {
+        if (stdoutOutput) stdoutOutput->append(process.readAllStandardOutput());
+        if (stderrOutput) stderrOutput->append(process.readAllStandardError());
         if (cancelled && cancelled()) {
             static_cast<void>(supervisor.stopAndWait());
             throw std::runtime_error("Encoder discovery cancelled.");
         }
         process.waitForFinished(100);
     }
-    return process.state() == QProcess::NotRunning;
+    if (stdoutOutput) stdoutOutput->append(process.readAllStandardOutput());
+    if (stderrOutput) stderrOutput->append(process.readAllStandardError());
+    return process.state() == QProcess::NotRunning && (!stdoutOutput || !stdoutOutput->exceeded());
 }
 
 bool canEncodeHevc(const QString &executable, const QString &encoder,
@@ -49,12 +56,16 @@ bool canEncodeHevc(const QString &executable, const QString &encoder,
     // still be unusable because a driver, device, or operating-system service
     // is unavailable, so verify the selected binary with a tiny in-memory job.
     QProcess process;
+    BoundedProcessOutput stdoutOutput(BoundedProcessOutput::Mode::ByteCountOnly, 0);
+    BoundedProcessOutput stderrOutput(BoundedProcessOutput::Mode::DiagnosticTail,
+                                      ProcessOutputLimits::ffmpegDiagnosticTailBytes);
     ExportProcessSupervisor supervisor(process, false);
     supervisor.start(
         executable,
         {"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
          "color=c=black:s=64x64:r=30", "-frames:v", "1", "-c:v", encoder, "-f", "null", "-"});
-    return supervisor.waitForStarted(5'000) && waitForFinished(process, supervisor, cancelled, 15'000)
+    return supervisor.waitForStarted(5'000) && waitForFinished(
+        process, supervisor, cancelled, 15'000, &stdoutOutput, &stderrOutput)
         && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
 }
 
@@ -63,6 +74,9 @@ EncoderProfileSupport probeProfile(
     const std::function<bool()> &cancelled)
 {
     QProcess process;
+    BoundedProcessOutput stdoutOutput(BoundedProcessOutput::Mode::ByteCountOnly, 0);
+    BoundedProcessOutput stderrOutput(BoundedProcessOutput::Mode::DiagnosticTail,
+                                      ProcessOutputLimits::ffmpegDiagnosticTailBytes);
     process.setProcessChannelMode(QProcess::SeparateChannels);
     ExportProcessSupervisor supervisor(process, false);
     const QString rate = QStringLiteral("%1/%2")
@@ -79,9 +93,9 @@ EncoderProfileSupport probeProfile(
     };
     supervisor.start(executable, arguments);
     if (!supervisor.waitForStarted(5'000)
-        || !waitForFinished(process, supervisor, cancelled, 30'000)
+        || !waitForFinished(process, supervisor, cancelled, 30'000, &stdoutOutput, &stderrOutput)
         || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        const QString diagnostics = QString::fromUtf8(process.readAllStandardError()).trimmed();
+        const QString diagnostics = stderrOutput.text();
         return {false, false,
             QStringLiteral("Encoder %1 cannot encode %2×%3 at %4 using %5/%6 (%7-bit).%8")
                 .arg(request.encoder).arg(request.size.width()).arg(request.size.height())
@@ -130,14 +144,24 @@ QList<EncoderCapability> EncoderDetector::discover(
         throw std::runtime_error(FfmpegTools::missingToolsMessage().toStdString());
     }
     QProcess process;
+    BoundedProcessOutput stdoutOutput(BoundedProcessOutput::Mode::CompletePayload,
+                                      ProcessOutputLimits::encoderListingBytes);
+    BoundedProcessOutput stderrOutput(BoundedProcessOutput::Mode::DiagnosticTail,
+                                      ProcessOutputLimits::ffmpegDiagnosticTailBytes);
     ExportProcessSupervisor supervisor(process, false);
     supervisor.start(executable, {"-hide_banner", "-encoders"});
-    if (!supervisor.waitForStarted(5'000) || !waitForFinished(process, supervisor, cancelled, 15'000)
+    if (!supervisor.waitForStarted(5'000) || !waitForFinished(
+            process, supervisor, cancelled, 15'000, &stdoutOutput, &stderrOutput)
         || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        throw std::runtime_error("Could not query FFmpeg encoders.");
+        if (stdoutOutput.exceeded()) {
+            throw std::runtime_error(QStringLiteral("FFmpeg encoder listing exceeded %1 bytes (observed %2 bytes).")
+                                         .arg(ProcessOutputLimits::encoderListingBytes)
+                                         .arg(stdoutOutput.observedBytes()).toStdString());
+        }
+        throw std::runtime_error(QStringLiteral("Could not query FFmpeg encoders: %1").arg(stderrOutput.text()).toStdString());
     }
     const QList<EncoderCapability> advertised = parseEncoders(
-        QString::fromUtf8(process.readAllStandardOutput()));
+        QString::fromUtf8(stdoutOutput.bytes()));
     QList<EncoderCapability> usable;
     for (const EncoderCapability &capability : advertised) {
         if (canEncodeHevc(executable, capability.id, cancelled)) {
