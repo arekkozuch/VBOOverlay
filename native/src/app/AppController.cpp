@@ -1,6 +1,8 @@
 #include "app/AppController.h"
 #include "export/ExportFormat.h"
 #include "export/ExportEngine.h"
+#include "export/ExportCancellation.h"
+#include "export/ExportMediaProfile.h"
 #include "app/AppLog.h"
 
 #include "gopro/GoProTelemetrySource.h"
@@ -1509,6 +1511,15 @@ bool AppController::startExport(
         emit exportChanged();
         return false;
     }
+    if (const QString displayTransformError =
+            ExportMediaProfile::unsupportedDisplayTransformError(m_exportSourceInfo);
+        !displayTransformError.isEmpty()) {
+        m_exportError = displayTransformError;
+        m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
+        emit exportChanged();
+        return false;
+    }
     if (m_exportSourceInfo.sourceColorClass == SourceColorClass::HdrHlg
         || m_exportSourceInfo.sourceColorClass == SourceColorClass::HdrPq
         || m_exportSourceInfo.sourceColorClass == SourceColorClass::LogOrExtended) {
@@ -1781,19 +1792,37 @@ void AppController::cancelExport()
     if (!exporting()) {
         return;
     }
-    QFile cancellationFile(m_exportCancelPath);
-    if (!cancellationFile.open(QIODevice::WriteOnly)) {
-        m_exportError = QStringLiteral("Could not request export cancellation.");
-        m_exportState = QStringLiteral("failed");
-        AppLog::error(QStringLiteral("Export cancellation failed: %1").arg(m_exportError));
+    m_exportState = QStringLiteral("cancelling");
+    m_exportProgressInfo.insert("stage", QStringLiteral("cancelling"));
+    const ExportCancellationResult cancellation =
+        ExportCancellation::request(m_exportCancelPath, m_exportSupervisor.get());
+    if (cancellation.markerCreated) {
+        AppLog::warn(QStringLiteral("Export cancellation requested"));
+        appendExportLifecycle(QStringLiteral("Cancellation requested"));
         emit exportChanged();
         return;
     }
-    cancellationFile.close();
-    AppLog::warn(QStringLiteral("Export cancellation requested"));
-    appendExportLifecycle(QStringLiteral("Cancellation requested"));
-    m_exportState = QStringLiteral("cancelling");
-    m_exportProgressInfo.insert("stage", QStringLiteral("cancelling"));
+
+    const QString reason = cancellation.error.isEmpty()
+        ? QStringLiteral("unknown cancellation marker error") : cancellation.error;
+    AppLog::error(QStringLiteral("Export cancellation marker creation failed: %1").arg(reason));
+    appendExportLifecycle(QStringLiteral("Cancellation marker failed; supervised stop requested"));
+    if (cancellation.workerStopped) {
+        m_exportError = QStringLiteral(
+            "Could not create the export cancellation marker; the export worker was stopped: %1.")
+                            .arg(reason);
+        // stopAndWait completed before publishing this terminal state. The
+        // finished callback retains the same error and performs cleanup.
+        m_exportState = QStringLiteral("failed");
+        AppLog::error(QStringLiteral("Export cancelled by supervised fallback: %1").arg(m_exportError));
+    } else {
+        m_exportError = QStringLiteral(
+            "Could not create the export cancellation marker and the supervised worker is still stopping: %1.")
+                            .arg(reason);
+        // Do not claim a terminal state while a process may still own export
+        // artifacts. finishExport will publish the final result on exit.
+        AppLog::error(QStringLiteral("Export cancellation fallback is still stopping: %1").arg(m_exportError));
+    }
     emit exportChanged();
 }
 

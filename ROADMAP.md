@@ -33,7 +33,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Validate one real HERO11 5.3K Main10/BT.709 fixture at native 5312×2988 and 3840×2160 on macOS/Metal/VideoToolbox; audio validation now accepts a legitimately shorter source-audio timeline.
 - [ ] Implement and validate color-managed HDR/HLG/PQ/Log preservation; current export rejects these sources without silent conversion.
 - [ ] Validate production 8K on representative renderer/encoder hardware; deterministic model and capability-decision coverage is complete.
-- [ ] Preserve rotation and sample-aspect-ratio display transforms end to end (probe/model retention is complete).
+- [ ] Preserve rotation and sample-aspect-ratio display transforms end to end (probe/model retention is complete; export currently fails fast for non-zero rotation or non-square SAR rather than applying an implicit transform).
 - [x] Establish process-tree termination guarantees for FFmpeg/ffprobe (macOS/Unix runtime-tested; Windows validated on the known configuration above).
 - [x] Add disk-space preflight and manifest-owned temporary-file management policy, including representative FFV1 sampling.
 - [ ] Validate the QML preview/export result against broader real media.

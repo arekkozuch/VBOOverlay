@@ -10,7 +10,7 @@ The validated default export policy preserves 8-bit SDR as HEVC Main and 10-bit 
 
 HLG, PQ, and Log/extended material requires a validated color-managed compositor. It is detected and rejected during export preflight today. Unsupported HDR/Log material must never be silently converted to 8-bit SDR, silently tone-mapped, or described as supported merely because metadata can be copied.
 
-Rotation and sample aspect ratio are retained and shown through the media model, but complete display-transform preservation remains pending. Native-resolution architecture is deterministic-tested through 8K representation; production 8K support remains a runtime renderer/encoder decision and still needs real hardware/media validation.
+Rotation and sample aspect ratio are retained and shown through the media model. Import, probe, playback, and editing do not alter their behavior, but the centralized `ExportMediaProfile` fails export preflight for non-zero rotation or a valid non-square SAR; there is no implicit rotation, scale, crop, or metadata-only transform. Complete display-transform preservation remains pending. Native-resolution architecture is deterministic-tested through 8K representation; production 8K support remains a runtime renderer/encoder decision and still needs real hardware/media validation.
 
 Recommended bitrate is a continuous pixel-rate curve anchored at 12.5 Mbps for 1080p30: `12.5 Mbps × (pixelRate / 1080p30)^0.66`, with a 1.15 multiplier for depths above 8-bit and quality multipliers of 0.70/1.00/1.30. Custom bitrate is defensively bounded to 0.5–500 Mbps. This supports future rasters without an arbitrary 4K plateau while retaining the established 1080p and 4K ballpark.
 

@@ -8,6 +8,10 @@ External documents are validated before editor models are populated. Projects an
 
 Saved project files are parsed and structurally validated on the existing project-load worker. Only its generation- and revision-checked canonical result commits on the UI thread.
 
+## Widget semantic normalization
+
+`WidgetModel` is the single semantic boundary for inspector edits, scene import, template application, imported templates, and persisted-template reload. It clamps supported numeric settings to their editor contracts (including typography, decimal precision, G-force ranges, opacity, and geometry), preserves only finite geometry, restores the widget default for an invalid known color, and repairs invalid min/max pairs from defaults. Cues always have finite `start >= 0`, `duration >= 0.1`, non-negative fades, and one of `fade`, `pop`, or `slideUp`; invalid cue values normalize to the safe fallback. Persisted widget IDs must be nonempty, bounded, and unique; duplicate or invalid IDs reject the incoming scene. Unknown compatible settings are retained for forward compatibility, except unsafe non-finite numeric values.
+
 ## Recovery discard and deletion residual
 
 Projects saved by the current application include `documentState.id` and a decimal-string `documentState.savedRevision`. Recovery v2 records that identity plus its snapshot revision and last saved revision, and its embedded project payload must repeat the same identity and saved revision. On startup, a v2 recovery is **valid** only when its document identity matches an available structurally valid authority and its revision is newer; it is **stale** when that authority has already reached or passed its revision; malformed, newer-unknown, or identity-mismatched metadata is **invalid** and is never applied automatically. The identity stays with a document across Save As and portable moves, while unrelated projects never compare revisions as though they were the same document.

@@ -12,6 +12,7 @@
 #include "export/ExportOutputTransaction.h"
 #include "export/ExportTargetIdentity.h"
 #include "export/ExportArtifactManifest.h"
+#include "export/ExportCancellation.h"
 #include "export/ExportProcessSupervisor.h"
 #include "export/ExportStoragePolicy.h"
 #include "export/FfmpegTools.h"
@@ -73,6 +74,8 @@ private slots:
     void parsesOptionalRealVbo();
     void benchmarksCachedOptionalRealVboPresentationLookups();
     void persistsWidgetScenes();
+    void normalizesWidgetSemanticsAcrossMutationAndImport();
+    void rejectsNonFiniteWidgetGeometryAndDuplicateIds();
     void loadsVisualTemplates();
     void providesCustomizableArchetypes();
     void persistsAndSharesCustomTemplates();
@@ -118,11 +121,13 @@ private slots:
     void cleansOnlyManifestOwnedArtifacts();
     void preservesLiveManifestForStartupRecovery();
     void supervisesUnixExportProcessTree();
+    void stopsExportWorkerWhenCancellationMarkerCannotBeCreated();
     void detectsHevcEncoders();
     void cancelsEncoderDiscovery();
     void calculatesTimestampDrivenExportFrames();
     void resolvesExplicitExportFormats();
     void derivesSourceDrivenExportProfiles();
+    void rejectsUnsupportedExportDisplayTransforms();
     void validatesHighResolutionCapabilitiesAndCache();
     void preservesTenBitSdrThroughComposition();
     void preservesExactExportRateRationals();
@@ -1159,6 +1164,96 @@ void TelemetryTests::persistsWidgetScenes()
     QCOMPARE(widget.value("type").toString(), QString("customValue"));
     QCOMPARE(widget.value("rotation").toDouble(), 12.0);
     QCOMPARE(widget.value("settings").toMap().value("source").toString(), QString("oiltemp"));
+}
+
+void TelemetryTests::normalizesWidgetSemanticsAcrossMutationAndImport()
+{
+    WidgetModel edited;
+    const int editedIndex = edited.addWidget(QStringLiteral("rpm"));
+    QVERIFY(editedIndex >= 0);
+    edited.setSetting(editedIndex, QStringLiteral("decimals"), 999999);
+    edited.setSetting(editedIndex, QStringLiteral("backgroundColor"), QStringLiteral("not-a-color"));
+    QCOMPARE(edited.widget(editedIndex).value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("decimals")).toInt(), 6);
+    QCOMPARE(edited.widget(editedIndex).value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("backgroundColor")).toString(), QStringLiteral("#16232d"));
+
+    WidgetModel imported;
+    const QJsonArray invalid{
+        QJsonObject{{QStringLiteral("id"), QStringLiteral("rpm-widget")},
+                    {QStringLiteral("type"), QStringLiteral("rpm")},
+                    {QStringLiteral("settings"), QJsonObject{{QStringLiteral("decimals"), 999999},
+                                                               {QStringLiteral("fontSize"), 999999},
+                                                               {QStringLiteral("backgroundColor"), QStringLiteral("invalid")},
+                                                               {QStringLiteral("minValue"), 100},
+                                                               {QStringLiteral("maxValue"), 10}}},
+                    {QStringLiteral("cues"), QJsonArray{QJsonObject{
+                        {QStringLiteral("start"), -1.0},
+                        {QStringLiteral("duration"), -2.0},
+                        {QStringLiteral("effect"), QStringLiteral("invalid")},
+                    }}}},
+    };
+    QVERIFY(imported.fromJson(invalid));
+    const QVariantMap importedWidget = imported.widget(0);
+    QCOMPARE(importedWidget.value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("decimals")).toInt(), 6);
+    QCOMPARE(importedWidget.value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("fontSize")).toDouble(), 200.0);
+    QCOMPARE(importedWidget.value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("backgroundColor")).toString(), QStringLiteral("#16232d"));
+    QCOMPARE(importedWidget.value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("minValue")).toDouble(), 0.0);
+    QCOMPARE(importedWidget.value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("maxValue")).toDouble(), 8000.0);
+    const QVariantMap cue = importedWidget.value(QStringLiteral("cues")).toList().front().toMap();
+    QCOMPARE(cue.value(QStringLiteral("start")).toDouble(), 0.0);
+    QCOMPARE(cue.value(QStringLiteral("duration")).toDouble(), 0.1);
+    QCOMPARE(cue.value(QStringLiteral("effect")).toString(), QStringLiteral("fade"));
+
+    QTemporaryDir templateDirectory;
+    QVERIFY(templateDirectory.isValid());
+    const bool hadOverride = qEnvironmentVariableIsSet("FLAPPEDEAR_TEMPLATE_STORE");
+    const QByteArray previousOverride = qgetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", templateDirectory.filePath("templates.json").toUtf8());
+    const auto restoreEnvironment = qScopeGuard([hadOverride, previousOverride] {
+        if (hadOverride) qputenv("FLAPPEDEAR_TEMPLATE_STORE", previousOverride);
+        else qunsetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    });
+    const QString importedTemplatePath = templateDirectory.filePath("unsafe.fettemplate");
+    const QJsonObject templateWidget{
+        {QStringLiteral("id"), QStringLiteral("template-rpm")},
+        {QStringLiteral("type"), QStringLiteral("rpm")},
+        {QStringLiteral("settings"), QJsonObject{{QStringLiteral("decimals"), 999999}}},
+    };
+    const QJsonObject unsafeTemplate{
+        {QStringLiteral("name"), QStringLiteral("unsafe")},
+        {QStringLiteral("widgets"), QJsonArray{templateWidget}},
+    };
+    QVERIFY(writeBytes(importedTemplatePath,
+                       QJsonDocument(QJsonObject{{QStringLiteral("template"), unsafeTemplate}}).toJson()));
+    WidgetModel templateModel;
+    const QString templateId = templateModel.importTemplate(QUrl::fromLocalFile(importedTemplatePath));
+    QVERIFY(!templateId.isEmpty());
+    QVERIFY(templateModel.applyTemplate(templateId));
+    QCOMPARE(templateModel.widget(0).value(QStringLiteral("settings")).toMap()
+                 .value(QStringLiteral("decimals")).toInt(), 6);
+}
+
+void TelemetryTests::rejectsNonFiniteWidgetGeometryAndDuplicateIds()
+{
+    WidgetModel model;
+    const int index = model.addWidget(QStringLiteral("speed"));
+    QVERIFY(index >= 0);
+    model.setWidgetProperty(index, QStringLiteral("scale"), std::numeric_limits<double>::quiet_NaN());
+    QVERIFY(std::isfinite(model.widget(index).value(QStringLiteral("scale")).toDouble()));
+
+    const QJsonArray duplicates{
+        QJsonObject{{QStringLiteral("id"), QStringLiteral("duplicate")},
+                    {QStringLiteral("type"), QStringLiteral("speed")}},
+        QJsonObject{{QStringLiteral("id"), QStringLiteral("duplicate")},
+                    {QStringLiteral("type"), QStringLiteral("rpm")}},
+    };
+    QVERIFY(!model.fromJson(duplicates));
 }
 
 void TelemetryTests::loadsVisualTemplates()
@@ -2226,6 +2321,26 @@ void TelemetryTests::supervisesUnixExportProcessTree()
 #else
     QSKIP("Unix process-group behavior is runtime-tested on this platform only.");
 #endif
+}
+
+void TelemetryTests::stopsExportWorkerWhenCancellationMarkerCannotBeCreated()
+{
+    QProcess process;
+    ExportProcessSupervisor supervisor(process);
+    supervisor.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("sleep 30")});
+    QVERIFY2(supervisor.waitForStarted(), qPrintable(process.errorString()));
+
+    const ExportCancellationResult result = ExportCancellation::request(
+        QStringLiteral("/unwritable/cancel"), &supervisor,
+        [](const QString &, QString *error) {
+            if (error) *error = QStringLiteral("injected cancellation-marker write failure");
+            return false;
+        });
+
+    QVERIFY(!result.markerCreated);
+    QVERIFY(result.workerStopped);
+    QVERIFY(!supervisor.isRunning());
+    QCOMPARE(result.error, QStringLiteral("injected cancellation-marker write failure"));
 }
 
 void TelemetryTests::preservesPartialOverlapInAnalysisSeries()
@@ -3777,6 +3892,33 @@ void TelemetryTests::derivesSourceDrivenExportProfiles()
         source, {3840, 2160}, {30, 1}, 40'000'000, QStringLiteral("libx265"));
     QVERIFY(!unknown.supported);
     QVERIFY(unknown.error.contains(QStringLiteral("unknown")));
+}
+
+void TelemetryTests::rejectsUnsupportedExportDisplayTransforms()
+{
+    MediaInfo source;
+    source.bitDepth = 8;
+    source.pixelFormat = QStringLiteral("yuv420p");
+    source.sourceColorClass = SourceColorClass::Sdr;
+    const auto derive = [&source] {
+        return ExportMediaProfile::derive(
+            source, {1920, 1080}, {30, 1}, 8'000'000, QStringLiteral("libx265"));
+    };
+
+    source.rotationDegrees = 90;
+    QVERIFY(!derive().supported);
+    source.rotationDegrees = -90;
+    QVERIFY(!derive().supported);
+    source.rotationDegrees.reset();
+    source.sampleAspectRatio = {4, 3};
+    QVERIFY(!derive().supported);
+    source.sampleAspectRatio = {8, 9};
+    QVERIFY(!derive().supported);
+    source.sampleAspectRatio = {};
+    QVERIFY(derive().supported);
+    source.rotationDegrees = 0;
+    source.sampleAspectRatio = {1, 1};
+    QVERIFY(derive().supported);
 }
 
 void TelemetryTests::validatesHighResolutionCapabilitiesAndCache()

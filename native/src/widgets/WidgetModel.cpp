@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QColor>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,6 +16,7 @@
 #include <QtGlobal>
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include <functional>
 
 static void initializeTemplateResources()
@@ -116,6 +118,14 @@ double bounded(const double value, const double minimum, const double maximum)
     return qBound(minimum, value, maximum);
 }
 
+double finiteBounded(
+    const QVariant &value, const double fallback, const double minimum, const double maximum)
+{
+    bool ok = false;
+    const double candidate = value.toDouble(&ok);
+    return ok && std::isfinite(candidate) ? bounded(candidate, minimum, maximum) : fallback;
+}
+
 QString templateStorePath()
 {
     const QString overridePath = qEnvironmentVariable("FLAPPEDEAR_TEMPLATE_STORE");
@@ -136,6 +146,207 @@ bool validTemplateObject(const QJsonObject &item)
             return false;
         }
     }
+    return true;
+}
+
+bool finiteNumber(const QVariant &value, double *result)
+{
+    bool ok = false;
+    const double number = value.toDouble(&ok);
+    if (!ok || !std::isfinite(number)) return false;
+    if (result) *result = number;
+    return true;
+}
+
+bool colorSetting(const QString &name)
+{
+    return name.endsWith(QStringLiteral("Color")) || name == QStringLiteral("gridColor")
+        || name == QStringLiteral("trackColor") || name == QStringLiteral("panelColor")
+        || name == QStringLiteral("valuePlateColor");
+}
+
+bool decimalSetting(const QString &name)
+{
+    return name == QStringLiteral("decimals") || name.endsWith(QStringLiteral("Decimals"));
+}
+
+bool opacitySetting(const QString &name)
+{
+    return name.endsWith(QStringLiteral("Opacity")) || name == QStringLiteral("opacity");
+}
+
+bool knownBooleanSetting(const QString &name)
+{
+    return name.startsWith(QStringLiteral("show")) || name.startsWith(QStringLiteral("invert"))
+        || name == QStringLiteral("clampValue") || name == QStringLiteral("mirrorX")
+        || name == QStringLiteral("mirrorY");
+}
+
+QVariant normalizeSettingValue(
+    const QVariantMap &defaults, const QString &name, const QVariant &value, bool *accepted)
+{
+    if (accepted) *accepted = true;
+    const auto fallback = [&defaults, &name] { return defaults.value(name); };
+    double number = 0.0;
+    if (name == QStringLiteral("fontSize")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.0, 200.0) : fallback();
+    }
+    if (decimalSetting(name)) {
+        return finiteNumber(value, &number) ? qBound(0, qRound(number), 6) : fallback();
+    }
+    if (name == QStringLiteral("maxG")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.01, 20.0) : fallback();
+    }
+    if (name == QStringLiteral("ringStepG")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.01, 10.0) : fallback();
+    }
+    if (opacitySetting(name)) {
+        return finiteNumber(value, &number) ? bounded(number, 0.0, 1.0) : fallback();
+    }
+    if (name == QStringLiteral("logoScale")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.1, 1.0) : fallback();
+    }
+    if (name == QStringLiteral("valueFontScale") || name == QStringLiteral("labelFontScale")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.1, 4.0) : fallback();
+    }
+    if (name == QStringLiteral("barRadius") || name == QStringLiteral("cornerRadius")
+        || name == QStringLiteral("padding") || name == QStringLiteral("borderWidth")
+        || name == QStringLiteral("lineWidth") || name == QStringLiteral("markerSize")
+        || name == QStringLiteral("dotSize") || name == QStringLiteral("arcWidth")
+        || name == QStringLiteral("trackPadding")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.0, 200.0) : fallback();
+    }
+    if (name == QStringLiteral("segments")) {
+        return finiteNumber(value, &number) ? qBound(5, qRound(number), 40) : fallback();
+    }
+    if (name == QStringLiteral("majorTicks")) {
+        return finiteNumber(value, &number) ? qBound(2, qRound(number), 30) : fallback();
+    }
+    if (name == QStringLiteral("minorTicks")) {
+        return finiteNumber(value, &number) ? qBound(0, qRound(number), 10) : fallback();
+    }
+    if (name == QStringLiteral("gRange")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.01, 20.0) : fallback();
+    }
+    if (name == QStringLiteral("speedMax") || name == QStringLiteral("rpmMax")) {
+        return finiteNumber(value, &number) ? bounded(number, 0.01, 100'000.0) : fallback();
+    }
+    if (colorSetting(name)) {
+        const QColor color(value.toString());
+        return color.isValid() ? value : fallback();
+    }
+    if (knownBooleanSetting(name)) return value.toBool();
+    if (value.metaType().id() == QMetaType::Double && !finiteNumber(value, &number)) {
+        if (accepted) *accepted = false;
+        return {};
+    }
+    return value;
+}
+
+bool invalidRangePair(const QVariantMap &settings, const QString &minimum, const QString &maximum)
+{
+    double minValue = 0.0;
+    double maxValue = 0.0;
+    return settings.contains(minimum) && settings.contains(maximum)
+        && finiteNumber(settings.value(minimum), &minValue)
+        && finiteNumber(settings.value(maximum), &maxValue) && maxValue <= minValue;
+}
+
+void repairRangePairs(QVariantMap *settings, const QVariantMap &defaults)
+{
+    for (const auto &[minimum, maximum] : std::array<std::pair<QString, QString>, 4>{
+             std::pair{QStringLiteral("minValue"), QStringLiteral("maxValue")},
+             std::pair{QStringLiteral("acceleratorMin"), QStringLiteral("acceleratorMax")},
+             std::pair{QStringLiteral("brakeMin"), QStringLiteral("brakeMax")},
+             std::pair{QStringLiteral("rpmMin"), QStringLiteral("rpmMax")}}) {
+        if (invalidRangePair(*settings, minimum, maximum)) {
+            settings->insert(minimum, defaults.value(minimum));
+            settings->insert(maximum, defaults.value(maximum));
+        }
+    }
+}
+
+void mergeNormalizedSettings(
+    QVariantMap *settings, const QVariantMap &incoming, const QVariantMap &defaults)
+{
+    for (auto iterator = incoming.cbegin(); iterator != incoming.cend(); ++iterator) {
+        bool accepted = false;
+        const QVariant normalized = normalizeSettingValue(defaults, iterator.key(), iterator.value(), &accepted);
+        if (accepted) settings->insert(iterator.key(), normalized);
+    }
+    repairRangePairs(settings, defaults);
+}
+
+void normalizeWidgetGeometry(WidgetData *widget, const QVariantMap &values)
+{
+    widget->x = finiteBounded(values.value(QStringLiteral("x")), widget->x, 0.0, 1.0);
+    widget->y = finiteBounded(values.value(QStringLiteral("y")), widget->y, 0.0, 1.0);
+    widget->width = finiteBounded(values.value(QStringLiteral("width")), widget->width, 0.04, 1.0);
+    widget->height = finiteBounded(values.value(QStringLiteral("height")), widget->height, 0.04, 1.0);
+    widget->scale = finiteBounded(values.value(QStringLiteral("scale")), widget->scale, 0.25, 3.0);
+    widget->rotation = finiteBounded(values.value(QStringLiteral("rotation")), widget->rotation, -180.0, 180.0);
+    widget->opacity = finiteBounded(values.value(QStringLiteral("opacity")), widget->opacity, 0.0, 1.0);
+}
+
+QVariantMap normalizeCue(const QVariantMap &raw)
+{
+    const auto number = [&raw](const QString &name, const double fallback, const double minimum) {
+        double value = 0.0;
+        return finiteNumber(raw.value(name), &value) ? qMax(minimum, value) : fallback;
+    };
+    const QString effect = raw.value(QStringLiteral("effect")).toString();
+    return {{QStringLiteral("start"), number(QStringLiteral("start"), 0.0, 0.0)},
+            {QStringLiteral("duration"), number(QStringLiteral("duration"), 0.1, 0.1)},
+            {QStringLiteral("fadeIn"), number(QStringLiteral("fadeIn"), 0.0, 0.0)},
+            {QStringLiteral("fadeOut"), number(QStringLiteral("fadeOut"), 0.0, 0.0)},
+            {QStringLiteral("effect"), QStringList{QStringLiteral("fade"), QStringLiteral("pop"),
+                                                      QStringLiteral("slideUp")}.contains(effect)
+                                         ? effect : QStringLiteral("fade")}};
+}
+
+bool validPersistedWidgetId(const QString &id)
+{
+    if (id.isEmpty() || id.size() > 128) return false;
+    return std::all_of(id.cbegin(), id.cend(), [](const QChar character) {
+        return character.isLetterOrNumber() || character == QLatin1Char('-')
+            || character == QLatin1Char('_');
+    });
+}
+
+bool normalizeTemplateObject(QJsonObject *templateObject)
+{
+    QJsonArray widgets = templateObject->value(QStringLiteral("widgets")).toArray();
+    for (QJsonValueRef value : widgets) {
+        QJsonObject widgetObject = value.toObject();
+        const QString type = widgetObject.value(QStringLiteral("type")).toString();
+        WidgetData widget;
+        widget.type = type;
+        const auto [defaultWidth, defaultHeight] = defaultSize(type);
+        widget.width = defaultWidth;
+        widget.height = defaultHeight;
+        normalizeWidgetGeometry(&widget, widgetObject.toVariantMap());
+        widgetObject.insert(QStringLiteral("x"), widget.x);
+        widgetObject.insert(QStringLiteral("y"), widget.y);
+        widgetObject.insert(QStringLiteral("width"), widget.width);
+        widgetObject.insert(QStringLiteral("height"), widget.height);
+        widgetObject.insert(QStringLiteral("scale"), widget.scale);
+        widgetObject.insert(QStringLiteral("rotation"), widget.rotation);
+        widgetObject.insert(QStringLiteral("opacity"), widget.opacity);
+
+        QVariantMap settings = defaultSettings(type);
+        mergeNormalizedSettings(
+            &settings, widgetObject.value(QStringLiteral("settings")).toObject().toVariantMap(), settings);
+        widgetObject.insert(QStringLiteral("settings"), QJsonObject::fromVariantMap(settings));
+
+        QJsonArray cues;
+        for (const QJsonValue &cue : widgetObject.value(QStringLiteral("cues")).toArray()) {
+            if (!cue.isObject()) return false;
+            cues.append(QJsonObject::fromVariantMap(normalizeCue(cue.toObject().toVariantMap())));
+        }
+        widgetObject.insert(QStringLiteral("cues"), cues);
+        value = widgetObject;
+    }
+    templateObject->insert(QStringLiteral("widgets"), widgets);
     return true;
 }
 
@@ -346,11 +557,11 @@ void WidgetModel::setWidgetProperty(
     }
     WidgetData &widget = m_widgets[index];
     if (name == "scale") {
-        widget.scale = bounded(value.toDouble(), 0.25, 3.0);
+        widget.scale = finiteBounded(value, widget.scale, 0.25, 3.0);
     } else if (name == "rotation") {
-        widget.rotation = bounded(value.toDouble(), -180.0, 180.0);
+        widget.rotation = finiteBounded(value, widget.rotation, -180.0, 180.0);
     } else if (name == "opacity") {
-        widget.opacity = bounded(value.toDouble(), 0.0, 1.0);
+        widget.opacity = finiteBounded(value, widget.opacity, 0.0, 1.0);
     } else if (name == "visible") {
         widget.visible = value.toBool();
     } else {
@@ -364,35 +575,23 @@ void WidgetModel::setSetting(const int index, const QString &name, const QVarian
     if (index < 0 || index >= m_widgets.size() || name.isEmpty()) {
         return;
     }
-    QVariant cleanValue = value;
-    if (name == "fontSize") {
-        const double candidate = value.toDouble();
-        cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.0, 200.0) : 0.0;
-    } else if (name == "maxG") {
-        const double candidate = value.toDouble();
-        cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.01, 20.0) : 1.5;
-    } else if (name == "ringStepG") {
-        const double candidate = value.toDouble();
-        cleanValue = std::isfinite(candidate) ? bounded(candidate, 0.01, 10.0) : 0.25;
-    }
-    m_widgets[index].settings.insert(name, cleanValue);
+    WidgetData &widget = m_widgets[index];
+    const QVariantMap defaults = defaultSettings(widget.type);
+    QVariantMap updated = widget.settings;
+    mergeNormalizedSettings(&updated, {{name, value}}, defaults);
+    widget.settings = std::move(updated);
     update(index);
 }
 
 int WidgetModel::addCue(
     const int index, const double startTime, const double duration, const QString &effect)
 {
-    if (index < 0 || index >= m_widgets.size() || !std::isfinite(startTime)
-        || !std::isfinite(duration)) {
+    if (index < 0 || index >= m_widgets.size()) {
         return -1;
     }
-    const QStringList effects = {"fade", "pop", "slideUp"};
-    const QString cleanEffect = effects.contains(effect) ? effect : QStringLiteral("fade");
-    m_widgets[index].cues.append(QVariantMap{{"start", qMax(0.0, startTime)},
-                                              {"duration", qMax(0.1, duration)},
-                                              {"fadeIn", 0.3},
-                                              {"fadeOut", 0.3},
-                                              {"effect", cleanEffect}});
+    m_widgets[index].cues.append(normalizeCue({{"start", startTime}, {"duration", duration},
+                                                {"fadeIn", 0.3}, {"fadeOut", 0.3},
+                                                {"effect", effect}}));
     update(index);
     return m_widgets[index].cues.size() - 1;
 }
@@ -405,22 +604,12 @@ void WidgetModel::setCueProperty(
         return;
     }
     QVariantMap cue = m_widgets[index].cues[cueIndex].toMap();
-    if (name == "start") {
-        cue.insert(name, qMax(0.0, value.toDouble()));
-    } else if (name == "duration") {
-        cue.insert(name, qMax(0.1, value.toDouble()));
-    } else if (name == "fadeIn" || name == "fadeOut") {
-        cue.insert(name, qMax(0.0, value.toDouble()));
-    } else if (name == "effect") {
-        const QString effect = value.toString();
-        if (!QStringList{"fade", "pop", "slideUp"}.contains(effect)) {
-            return;
-        }
-        cue.insert(name, effect);
-    } else {
+    if (name != "start" && name != "duration" && name != "fadeIn" && name != "fadeOut"
+        && name != "effect") {
         return;
     }
-    m_widgets[index].cues[cueIndex] = cue;
+    cue.insert(name, value);
+    m_widgets[index].cues[cueIndex] = normalizeCue(cue);
     update(index);
 }
 
@@ -545,20 +734,16 @@ bool WidgetModel::applyTemplate(const QString &templateId)
                 return false;
             }
             WidgetData widget = createWidget(type, widgets.size());
-            widget.x = bounded(object.value("x").toDouble(widget.x), 0.0, 1.0);
-            widget.y = bounded(object.value("y").toDouble(widget.y), 0.0, 1.0);
-            widget.width = bounded(object.value("width").toDouble(widget.width), 0.04, 1.0);
-            widget.height = bounded(object.value("height").toDouble(widget.height), 0.04, 1.0);
-            widget.scale = bounded(object.value("scale").toDouble(widget.scale), 0.25, 3.0);
-            widget.rotation = bounded(object.value("rotation").toDouble(widget.rotation), -180.0, 180.0);
-            widget.opacity = bounded(object.value("opacity").toDouble(widget.opacity), 0.0, 1.0);
+            normalizeWidgetGeometry(&widget, object.toVariantMap());
             widget.visible = object.value("visible").toBool(widget.visible);
-            widget.cues = object.value("cues").toArray().toVariantList();
-            widget.groupId = object.value("groupId").toString();
-            const QVariantMap overrides = object.value("settings").toObject().toVariantMap();
-            for (auto iterator = overrides.cbegin(); iterator != overrides.cend(); ++iterator) {
-                widget.settings.insert(iterator.key(), iterator.value());
+            for (const QJsonValue &cue : object.value("cues").toArray()) {
+                if (!cue.isObject()) return false;
+                widget.cues.append(normalizeCue(cue.toObject().toVariantMap()));
             }
+            widget.groupId = object.value("groupId").toString();
+            mergeNormalizedSettings(&widget.settings,
+                                    object.value("settings").toObject().toVariantMap(),
+                                    defaultSettings(type));
             widgets.append(std::move(widget));
         }
         beginResetModel();
@@ -678,6 +863,7 @@ QString WidgetModel::importTemplate(const QUrl &url)
     if (!validTemplateObject(item)) {
         return {};
     }
+    if (!normalizeTemplateObject(&item)) return {};
     m_userTemplates.append(item);
     if (!saveUserTemplates()) {
         m_userTemplates.removeLast();
@@ -707,7 +893,8 @@ void WidgetModel::loadUserTemplates()
     }
     for (const QJsonValue &value : root.value("templates").toArray()) {
         if (value.isObject() && validTemplateObject(value.toObject())) {
-            m_userTemplates.append(value);
+            QJsonObject item = value.toObject();
+            if (normalizeTemplateObject(&item)) m_userTemplates.append(item);
         }
     }
 }
@@ -763,28 +950,28 @@ bool WidgetModel::fromJson(const QJsonArray &array)
                                {QStringLiteral("scene"), QJsonObject{{QStringLiteral("widgets"), array}}}};
     if (!ProjectLimits::validateProject(document)) return false;
     QList<WidgetData> widgets;
+    QSet<QString> ids;
     for (const QJsonValue &entry : array) {
         const QJsonObject object = entry.toObject();
         const QString type = object.value("type").toString();
         if (!validType(type)) {
             return false;
         }
+        const QString id = object.value("id").toString();
+        if (!validPersistedWidgetId(id) || ids.contains(id)) return false;
+        ids.insert(id);
         WidgetData widget = createWidget(type, widgets.size());
-        widget.id = object.value("id").toString(widget.id);
-        widget.x = bounded(object.value("x").toDouble(widget.x), 0.0, 1.0);
-        widget.y = bounded(object.value("y").toDouble(widget.y), 0.0, 1.0);
-        widget.width = bounded(object.value("width").toDouble(widget.width), 0.04, 1.0);
-        widget.height = bounded(object.value("height").toDouble(widget.height), 0.04, 1.0);
-        widget.scale = bounded(object.value("scale").toDouble(1.0), 0.25, 3.0);
-        widget.rotation = bounded(object.value("rotation").toDouble(), -180.0, 180.0);
-        widget.opacity = bounded(object.value("opacity").toDouble(1.0), 0.0, 1.0);
+        widget.id = id;
+        normalizeWidgetGeometry(&widget, object.toVariantMap());
         widget.visible = object.value("visible").toBool(true);
-        widget.cues = object.value("cues").toArray().toVariantList();
-        widget.groupId = object.value("groupId").toString();
-        const QVariantMap savedSettings = object.value("settings").toObject().toVariantMap();
-        for (auto iterator = savedSettings.cbegin(); iterator != savedSettings.cend(); ++iterator) {
-            widget.settings.insert(iterator.key(), iterator.value());
+        for (const QJsonValue &cue : object.value("cues").toArray()) {
+            if (!cue.isObject()) return false;
+            widget.cues.append(normalizeCue(cue.toObject().toVariantMap()));
         }
+        widget.groupId = object.value("groupId").toString();
+        mergeNormalizedSettings(&widget.settings,
+                                object.value("settings").toObject().toVariantMap(),
+                                defaultSettings(type));
         widgets.append(std::move(widget));
     }
     beginResetModel();

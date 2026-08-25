@@ -21,6 +21,8 @@ qt_add_library(flappedear_core STATIC
     src/export/ExportDiagnostics.h
     src/export/ExportArtifactManifest.cpp
     src/export/ExportArtifactManifest.h
+    src/export/ExportCancellation.cpp
+    src/export/ExportCancellation.h
     src/export/ExportEngine.cpp
     src/export/ExportMediaProfile.cpp
     src/export/ExportMediaProfile.h

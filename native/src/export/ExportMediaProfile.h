@@ -32,6 +32,7 @@ struct ExportMediaProfile {
         const MediaInfo &source, const QSize &outputSize,
         const MediaRational &frameRate, qint64 videoBitrate,
         const QString &encoder);
+    [[nodiscard]] static QString unsupportedDisplayTransformError(const MediaInfo &source);
     [[nodiscard]] bool acceptsOutputPixelFormat(const QString &actualPixelFormat) const;
 };
 

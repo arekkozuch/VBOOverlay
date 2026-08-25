@@ -21,6 +21,11 @@ ExportMediaProfile ExportMediaProfile::derive(
         profile.error = QStringLiteral("Export media profile is missing a valid size, rate, bitrate, or encoder.");
         return profile;
     }
+    if (const QString displayTransformError = unsupportedDisplayTransformError(source);
+        !displayTransformError.isEmpty()) {
+        profile.error = displayTransformError;
+        return profile;
+    }
     if (source.sourceColorClass == SourceColorClass::HdrHlg
         || source.sourceColorClass == SourceColorClass::HdrPq
         || source.sourceColorClass == SourceColorClass::LogOrExtended) {
@@ -53,6 +58,21 @@ ExportMediaProfile ExportMediaProfile::derive(
     }
     profile.supported = true;
     return profile;
+}
+
+QString ExportMediaProfile::unsupportedDisplayTransformError(const MediaInfo &source)
+{
+    if (source.rotationDegrees && *source.rotationDegrees != 0) {
+        return QStringLiteral("Export does not yet support videos with rotation metadata.");
+    }
+    if (source.sampleAspectRatio.isValid()
+        && !source.sampleAspectRatio.isEquivalentTo({1, 1})) {
+        return QStringLiteral(
+            "Export does not yet support non-square pixel aspect ratio (SAR %1:%2).")
+            .arg(source.sampleAspectRatio.numerator)
+            .arg(source.sampleAspectRatio.denominator);
+    }
+    return {};
 }
 
 bool ExportMediaProfile::acceptsOutputPixelFormat(const QString &actualPixelFormat) const
