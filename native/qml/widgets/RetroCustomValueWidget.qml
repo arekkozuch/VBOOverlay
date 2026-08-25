@@ -24,9 +24,9 @@ Item {
     }
     readonly property url temperatureIconSource: {
         switch (temperatureIcon) {
-        case "oil": return Qt.resolvedUrl("../assets/temperature-oil.svg");
+        case "oil": return Qt.resolvedUrl("../assets/change-car-oil-svgrepo-com.svg");
         case "transmission": return Qt.resolvedUrl("../assets/temperature-transmission.svg");
-        case "coolant": return Qt.resolvedUrl("../assets/temperature-coolant.svg");
+        case "coolant": return Qt.resolvedUrl("../assets/engine-coolant-svgrepo-com.svg");
         default: return "";
         }
     }

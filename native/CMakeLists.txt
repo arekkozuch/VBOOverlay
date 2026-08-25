@@ -162,9 +162,9 @@ qt_add_qml_module(flappedear_native
         qml/widgets/TelemetryPanel.qml
         qml/widgets/TrackWidget.qml
     RESOURCES
-        qml/assets/temperature-oil.svg
+        qml/assets/change-car-oil-svgrepo-com.svg
         qml/assets/temperature-transmission.svg
-        qml/assets/temperature-coolant.svg
+        qml/assets/engine-coolant-svgrepo-com.svg
 )
 
 set_target_properties(flappedear_native PROPERTIES
