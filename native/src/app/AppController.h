@@ -92,7 +92,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QString activeTemplateId READ activeTemplateId NOTIFY templateUiStateChanged)
 
 public:
-    explicit AppController(QObject *parent = nullptr, QString recoveryPath = {});
+    explicit AppController(QObject *parent = nullptr, QString recoveryPath = {},
+                           ProjectRecoveryStore::Operations recoveryOperations = {});
     ~AppController() override;
 
     [[nodiscard]] QUrl videoSource() const;
@@ -315,6 +316,8 @@ private:
     void scheduleRecoveryWrite();
     void writeRecoverySnapshot();
     bool clearRecovery(const QString &reason);
+    bool discardRecovery(const ProjectRecoverySnapshot &snapshot, const QString &reason);
+    void clearDiscardTombstoneAfterRecoveryCleanup();
     void retireLegacyDocumentSettings();
     void performClearProject();
     bool performOpenProject(const QUrl &url);

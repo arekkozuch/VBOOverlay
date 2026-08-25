@@ -8,11 +8,13 @@ External documents are validated before editor models are populated. Projects an
 
 Saved project files are parsed and structurally validated on the existing project-load worker. Only its generation- and revision-checked canonical result commits on the UI thread.
 
-## Recovery deletion residual
+## Recovery discard and deletion residual
 
 Projects saved by the current application include `documentState.id` and a decimal-string `documentState.savedRevision`. Recovery v2 records that identity plus its snapshot revision and last saved revision, and its embedded project payload must repeat the same identity and saved revision. On startup, a v2 recovery is **valid** only when its document identity matches an available structurally valid authority and its revision is newer; it is **stale** when that authority has already reached or passed its revision; malformed, newer-unknown, or identity-mismatched metadata is **invalid** and is never applied automatically. The identity stays with a document across Save As and portable moves, while unrelated projects never compare revisions as though they were the same document.
 
-After an authoritative project save, deletion of the prior recovery snapshot is best-effort cleanup. A deletion failure is logged as cleanup debt but neither fails Save nor sets `recoveryDegraded` or a user warning. A later startup retries deletion after classifying the retained v2 snapshot as stale. Legacy v1 snapshots have no logical identity, so they remain conservatively recoverable when otherwise valid.
+After an authoritative project save, deletion of the prior recovery snapshot is best-effort cleanup. A deletion failure is logged as cleanup debt but neither fails Save nor sets `recoveryDegraded` or a user warning. A later startup retries deletion after classifying the retained v2 snapshot as stale.
+
+Discarding recovery for Quit, New, Open, or the startup recovery dialog has a stronger durable invariant. Before attempting snapshot deletion, the application atomically writes `<project-recovery.json>.discard` with `discardVersion`, `documentId`, and decimal-string `discardedThroughRevision`, using `QSaveFile` with direct-write fallback disabled. If that write succeeds, the requested destructive action continues even when physical snapshot deletion fails. On startup the tombstone suppresses only a well-formed recovery v2 snapshot with the same `documentId` and `revision <= discardedThroughRevision`; cleanup then retries snapshot deletion and removes the tombstone after success. A newer recovery revision or another document identity remains recoverable. If both tombstone persistence and snapshot deletion fail, discard is cancelled. Tombstone cleanup debt and deferred snapshot cleanup do not set `recoveryDegraded`. Legacy v1 snapshots have no logical identity, so they are never suppressed by a tombstone and remain conservatively recoverable when otherwise valid.
 
 ## Source representation
 

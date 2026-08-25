@@ -15,6 +15,7 @@ namespace FlappedEar {
 namespace {
 constexpr int RecoveryFormatVersion = 2;
 constexpr int LegacyRecoveryFormatVersion = 1;
+constexpr int DiscardTombstoneFormatVersion = 1;
 
 bool unsignedValue(const QJsonValue &value, quint64 *result)
 {
@@ -27,15 +28,20 @@ bool unsignedValue(const QJsonValue &value, quint64 *result)
 }
 }
 
-ProjectRecoveryStore::ProjectRecoveryStore(QString path)
+ProjectRecoveryStore::ProjectRecoveryStore(QString path, Operations operations)
     : m_path(path.isEmpty()
                  ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
                        .filePath(QStringLiteral("project-recovery.json"))
                  : std::move(path))
+    , m_operations(std::move(operations))
 {
 }
 
 QString ProjectRecoveryStore::path() const { return m_path; }
+QString ProjectRecoveryStore::discardTombstonePath() const
+{
+    return m_path + QStringLiteral(".discard");
+}
 bool ProjectRecoveryStore::exists() const { return QFileInfo(m_path).isFile(); }
 
 bool ProjectRecoveryStore::load(ProjectRecoverySnapshot *snapshot, QString *error) const
@@ -127,10 +133,87 @@ bool ProjectRecoveryStore::write(const ProjectRecoverySnapshot &snapshot, QStrin
 
 bool ProjectRecoveryStore::clear(QString *error) const
 {
+    if (m_operations.clearSnapshot) {
+        return m_operations.clearSnapshot(error);
+    }
     if (!exists() || QFile::remove(m_path)) {
         return true;
     }
     if (error) *error = QStringLiteral("could not remove recovery snapshot");
+    return false;
+}
+
+bool ProjectRecoveryStore::loadDiscardTombstone(
+    ProjectRecoveryDiscardTombstone *tombstone, QString *error) const
+{
+    const auto loaded = BoundedJsonLoader::loadFile(
+        discardTombstonePath(), ProjectLimits::recoveryBytes,
+        QStringLiteral("Recovery discard tombstone"));
+    if (!loaded.success() || !loaded.document.isObject()) {
+        if (error) *error = loaded.error;
+        return false;
+    }
+    const QJsonObject root = loaded.document.object();
+    quint64 revision = 0;
+    const QJsonValue versionValue = root.value(QStringLiteral("discardVersion"));
+    const int version = versionValue.toInt(-1);
+    const QString documentId = root.value(QStringLiteral("documentId")).toString();
+    if (!versionValue.isDouble() || versionValue.toDouble() != version
+        || version != DiscardTombstoneFormatVersion
+        || documentId.isEmpty() || documentId.size() > 128
+        || !unsignedValue(root.value(QStringLiteral("discardedThroughRevision")), &revision)) {
+        if (error) *error = QStringLiteral("invalid recovery discard tombstone");
+        return false;
+    }
+    if (tombstone) {
+        tombstone->documentId = documentId;
+        tombstone->discardedThroughRevision = revision;
+    }
+    return true;
+}
+
+bool ProjectRecoveryStore::writeDiscardTombstone(
+    const ProjectRecoveryDiscardTombstone &tombstone, QString *error) const
+{
+    if (m_operations.writeDiscardTombstone) {
+        return m_operations.writeDiscardTombstone(error);
+    }
+    if (tombstone.documentId.isEmpty() || tombstone.documentId.size() > 128) {
+        if (error) *error = QStringLiteral("recovery discard tombstone document identity is malformed");
+        return false;
+    }
+    const QFileInfo info(discardTombstonePath());
+    if (!QDir().mkpath(info.absolutePath())) {
+        if (error) *error = QStringLiteral("could not create recovery discard directory");
+        return false;
+    }
+    const QJsonObject root{
+        {QStringLiteral("discardVersion"), DiscardTombstoneFormatVersion},
+        {QStringLiteral("documentId"), tombstone.documentId},
+        {QStringLiteral("discardedThroughRevision"),
+         QString::number(tombstone.discardedThroughRevision)},
+    };
+    QSaveFile file(discardTombstonePath());
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    const QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    if (file.write(payload) != payload.size() || !file.commit()) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    return true;
+}
+
+bool ProjectRecoveryStore::clearDiscardTombstone(QString *error) const
+{
+    const QString tombstonePath = discardTombstonePath();
+    if (!QFileInfo(tombstonePath).exists() || QFile::remove(tombstonePath)) {
+        return true;
+    }
+    if (error) *error = QStringLiteral("could not remove recovery discard tombstone");
     return false;
 }
 

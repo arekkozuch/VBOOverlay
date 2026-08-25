@@ -110,11 +110,12 @@ RecoveryValidity recoveryValidity(const ProjectRecoverySnapshot &snapshot,
 
 } // namespace
 
-AppController::AppController(QObject *parent, QString recoveryPath)
+AppController::AppController(QObject *parent, QString recoveryPath,
+                             ProjectRecoveryStore::Operations recoveryOperations)
     : QObject(parent)
     , m_settings()
     , m_previewRenderContext(this)
-    , m_recoveryStore(std::move(recoveryPath))
+    , m_recoveryStore(std::move(recoveryPath), std::move(recoveryOperations))
 {
     m_documentId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_sync = {};
@@ -1070,7 +1071,7 @@ void AppController::resolveStartupRecovery(const QString &decision)
         }
         return;
     }
-    if (!clearRecovery(QStringLiteral("startup discard"))) {
+    if (!discardRecovery(snapshot, QStringLiteral("startup discard"))) {
         m_pendingRecovery = snapshot;
         m_recoveryPending = true;
         emit recoveryChanged();
@@ -2298,6 +2299,38 @@ bool AppController::clearRecovery(const QString &reason)
     return true;
 }
 
+void AppController::clearDiscardTombstoneAfterRecoveryCleanup()
+{
+    QString error;
+    if (!m_recoveryStore.clearDiscardTombstone(&error)) {
+        AppLog::error(QStringLiteral("Recovery discard tombstone cleanup failed: %1").arg(error));
+    }
+}
+
+bool AppController::discardRecovery(const ProjectRecoverySnapshot &snapshot, const QString &reason)
+{
+    if (!m_recoveryStore.exists()) return true;
+    if (!snapshot.hasLogicalMetadata) return clearRecovery(reason);
+
+    QString tombstoneError;
+    const ProjectRecoveryDiscardTombstone tombstone{
+        snapshot.documentId, snapshot.revision,
+    };
+    if (m_recoveryStore.writeDiscardTombstone(tombstone, &tombstoneError)) {
+        AppLog::info(QStringLiteral("Recovery discard intent persisted through revision %1")
+                         .arg(snapshot.revision));
+        if (!clearRecovery(reason)) {
+            AppLog::warn(QStringLiteral("Recovery cleanup deferred after durable discard intent"));
+            return true;
+        }
+        clearDiscardTombstoneAfterRecoveryCleanup();
+        return true;
+    }
+
+    AppLog::error(QStringLiteral("Recovery discard intent persistence failed: %1").arg(tombstoneError));
+    return clearRecovery(reason);
+}
+
 void AppController::retireLegacyDocumentSettings()
 {
     m_settings.remove(QStringLiteral("editor/widgets"));
@@ -2314,21 +2347,46 @@ void AppController::restoreStartupState()
 {
     ProjectRecoverySnapshot snapshot;
     QString error;
+    if (!m_recoveryStore.exists()
+        && QFileInfo(m_recoveryStore.discardTombstonePath()).exists()) {
+        clearDiscardTombstoneAfterRecoveryCleanup();
+    }
     if (m_recoveryStore.exists() && m_recoveryStore.load(&snapshot, &error)) {
-        const RecoveryValidity validity = recoveryValidity(
-            snapshot, m_settings.value(QStringLiteral("project/path")).toString());
-        if (validity == RecoveryValidity::Stale) {
-            AppLog::info(QStringLiteral("Stale recovery snapshot ignored"));
-            clearRecovery(QStringLiteral("stale startup recovery"));
-        } else if (validity == RecoveryValidity::Invalid) {
-            AppLog::error(QStringLiteral("Recovery snapshot ignored: document identity does not match authority"));
-        } else {
-            m_pendingRecovery = snapshot;
-            m_recoveryPending = true;
-            m_documentState.reset();
-            AppLog::info(QStringLiteral("Recovery detected"));
-            setStatus(QStringLiteral("Unsaved changes are available for recovery."));
-            return;
+        bool discardedByTombstone = false;
+        if (snapshot.hasLogicalMetadata) {
+            ProjectRecoveryDiscardTombstone tombstone;
+            QString tombstoneError;
+            if (m_recoveryStore.loadDiscardTombstone(&tombstone, &tombstoneError)) {
+                if (tombstone.documentId == snapshot.documentId
+                    && snapshot.revision <= tombstone.discardedThroughRevision) {
+                    AppLog::info(QStringLiteral("Recovery snapshot suppressed by durable discard intent"));
+                    discardedByTombstone = true;
+                    if (clearRecovery(QStringLiteral("startup discarded recovery"))) {
+                        clearDiscardTombstoneAfterRecoveryCleanup();
+                    } else {
+                        AppLog::warn(QStringLiteral("Discarded recovery cleanup remains pending"));
+                    }
+                }
+            } else if (QFileInfo(m_recoveryStore.discardTombstonePath()).exists()) {
+                AppLog::error(QStringLiteral("Recovery discard tombstone ignored: %1").arg(tombstoneError));
+            }
+        }
+        if (!discardedByTombstone) {
+            const RecoveryValidity validity = recoveryValidity(
+                snapshot, m_settings.value(QStringLiteral("project/path")).toString());
+            if (validity == RecoveryValidity::Stale) {
+                AppLog::info(QStringLiteral("Stale recovery snapshot ignored"));
+                clearRecovery(QStringLiteral("stale startup recovery"));
+            } else if (validity == RecoveryValidity::Invalid) {
+                AppLog::error(QStringLiteral("Recovery snapshot ignored: document identity does not match authority"));
+            } else {
+                m_pendingRecovery = snapshot;
+                m_recoveryPending = true;
+                m_documentState.reset();
+                AppLog::info(QStringLiteral("Recovery detected"));
+                setStatus(QStringLiteral("Unsaved changes are available for recovery."));
+                return;
+            }
         }
     }
     if (m_recoveryStore.exists() && !error.isEmpty()) {
@@ -2377,8 +2435,12 @@ void AppController::performPendingDestructiveAction()
     m_pendingOpenProject = QUrl();
     emit destructiveActionChanged();
     m_recoveryTimer.stop();
+    const ProjectRecoverySnapshot snapshot{
+        m_documentState.projectPath(), m_documentId, m_documentState.revision(),
+        m_documentState.lastSavedRevision(), {}, {}, true,
+    };
     if (action != ProjectDocumentState::DestructiveAction::None
-        && !clearRecovery(QStringLiteral("discarded document state"))) {
+        && !discardRecovery(snapshot, QStringLiteral("discarded document state"))) {
         setStatus(QStringLiteral("Could not discard recovery data; action cancelled."));
         return;
     }

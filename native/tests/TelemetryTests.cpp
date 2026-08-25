@@ -176,6 +176,12 @@ private slots:
     void recoversAndDiscardsSavedChanges();
     void recoversAndDiscardsUnsavedDocuments();
     void discardsUnsavedStateForQuitNewAndOpen();
+    void continuesDiscardedQuitWhenRecoveryDeletionFails();
+    void continuesDiscardedNewAndOpenWhenRecoveryDeletionFails();
+    void leavesRecoveryUntouchedWhenDiscardIsCancelled();
+    void preservesNewerAndDifferentRecoveryAfterDiscard();
+    void cancelsDiscardWhenTombstoneAndDeletionFail();
+    void doesNotApplyDiscardTombstonesToLegacyRecovery();
     void preservesRecoveryAcrossFailedSave();
     void doesNotOfferStaleRecoveryAfterSuccessfulSaveCleanupFailure();
     void classifiesVersionedRecoveryAgainstSavedAuthority();
@@ -2888,6 +2894,206 @@ void TelemetryTests::discardsUnsavedStateForQuitNewAndOpen()
         QVERIFY(!controller.dirty());
         QVERIFY(!QFileInfo(recoveryPath).exists());
     }
+}
+
+void TelemetryTests::continuesDiscardedQuitWhenRecoveryDeletionFails()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    ProjectRecoveryStore::Operations operations;
+    operations.clearSnapshot = [](QString *error) {
+        if (error) *error = QStringLiteral("injected recovery deletion failure");
+        return false;
+    };
+
+    {
+        AppController controller(nullptr, recoveryPath, operations);
+        controller.setSyncOffset(8.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        QSignalSpy quitSpy(&controller, &AppController::quitApproved);
+        controller.requestQuit();
+        controller.resolveDestructiveAction(QStringLiteral("discard"));
+
+        QCOMPARE(quitSpy.count(), 1);
+        QVERIFY(!controller.recoveryDegraded());
+        QVERIFY(QFileInfo(recoveryPath).isFile());
+        ProjectRecoveryStore store(recoveryPath);
+        ProjectRecoveryDiscardTombstone tombstone;
+        QString error;
+        QVERIFY2(store.loadDiscardTombstone(&tombstone, &error), qPrintable(error));
+        QVERIFY(!tombstone.documentId.isEmpty());
+        QVERIFY(tombstone.discardedThroughRevision > 0);
+    }
+    {
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(!restarted.recoveryPending());
+    }
+    QVERIFY(!QFileInfo(recoveryPath).exists());
+    QVERIFY(!QFileInfo(recoveryPath + QStringLiteral(".discard")).exists());
+}
+
+void TelemetryTests::continuesDiscardedNewAndOpenWhenRecoveryDeletionFails()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    const QString projectPath = directory.filePath(QStringLiteral("open.fetproject"));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(3.0)).toJson()));
+    ProjectRecoveryStore::Operations operations;
+    operations.clearSnapshot = [](QString *error) {
+        if (error) *error = QStringLiteral("injected recovery deletion failure");
+        return false;
+    };
+
+    {
+        AppController controller(nullptr, recoveryPath, operations);
+        controller.setSyncOffset(8.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        controller.requestNewProject();
+        controller.resolveDestructiveAction(QStringLiteral("discard"));
+        QCOMPARE(controller.syncOffset(), 0.0);
+        QVERIFY(controller.projectPath().isEmpty());
+        QVERIFY(QFileInfo(recoveryPath).isFile());
+    }
+    {
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(!restarted.recoveryPending());
+    }
+
+    {
+        AppController controller(nullptr, recoveryPath, operations);
+        controller.setSyncOffset(9.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
+        controller.resolveDestructiveAction(QStringLiteral("discard"));
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 3.0);
+        QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(projectPath).canonicalFilePath());
+        QVERIFY(QFileInfo(recoveryPath).isFile());
+    }
+    {
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(!restarted.recoveryPending());
+        QTRY_VERIFY(!restarted.projectLoading());
+        QCOMPARE(restarted.projectPath().toLocalFile(), QFileInfo(projectPath).canonicalFilePath());
+    }
+}
+
+void TelemetryTests::leavesRecoveryUntouchedWhenDiscardIsCancelled()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    AppController controller(nullptr, recoveryPath);
+    controller.setSyncOffset(8.0);
+    QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+    QSignalSpy quitSpy(&controller, &AppController::quitApproved);
+    controller.requestQuit();
+    controller.resolveDestructiveAction(QStringLiteral("cancel"));
+
+    QCOMPARE(quitSpy.count(), 0);
+    QVERIFY(QFileInfo(recoveryPath).isFile());
+    QVERIFY(!QFileInfo(recoveryPath + QStringLiteral(".discard")).exists());
+}
+
+void TelemetryTests::preservesNewerAndDifferentRecoveryAfterDiscard()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    ProjectRecoveryStore store(recoveryPath);
+    QString error;
+    QVERIFY2(store.writeDiscardTombstone({QStringLiteral("document-a"), 3}, &error), qPrintable(error));
+    const auto projectFor = [](const QString &id) {
+        QJsonObject project = testProject(8.0);
+        project.insert(QStringLiteral("documentState"), QJsonObject{
+            {QStringLiteral("id"), id},
+            {QStringLiteral("savedRevision"), QStringLiteral("1")},
+        });
+        return project;
+    };
+    QVERIFY2(store.write({{}, QStringLiteral("document-a"), 4, 1,
+                          QStringLiteral("2026-08-25T12:00:00.000Z"),
+                          projectFor(QStringLiteral("document-a")), true}, &error), qPrintable(error));
+    {
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(restarted.recoveryPending());
+    }
+    QVERIFY2(store.write({{}, QStringLiteral("document-b"), 2, 1,
+                          QStringLiteral("2026-08-25T12:00:01.000Z"),
+                          projectFor(QStringLiteral("document-b")), true}, &error), qPrintable(error));
+    {
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(restarted.recoveryPending());
+    }
+}
+
+void TelemetryTests::cancelsDiscardWhenTombstoneAndDeletionFail()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    ProjectRecoveryStore::Operations operations;
+    operations.clearSnapshot = [](QString *error) {
+        if (error) *error = QStringLiteral("injected recovery deletion failure");
+        return false;
+    };
+    operations.writeDiscardTombstone = [](QString *error) {
+        if (error) *error = QStringLiteral("injected tombstone persistence failure");
+        return false;
+    };
+    AppController controller(nullptr, recoveryPath, operations);
+    controller.setSyncOffset(8.0);
+    QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+    QSignalSpy quitSpy(&controller, &AppController::quitApproved);
+    controller.requestQuit();
+    controller.resolveDestructiveAction(QStringLiteral("discard"));
+
+    QCOMPARE(quitSpy.count(), 0);
+    QCOMPARE(controller.statusText(), QStringLiteral("Could not discard recovery data; action cancelled."));
+    QVERIFY(QFileInfo(recoveryPath).isFile());
+    QVERIFY(!QFileInfo(recoveryPath + QStringLiteral(".discard")).exists());
+    QVERIFY(!controller.recoveryDegraded());
+}
+
+void TelemetryTests::doesNotApplyDiscardTombstonesToLegacyRecovery()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    ProjectRecoveryStore store(recoveryPath);
+    QString error;
+    QVERIFY2(store.writeDiscardTombstone({QStringLiteral("document-a"), 99}, &error), qPrintable(error));
+    const QJsonObject legacy{
+        {QStringLiteral("recoveryVersion"), 1},
+        {QStringLiteral("dirty"), true},
+        {QStringLiteral("revision"), QStringLiteral("2")},
+        {QStringLiteral("lastSavedRevision"), QStringLiteral("1")},
+        {QStringLiteral("project"), testProject(8.0)},
+    };
+    QVERIFY(writeBytes(recoveryPath, QJsonDocument(legacy).toJson()));
+
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(restarted.recoveryPending());
 }
 
 void TelemetryTests::preservesRecoveryAcrossFailedSave()
