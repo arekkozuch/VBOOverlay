@@ -26,6 +26,8 @@ Item {
             const maximum = Math.max(minimum + 1, Number(settings.maxValue ?? 8000));
             const steps = Math.max(4, Math.min(16, Math.round((maximum - minimum) / 1000)));
             const progress = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
+            const warningValue = Number(settings.warningValue ?? 7500);
+            const redlineStart = Math.max(0, Math.min(1, (warningValue - minimum) / (maximum - minimum)));
             const startAngle = Math.PI * 0.76;
             const sweep = Math.PI * 1.33;
             const endAngle = startAngle + sweep;
@@ -62,7 +64,7 @@ Item {
             ctx.strokeStyle = warningColor;
             ctx.lineWidth = Math.max(3 * frame.sceneScale, radius * 0.040);
             ctx.beginPath();
-            ctx.arc(cx, cy, radius * 0.875, startAngle + sweep * 0.76, endAngle);
+            ctx.arc(cx, cy, radius * 0.875, startAngle + sweep * redlineStart, endAngle);
             ctx.stroke();
 
             const tickCount = steps * 4;
@@ -70,7 +72,7 @@ Item {
                 const ratio = tick / tickCount;
                 const angle = startAngle + sweep * ratio;
                 const major = tick % 4 === 0;
-                const highRpm = ratio >= 0.76;
+                const highRpm = ratio >= redlineStart;
                 ctx.strokeStyle = highRpm ? warningColor : dialColor;
                 ctx.fillStyle = ctx.strokeStyle;
                 ctx.lineWidth = Math.max(major ? 2 * frame.sceneScale : frame.sceneScale,

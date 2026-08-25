@@ -95,7 +95,7 @@
     },
     "retroTachometer": {
       "showBackground": false, "showBorder": false, "padding": 0, "source": "rpm-obd",
-      "label": "RPM", "minValue": 0, "maxValue": 8000, "dialColor": "#f2f5f7",
+      "label": "RPM", "minValue": 0, "maxValue": 9000, "warningValue": 7500, "dialColor": "#f2f5f7",
       "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#8895a3",
       "valuePlateColor": "#111a22", "panelColor": "#111a22", "panelOpacity": 0.86
     },

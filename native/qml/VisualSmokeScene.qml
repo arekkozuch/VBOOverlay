@@ -114,7 +114,8 @@ Item {
             // magnitude bar intentionally form their own compact right cluster.
             add("retroTachometer", 0.045, 0.58, 0.165, 0.31, {
                 "showBackground": false, "showBorder": false, "padding": 0,
-                "source": "rpm", "label": "RPM", "minValue": 0, "maxValue": 8000,
+                "source": "rpm", "label": "RPM", "minValue": 0, "maxValue": 9000,
+                "warningValue": 7500,
                 "panelColor": "#16232d", "panelOpacity": 0.78, "dialColor": "#f2f5f7",
                 "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#8895a3"
             });
