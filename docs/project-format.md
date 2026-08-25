@@ -10,7 +10,9 @@ Saved project files are parsed and structurally validated on the existing projec
 
 ## Recovery deletion residual
 
-After an authoritative project save, the application attempts to delete its prior recovery snapshot. If the filesystem refuses that deletion, the v1 snapshot format has no saved-document revision marker with which a later launch can prove the retained snapshot is stale. It may therefore still be offered for explicit user review; it is never applied silently. This deletion-failure distinction is intentionally deferred to a dedicated recovery-format/versioning change rather than weakening the current transactional save/recovery contract.
+Projects saved by the current application include `documentState.id` and a decimal-string `documentState.savedRevision`. Recovery v2 records that identity plus its snapshot revision and last saved revision, and its embedded project payload must repeat the same identity and saved revision. On startup, a v2 recovery is **valid** only when its document identity matches an available structurally valid authority and its revision is newer; it is **stale** when that authority has already reached or passed its revision; malformed, newer-unknown, or identity-mismatched metadata is **invalid** and is never applied automatically. The identity stays with a document across Save As and portable moves, while unrelated projects never compare revisions as though they were the same document.
+
+After an authoritative project save, deletion of the prior recovery snapshot is best-effort cleanup. A deletion failure is logged as cleanup debt but neither fails Save nor sets `recoveryDegraded` or a user warning. A later startup retries deletion after classifying the retained v2 snapshot as stale. Legacy v1 snapshots have no logical identity, so they remain conservatively recoverable when otherwise valid.
 
 ## Source representation
 

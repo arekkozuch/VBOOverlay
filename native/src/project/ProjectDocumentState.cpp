@@ -13,11 +13,11 @@ void ProjectDocumentState::markSaved(const QString &projectPath)
     m_lastSavedRevision = m_revision;
 }
 
-void ProjectDocumentState::reset(const QString &projectPath)
+void ProjectDocumentState::reset(const QString &projectPath, const quint64 savedRevision)
 {
     m_projectPath = projectPath;
-    m_revision = 0;
-    m_lastSavedRevision = 0;
+    m_revision = savedRevision;
+    m_lastSavedRevision = savedRevision;
     m_pendingAction = DestructiveAction::None;
 }
 

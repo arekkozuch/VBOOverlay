@@ -7,10 +7,12 @@ namespace FlappedEar {
 
 struct ProjectRecoverySnapshot final {
     QString originalProjectPath;
+    QString documentId;
     quint64 revision = 0;
     quint64 lastSavedRevision = 0;
     QString timestamp;
     QJsonObject project;
+    bool hasLogicalMetadata = false;
 };
 
 class ProjectRecoveryStore final {

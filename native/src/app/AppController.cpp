@@ -26,14 +26,89 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QUuid>
 #include <QtConcurrent>
 #include <QtGlobal>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 namespace FlappedEar {
+
+namespace {
+
+constexpr int RecoveryWriteDelayMs = 250;
+constexpr int RecoveryRetryDelayMs = 5'000;
+
+struct SavedDocumentMetadata final {
+    QString id;
+    quint64 revision = 0;
+};
+
+bool parseSavedDocumentMetadata(const QJsonObject &project, SavedDocumentMetadata *metadata)
+{
+    const QJsonValue stateValue = project.value(QStringLiteral("documentState"));
+    if (!stateValue.isObject()) return false;
+    const QJsonObject state = stateValue.toObject();
+    const QString id = state.value(QStringLiteral("id")).toString();
+    if (id.isEmpty() || id.size() > 128 || !state.value(QStringLiteral("savedRevision")).isString()) {
+        return false;
+    }
+    bool revisionOk = false;
+    const quint64 revision = state.value(QStringLiteral("savedRevision")).toString().toULongLong(&revisionOk);
+    if (!revisionOk) return false;
+    if (metadata) *metadata = {id, revision};
+    return true;
+}
+
+std::optional<SavedDocumentMetadata> loadSavedDocumentMetadata(const QString &path)
+{
+    if (path.isEmpty() || !QFileInfo(path).isFile()) return std::nullopt;
+    const auto loaded = BoundedJsonLoader::loadFile(
+        path, ProjectLimits::projectBytes, QStringLiteral("Saved project"));
+    SavedDocumentMetadata metadata;
+    QString validationError;
+    if (!loaded.success() || !loaded.document.isObject()
+        || !ProjectLimits::validateProject(loaded.document.object(), &validationError)
+        || !parseSavedDocumentMetadata(loaded.document.object(), &metadata)) {
+        return std::nullopt;
+    }
+    return metadata;
+}
+
+enum class RecoveryValidity {
+    Valid,
+    Stale,
+    Invalid,
+};
+
+RecoveryValidity recoveryValidity(const ProjectRecoverySnapshot &snapshot,
+                                  const QString &rememberedProjectPath)
+{
+    if (!snapshot.hasLogicalMetadata) return RecoveryValidity::Valid;
+    if (snapshot.revision <= snapshot.lastSavedRevision) return RecoveryValidity::Stale;
+
+    QStringList authorityPaths;
+    if (!rememberedProjectPath.isEmpty()) authorityPaths.append(rememberedProjectPath);
+    if (!snapshot.originalProjectPath.isEmpty()
+        && !authorityPaths.contains(snapshot.originalProjectPath)) {
+        authorityPaths.append(snapshot.originalProjectPath);
+    }
+    bool foundAuthority = false;
+    for (const QString &path : authorityPaths) {
+        const auto metadata = loadSavedDocumentMetadata(path);
+        if (!metadata) continue;
+        foundAuthority = true;
+        if (metadata->id != snapshot.documentId) continue;
+        return snapshot.revision <= metadata->revision
+            ? RecoveryValidity::Stale : RecoveryValidity::Valid;
+    }
+    return foundAuthority ? RecoveryValidity::Invalid : RecoveryValidity::Valid;
+}
+
+} // namespace
 
 AppController::AppController(QObject *parent, QString recoveryPath)
     : QObject(parent)
@@ -41,11 +116,12 @@ AppController::AppController(QObject *parent, QString recoveryPath)
     , m_previewRenderContext(this)
     , m_recoveryStore(std::move(recoveryPath))
 {
+    m_documentId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_sync = {};
     m_previewRenderContext.setSyncTransform(m_sync);
     m_widgetModel.resetDefaults();
     m_recoveryTimer.setSingleShot(true);
-    m_recoveryTimer.setInterval(250);
+    m_recoveryTimer.setInterval(RecoveryWriteDelayMs);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &AppController::writeRecoverySnapshot);
     connect(&m_widgetModel, &WidgetModel::revisionChanged, this, [this] {
         markPersistentChange();
@@ -814,6 +890,7 @@ void AppController::performClearProject()
     emit syncCandidateChanged();
     emit sourceLoadStateChanged();
     emit liveValuesChanged();
+    m_documentId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_documentState.reset();
     m_pendingOpenProject = QUrl();
     m_settings.remove("project/path");
@@ -986,7 +1063,7 @@ void AppController::resolveStartupRecovery(const QString &decision)
     emit recoveryChanged();
     if (decision == QStringLiteral("recover")) {
         if (!beginProjectLoad(snapshot.originalProjectPath, snapshot.project, true,
-                              snapshot.revision, snapshot.lastSavedRevision)) {
+                              snapshot.revision, snapshot.lastSavedRevision, snapshot.documentId)) {
             m_pendingRecovery = snapshot;
             m_recoveryPending = true;
             emit recoveryChanged();
@@ -1059,7 +1136,8 @@ bool AppController::performOpenProject(const QUrl &url)
 
 bool AppController::beginProjectLoad(
     QString projectPath, const QJsonObject &project, const bool recovered,
-    const quint64 recoveredRevision, const quint64 recoveredLastSavedRevision)
+    const quint64 recoveredRevision, const quint64 recoveredLastSavedRevision,
+    QString recoveredDocumentId)
 {
     QString validationError;
     if (!ProjectLimits::validateProject(project, &validationError)) {
@@ -1104,6 +1182,7 @@ bool AppController::beginProjectLoad(
     result.recovered = recovered;
     result.recoveredRevision = recoveredRevision;
     result.recoveredLastSavedRevision = recoveredLastSavedRevision;
+    result.recoveredDocumentId = std::move(recoveredDocumentId);
     result.videoReference = ProjectSourceReferenceCodec::fromProject(
         project, QStringLiteral("video"), QStringLiteral("videoPath"));
     result.vboReference = ProjectSourceReferenceCodec::fromProject(
@@ -1188,10 +1267,20 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
         m_settings.setValue("project/path", result.projectPath);
     }
     if (result.recovered) {
+        m_documentId = result.recoveredDocumentId.isEmpty()
+            ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+            : result.recoveredDocumentId;
         m_documentState.restoreUnsaved(
             result.projectPath, result.recoveredRevision, result.recoveredLastSavedRevision);
     } else {
-        m_documentState.reset(result.projectPath);
+        SavedDocumentMetadata metadata;
+        if (parseSavedDocumentMetadata(result.project, &metadata)) {
+            m_documentId = metadata.id;
+            m_documentState.reset(result.projectPath, metadata.revision);
+        } else {
+            m_documentId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            m_documentState.reset(result.projectPath);
+        }
     }
     emit videoSourceChanged();
     emit telemetryChanged();
@@ -1213,7 +1302,8 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
     }
 }
 
-QJsonObject AppController::currentProjectObject(const QString &projectPath) const
+QJsonObject AppController::currentProjectObject(
+    const QString &projectPath, const std::optional<quint64> savedRevision) const
 {
     QJsonObject project = m_projectTemplate;
     project.insert("version", 2);
@@ -1249,6 +1339,11 @@ QJsonObject AppController::currentProjectObject(const QString &projectPath) cons
     analysis.insert("channels", QJsonArray::fromStringList(m_analysisChannels));
     analysis.remove(QStringLiteral("visible"));
     project.insert("analysis", analysis);
+    QJsonObject documentState = project.value(QStringLiteral("documentState")).toObject();
+    documentState.insert(QStringLiteral("id"), m_documentId);
+    documentState.insert(QStringLiteral("savedRevision"), QString::number(
+        savedRevision.value_or(m_documentState.lastSavedRevision())));
+    project.insert(QStringLiteral("documentState"), documentState);
     if (!project.contains("mapSettings")) {
         project.insert("mapSettings", QJsonObject{{"providerId", "none"}});
     }
@@ -1265,7 +1360,7 @@ bool AppController::saveProject(const QUrl &url)
         path.append(".fetproject");
     }
     AppLog::info(QStringLiteral("Project save requested: %1").arg(path));
-    const QJsonObject project = currentProjectObject(path);
+    const QJsonObject project = currentProjectObject(path, m_documentState.revision());
     const QByteArray payload = QJsonDocument(project).toJson(QJsonDocument::Indented);
     const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
     if (!writeResult.success) {
@@ -2153,7 +2248,7 @@ void AppController::scheduleRecoveryWrite()
     if (!m_recoveryPending && m_documentState.dirty()) {
         // A normal edit retries immediately; a failed write below schedules a
         // bounded backoff so a broken filesystem cannot cause a busy loop.
-        m_recoveryTimer.start();
+        m_recoveryTimer.start(RecoveryWriteDelayMs);
     }
 }
 
@@ -2164,10 +2259,12 @@ void AppController::writeRecoverySnapshot()
     }
     const ProjectRecoverySnapshot snapshot{
         m_documentState.projectPath(),
+        m_documentId,
         m_documentState.revision(),
         m_documentState.lastSavedRevision(),
         QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs),
         currentProjectObject(),
+        true,
     };
     QString error;
     if (!m_recoveryStore.write(snapshot, &error)) {
@@ -2176,7 +2273,7 @@ void AppController::writeRecoverySnapshot()
         m_recoveryDegraded = true;
         m_recoveryError = error;
         if (changed) emit recoveryChanged();
-        m_recoveryTimer.start(5'000);
+        m_recoveryTimer.start(RecoveryRetryDelayMs);
         return;
     }
     if (m_recoveryDegraded) {
@@ -2218,14 +2315,23 @@ void AppController::restoreStartupState()
     ProjectRecoverySnapshot snapshot;
     QString error;
     if (m_recoveryStore.exists() && m_recoveryStore.load(&snapshot, &error)) {
-        m_pendingRecovery = snapshot;
-        m_recoveryPending = true;
-        m_documentState.reset();
-        AppLog::info(QStringLiteral("Recovery detected"));
-        setStatus(QStringLiteral("Unsaved changes are available for recovery."));
-        return;
+        const RecoveryValidity validity = recoveryValidity(
+            snapshot, m_settings.value(QStringLiteral("project/path")).toString());
+        if (validity == RecoveryValidity::Stale) {
+            AppLog::info(QStringLiteral("Stale recovery snapshot ignored"));
+            clearRecovery(QStringLiteral("stale startup recovery"));
+        } else if (validity == RecoveryValidity::Invalid) {
+            AppLog::error(QStringLiteral("Recovery snapshot ignored: document identity does not match authority"));
+        } else {
+            m_pendingRecovery = snapshot;
+            m_recoveryPending = true;
+            m_documentState.reset();
+            AppLog::info(QStringLiteral("Recovery detected"));
+            setStatus(QStringLiteral("Unsaved changes are available for recovery."));
+            return;
+        }
     }
-    if (m_recoveryStore.exists()) {
+    if (m_recoveryStore.exists() && !error.isEmpty()) {
         AppLog::error(QStringLiteral("Recovery snapshot ignored: %1").arg(error));
     }
     const QString projectPath = m_settings.value(QStringLiteral("project/path")).toString();

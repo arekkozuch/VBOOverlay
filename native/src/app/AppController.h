@@ -27,6 +27,7 @@
 #include <QVariant>
 #include <atomic>
 #include <memory>
+#include <optional>
 
 namespace FlappedEar {
 
@@ -285,6 +286,7 @@ private:
         bool recovered = false;
         quint64 recoveredRevision = 0;
         quint64 recoveredLastSavedRevision = 0;
+        QString recoveredDocumentId;
     };
 
     [[nodiscard]] QVariant semanticValue(const QString &alias) const;
@@ -303,10 +305,12 @@ private:
     [[nodiscard]] static QString normalizedSourcePath(const QString &path);
     [[nodiscard]] static QVariantList trackPointsFor(const TrackGeometry &geometry);
     void markPersistentChange();
-    [[nodiscard]] QJsonObject currentProjectObject(const QString &projectPath = {}) const;
+    [[nodiscard]] QJsonObject currentProjectObject(const QString &projectPath = {},
+                                                    std::optional<quint64> savedRevision = std::nullopt) const;
     bool beginProjectLoad(QString projectPath, const QJsonObject &project,
                           bool recovered = false, quint64 recoveredRevision = 0,
-                          quint64 recoveredLastSavedRevision = 0);
+                          quint64 recoveredLastSavedRevision = 0,
+                          QString recoveredDocumentId = {});
     void restoreStartupState();
     void scheduleRecoveryWrite();
     void writeRecoverySnapshot();
@@ -340,6 +344,7 @@ private:
     ProjectWriter m_projectWriter;
     ProjectDocumentState m_documentState;
     ProjectRecoveryStore m_recoveryStore;
+    QString m_documentId;
     ProjectRecoverySnapshot m_pendingRecovery;
     QTimer m_recoveryTimer;
     bool m_recoveryPending = false;

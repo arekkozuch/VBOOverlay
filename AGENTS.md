@@ -38,7 +38,9 @@
   source must not be silently accepted solely because a pathname matches.
 - The saved `.fetproject` is the authoritative clean document state. Recovery data is separate,
   represents unsaved changes, and must never be silently marked clean. Discard removes unsaved
-  recovery state rather than persisting it as the next clean session.
+  recovery state rather than persisting it as the next clean session. A recovery file is offered only
+  when its logical document state is newer than the authoritative saved state; failed deletion of a
+  stale snapshot after Save is cleanup debt, not degraded data protection or a user warning.
 - Source and project async results must be guarded by generation and source identity. Stale results
   must never mutate committed state.
 - Long-running source parsing, media probing, and synchronization operations must be cooperatively

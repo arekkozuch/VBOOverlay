@@ -177,6 +177,13 @@ private slots:
     void recoversAndDiscardsUnsavedDocuments();
     void discardsUnsavedStateForQuitNewAndOpen();
     void preservesRecoveryAcrossFailedSave();
+    void doesNotOfferStaleRecoveryAfterSuccessfulSaveCleanupFailure();
+    void classifiesVersionedRecoveryAgainstSavedAuthority();
+    void keepsSaveAsRecoveryIdentityWithNewAndExistingProjects();
+    void rejectsInvalidVersionedRecoveryMetadata();
+    void rejectsMismatchedVersionedRecoveryPayloadIdentity();
+    void doesNotTrustMalformedProjectAsRecoveryAuthority();
+    void recoversLegacyRecoverySnapshotConservatively();
     void preservesEditsAfterDocumentFirstProjectOpen();
     void syncsOptionalRealRecording();
 };
@@ -592,9 +599,14 @@ void TelemetryTests::writesRecoverySnapshotsAtomically()
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("recovery.json"));
     const ProjectRecoveryStore store(path);
+    QJsonObject firstProject = testProject(1.0);
+    firstProject.insert(QStringLiteral("documentState"), QJsonObject{
+        {QStringLiteral("id"), QStringLiteral("document-identity")},
+        {QStringLiteral("savedRevision"), QStringLiteral("1")},
+    });
     const ProjectRecoverySnapshot first{
-        QStringLiteral("saved.fetproject"), 2, 1,
-        QStringLiteral("2026-08-22T12:00:00.000Z"), testProject(1.0)};
+        QStringLiteral("saved.fetproject"), QStringLiteral("document-identity"), 2, 1,
+        QStringLiteral("2026-08-22T12:00:00.000Z"), firstProject, true};
     QString error;
     QVERIFY2(store.write(first, &error), qPrintable(error));
     ProjectRecoverySnapshot loaded;
@@ -2905,6 +2917,274 @@ void TelemetryTests::preservesRecoveryAcrossFailedSave()
     QVERIFY(controller.saveCurrentProject());
     QVERIFY(!controller.dirty());
     QVERIFY(!QFileInfo(recoveryPath).exists());
+}
+
+void TelemetryTests::doesNotOfferStaleRecoveryAfterSuccessfulSaveCleanupFailure()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryDirectory = directory.filePath(QStringLiteral("recovery-state"));
+    const QString recoveryPath = QDir(recoveryDirectory).filePath(QStringLiteral("recovery.json"));
+    QVERIFY(QDir().mkpath(recoveryDirectory));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(1.0)).toJson()));
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
+        QTRY_VERIFY(!controller.projectLoading());
+        controller.setSyncOffset(8.0);
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+
+        QVERIFY(QFile::setPermissions(recoveryDirectory, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        QVERIFY(controller.saveCurrentProject());
+        QVERIFY(!controller.dirty());
+        QVERIFY(!controller.recoveryDegraded());
+        QVERIFY(QFileInfo(recoveryPath).isFile());
+        QVERIFY(QFile::setPermissions(recoveryDirectory,
+                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    }
+
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(!restarted.recoveryPending());
+    QTRY_VERIFY(!restarted.projectLoading());
+    QCOMPARE(restarted.syncOffset(), 8.0);
+    QVERIFY(!restarted.dirty());
+    QVERIFY(!QFileInfo(recoveryPath).exists()); // Startup retry completed stale cleanup.
+}
+
+void TelemetryTests::classifiesVersionedRecoveryAgainstSavedAuthority()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        controller.setSyncOffset(1.0);
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectPath)));
+    }
+    const QJsonObject saved = QJsonDocument::fromJson(readBytes(projectPath)).object();
+    const QJsonObject state = saved.value(QStringLiteral("documentState")).toObject();
+    const QString documentId = state.value(QStringLiteral("id")).toString();
+    QVERIFY(!documentId.isEmpty());
+    ProjectRecoveryStore store(recoveryPath);
+    QString error;
+
+    for (const quint64 revision : {quint64{1}, quint64{0}}) {
+        const ProjectRecoverySnapshot stale{
+            projectPath, documentId, revision, 1,
+            QStringLiteral("2026-08-25T12:00:00.000Z"), saved, true};
+        QVERIFY2(store.write(stale, &error), qPrintable(error));
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(!restarted.recoveryPending());
+        QTRY_VERIFY(!restarted.projectLoading());
+        QCOMPARE(restarted.syncOffset(), 1.0);
+    }
+
+    QJsonObject newer = saved;
+    QJsonObject sync = newer.value(QStringLiteral("sync")).toObject();
+    sync.insert(QStringLiteral("offset"), 7.0);
+    newer.insert(QStringLiteral("sync"), sync);
+    const ProjectRecoverySnapshot valid{
+        projectPath, documentId, 2, 1,
+        QStringLiteral("2026-08-25T12:00:01.000Z"), newer, true};
+    QVERIFY2(store.write(valid, &error), qPrintable(error));
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(restarted.recoveryPending());
+    restarted.resolveStartupRecovery(QStringLiteral("recover"));
+    QTRY_VERIFY(!restarted.projectLoading());
+    QVERIFY(restarted.dirty());
+    QVERIFY(restarted.saveCurrentProject());
+    const QJsonObject recoveredSaved = QJsonDocument::fromJson(readBytes(projectPath)).object();
+    QVERIFY(!recoveredSaved.value(QStringLiteral("documentState")).toObject()
+                 .value(QStringLiteral("id")).toString().isEmpty());
+}
+
+void TelemetryTests::keepsSaveAsRecoveryIdentityWithNewAndExistingProjects()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectA = directory.filePath(QStringLiteral("a.fetproject"));
+    const QString projectB = directory.filePath(QStringLiteral("b.fetproject"));
+    const QString recoveryDirectory = directory.filePath(QStringLiteral("recovery-state"));
+    const QString recoveryPath = QDir(recoveryDirectory).filePath(QStringLiteral("recovery.json"));
+    QVERIFY(QDir().mkpath(recoveryDirectory));
+    QVERIFY(writeBytes(projectA, QJsonDocument(testProject(1.0)).toJson()));
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        controller.setSyncOffset(2.0); // New document -> Save As.
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        QVERIFY(QFile::setPermissions(recoveryDirectory, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectB)));
+        QVERIFY(QFileInfo(recoveryPath).isFile());
+        QVERIFY(QFile::setPermissions(recoveryDirectory,
+                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    }
+    {
+        AppController restarted(nullptr, recoveryPath);
+        QVERIFY(!restarted.recoveryPending());
+        QTRY_VERIFY(!restarted.projectLoading());
+        QCOMPARE(restarted.projectPath().toLocalFile(), QFileInfo(projectB).canonicalFilePath());
+    }
+
+    {
+        AppController controller(nullptr, recoveryPath);
+        controller.requestOpenProject(QUrl::fromLocalFile(projectA));
+        QTRY_VERIFY(!controller.projectLoading());
+        controller.setSyncOffset(3.0); // Existing A -> Save As B.
+        QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
+        QVERIFY(QFile::setPermissions(recoveryDirectory, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectB)));
+        QVERIFY(QFile::setPermissions(recoveryDirectory,
+                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    }
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(!restarted.recoveryPending());
+    QTRY_VERIFY(!restarted.projectLoading());
+    QCOMPARE(restarted.projectPath().toLocalFile(), QFileInfo(projectB).canonicalFilePath());
+}
+
+void TelemetryTests::rejectsInvalidVersionedRecoveryMetadata()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(1.0)).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectPath);
+    settings.sync();
+    QJsonObject invalid{
+        {QStringLiteral("recoveryVersion"), 2},
+        {QStringLiteral("dirty"), true},
+        {QStringLiteral("revision"), QStringLiteral("not-a-revision")},
+        {QStringLiteral("lastSavedRevision"), QStringLiteral("0")},
+        {QStringLiteral("documentId"), QStringLiteral("identity")},
+        {QStringLiteral("project"), testProject(9.0)},
+    };
+    QVERIFY(writeBytes(recoveryPath, QJsonDocument(invalid).toJson()));
+
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(!restarted.recoveryPending());
+    QTRY_VERIFY(!restarted.projectLoading());
+    QCOMPARE(restarted.syncOffset(), 1.0);
+}
+
+void TelemetryTests::rejectsMismatchedVersionedRecoveryPayloadIdentity()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QJsonObject authority = testProject(1.0);
+    authority.insert(QStringLiteral("documentState"), QJsonObject{
+        {QStringLiteral("id"), QStringLiteral("document-a")},
+        {QStringLiteral("savedRevision"), QStringLiteral("1")},
+    });
+    QVERIFY(writeBytes(projectPath, QJsonDocument(authority).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectPath);
+    settings.sync();
+    QJsonObject mixedPayload = testProject(9.0);
+    mixedPayload.insert(QStringLiteral("documentState"), QJsonObject{
+        {QStringLiteral("id"), QStringLiteral("document-b")},
+        {QStringLiteral("savedRevision"), QStringLiteral("1")},
+    });
+    ProjectRecoveryStore store(recoveryPath);
+    QString error;
+    const ProjectRecoverySnapshot mixed{
+        projectPath, QStringLiteral("document-a"), 2, 1,
+        QStringLiteral("2026-08-25T12:00:00.000Z"), mixedPayload, true};
+    QVERIFY2(store.write(mixed, &error), qPrintable(error));
+
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(!restarted.recoveryPending());
+    QTRY_VERIFY(!restarted.projectLoading());
+    QCOMPARE(restarted.syncOffset(), 1.0);
+}
+
+void TelemetryTests::doesNotTrustMalformedProjectAsRecoveryAuthority()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    const QJsonObject malformedAuthority{
+        {QStringLiteral("documentState"), QJsonObject{
+            {QStringLiteral("id"), QStringLiteral("document-a")},
+            {QStringLiteral("savedRevision"), QStringLiteral("2")},
+        }},
+    };
+    QVERIFY(writeBytes(projectPath, QJsonDocument(malformedAuthority).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectPath);
+    settings.sync();
+    QJsonObject recoveryProject = testProject(9.0);
+    recoveryProject.insert(QStringLiteral("documentState"), QJsonObject{
+        {QStringLiteral("id"), QStringLiteral("document-a")},
+        {QStringLiteral("savedRevision"), QStringLiteral("1")},
+    });
+    ProjectRecoveryStore store(recoveryPath);
+    QString error;
+    const ProjectRecoverySnapshot recovery{
+        projectPath, QStringLiteral("document-a"), 2, 1,
+        QStringLiteral("2026-08-25T12:00:00.000Z"), recoveryProject, true};
+    QVERIFY2(store.write(recovery, &error), qPrintable(error));
+
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(restarted.recoveryPending());
+}
+
+void TelemetryTests::recoversLegacyRecoverySnapshotConservatively()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const QString projectPath = directory.filePath(QStringLiteral("saved.fetproject"));
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(1.0)).toJson()));
+    settings.setValue(QStringLiteral("project/path"), projectPath);
+    settings.sync();
+    QJsonObject recovered = testProject(9.0);
+    const QJsonObject legacy{
+        {QStringLiteral("recoveryVersion"), 1},
+        {QStringLiteral("dirty"), true},
+        {QStringLiteral("originalProjectPath"), projectPath},
+        {QStringLiteral("revision"), QStringLiteral("2")},
+        {QStringLiteral("lastSavedRevision"), QStringLiteral("1")},
+        {QStringLiteral("project"), recovered},
+    };
+    QVERIFY(writeBytes(recoveryPath, QJsonDocument(legacy).toJson()));
+
+    AppController restarted(nullptr, recoveryPath);
+    QVERIFY(restarted.recoveryPending());
+    restarted.resolveStartupRecovery(QStringLiteral("recover"));
+    QTRY_VERIFY(!restarted.projectLoading());
+    QVERIFY(restarted.dirty());
+    QVERIFY(restarted.saveCurrentProject());
+    const QJsonObject saved = QJsonDocument::fromJson(readBytes(projectPath)).object();
+    QVERIFY(!saved.value(QStringLiteral("documentState")).toObject()
+                 .value(QStringLiteral("id")).toString().isEmpty());
 }
 
 void TelemetryTests::preservesEditsAfterDocumentFirstProjectOpen()
