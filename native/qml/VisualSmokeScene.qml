@@ -109,42 +109,45 @@ Item {
                     "widgetCues": [], "widgetGroupId": ""
                 });
             };
-            add("retroTachometer", 0.025, 0.17, 0.18, 0.32, {
+            // Keep the primary modules as one lower-third band rather than
+            // distributing them across the whole driving view. The radar and
+            // magnitude bar intentionally form their own compact right cluster.
+            add("retroTachometer", 0.045, 0.58, 0.165, 0.31, {
                 "showBackground": false, "showBorder": false, "padding": 0,
                 "source": "rpm", "label": "RPM", "minValue": 0, "maxValue": 8000,
                 "panelColor": "#16232d", "panelOpacity": 0.78, "dialColor": "#f2f5f7",
                 "needleColor": "#e14b4b", "warningColor": "#e14b4b", "rimColor": "#8895a3"
             });
-            add("speed", 0.21, 0.26, 0.09, 0.15, Object.assign({}, common, {
+            add("speed", 0.215, 0.655, 0.085, 0.15, Object.assign({}, common, {
                 "source": "speed", "label": "Speed", "unit": "km/h", "decimals": 0
             }));
-            add("pedals", 0.31, 0.26, 0.16, 0.135, Object.assign({}, common, {
+            add("pedals", 0.31, 0.6625, 0.15, 0.135, Object.assign({}, common, {
                 "acceleratorSource": "throttle", "brakeSource": "brake",
                 "acceleratorLabel": "Throttle", "brakeLabel": "Brake",
                 "acceleratorColor": "#55d76a", "brakeColor": "#e14b4b", "showValues": true
             }));
-            add("retroCustomValue", 0.48, 0.26, 0.18, 0.045, Object.assign({}, common, {
+            add("retroCustomValue", 0.47, 0.6625, 0.17, 0.045, Object.assign({}, common, {
                 "source": "oil", "label": "OIL", "unit": "°C", "decimals": 0,
                 "icon": "◒", "stackPosition": "top"
             }));
-            add("retroCustomValue", 0.48, 0.305, 0.18, 0.045, Object.assign({}, common, {
+            add("retroCustomValue", 0.47, 0.7075, 0.17, 0.045, Object.assign({}, common, {
                 "source": "atf", "label": "ATF", "unit": "°C", "decimals": 0,
                 "icon": "⚙", "stackPosition": "middle"
             }));
-            add("retroCustomValue", 0.48, 0.35, 0.18, 0.045, Object.assign({}, common, {
+            add("retroCustomValue", 0.47, 0.7525, 0.17, 0.045, Object.assign({}, common, {
                 "source": "coolant", "label": "COOLANT", "unit": "°C", "decimals": 0,
                 "icon": "♨", "stackPosition": "bottom"
             }));
-            add("heartRate", 0.675, 0.26, 0.095, 0.15, Object.assign({}, common, {
+            add("heartRate", 0.65, 0.655, 0.09, 0.15, Object.assign({}, common, {
                 "source": "heartRate", "label": "HR", "unit": "bpm", "accentColor": "#e14b4b"
             }));
-            add("f1GForceRadar", 0.815, 0.105, 0.145, 0.265, {
+            add("f1GForceRadar", 0.755, 0.515, 0.13, 0.235, {
                 "showBackground": false, "showBorder": false, "padding": 0,
                 "lateralSource": "lateralG", "longitudinalSource": "longitudinalG",
                 "maxG": 1.5, "ringStepG": 0.25, "radarBackgroundColor": "#16232d",
                 "backgroundOpacity": 0.78, "dotColor": "#f5a623", "gridColor": "#96a8b8"
             });
-            add("gForceMagnitudeBar", 0.80, 0.385, 0.17, 0.105, Object.assign({}, common, {
+            add("gForceMagnitudeBar", 0.745, 0.7625, 0.15, 0.09, Object.assign({}, common, {
                 "lateralSource": "lateralG", "longitudinalSource": "longitudinalG",
                 "maxG": 1.5, "labelText": "G-Force", "decimals": 2,
                 "barColor": "#f5a623", "barBackgroundColor": "#2b3a46"

@@ -46,8 +46,8 @@ Item {
             ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalAlpha = 1;
-            ctx.lineWidth = Math.max(frame.sceneScale, radius * 0.025);
-            ctx.strokeStyle = settings.rimColor || "#8895a3";
+            ctx.lineWidth = Math.max(1.5 * frame.sceneScale, radius * 0.038);
+            ctx.strokeStyle = settings.rimColor || "#a6b3bf";
             ctx.beginPath();
             ctx.arc(cx, cy, radius * 1.30, 0, Math.PI * 2);
             ctx.stroke();
@@ -59,7 +59,8 @@ Item {
                 ? frame.configuredFontSize() * frame.sceneScale
                 : Math.max(9 * frame.sceneScale, radius * 0.18)) + "px " + frame.family;
             for (const ring of [0.92, 1.0]) {
-                ctx.lineWidth = Math.max(2 * frame.sceneScale, radius * 0.035);
+                ctx.lineWidth = Math.max(2 * frame.sceneScale,
+                                         radius * (ring === 1.0 ? 0.045 : 0.030));
                 ctx.beginPath();
                 ctx.arc(cx, cy, radius * ring, Math.PI * 0.5, Math.PI * 2);
                 ctx.stroke();
@@ -75,10 +76,10 @@ Item {
                 const highRpm = step / steps >= 0.78;
                 ctx.strokeStyle = highRpm ? (settings.warningColor || "#e14b4b") : (settings.dialColor || "#f2f5f7");
                 ctx.fillStyle = ctx.strokeStyle;
-                ctx.lineWidth = Math.max(frame.sceneScale, radius * 0.025);
+                ctx.lineWidth = Math.max(1.5 * frame.sceneScale, radius * 0.038);
                 ctx.beginPath();
-                ctx.moveTo(cx + Math.cos(angle) * radius * 1.03, cy + Math.sin(angle) * radius * 1.03);
-                ctx.lineTo(cx + Math.cos(angle) * radius * 1.14, cy + Math.sin(angle) * radius * 1.14);
+                ctx.moveTo(cx + Math.cos(angle) * radius * 1.01, cy + Math.sin(angle) * radius * 1.01);
+                ctx.lineTo(cx + Math.cos(angle) * radius * 1.17, cy + Math.sin(angle) * radius * 1.17);
                 ctx.stroke();
                 ctx.fillText(String(Math.round((minimum + (maximum - minimum) * step / steps) / 1000)), cx + Math.cos(angle) * radius * 1.35, cy + Math.sin(angle) * radius * 1.35);
             }
@@ -101,8 +102,8 @@ Item {
                 ctx.arc(cx, cy, Math.max(5 * frame.sceneScale, radius * 0.12), 0, Math.PI * 2);
                 ctx.fill();
             }
-            const plateWidth = radius * 1.35;
-            const plateHeight = Math.max(22 * frame.sceneScale, radius * 0.42);
+            const plateWidth = radius * 1.45;
+            const plateHeight = Math.max(24 * frame.sceneScale, radius * 0.48);
             const plateX = cx - plateWidth / 2;
             const plateY = cy + radius * 0.52;
             ctx.globalAlpha = Number(settings.backgroundOpacity ?? 0.90);
@@ -110,12 +111,12 @@ Item {
             ctx.fillStyle = settings.valuePlateColor || "#111a22";
             ctx.fill();
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = settings.rimColor || "#8895a3";
-            ctx.lineWidth = Math.max(1, frame.sceneScale * 0.75);
+            ctx.strokeStyle = settings.rimColor || "#a6b3bf";
+            ctx.lineWidth = Math.max(1.2, frame.sceneScale);
             roundedPath(ctx, plateX, plateY, plateWidth, plateHeight, Math.max(3 * frame.sceneScale, plateHeight * 0.18));
             ctx.stroke();
             ctx.fillStyle = settings.dialColor || "#f2f5f7";
-            ctx.font = "700 " + Math.max(14 * frame.sceneScale, plateHeight * 0.63) + "px " + frame.family;
+            ctx.font = "700 " + Math.max(15 * frame.sceneScale, plateHeight * 0.66) + "px " + frame.family;
             ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.54);
         }
     }
