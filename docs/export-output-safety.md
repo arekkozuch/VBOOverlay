@@ -63,3 +63,6 @@ The separate per-export diagnostic log is stored beneath the application-data `e
 On normal success, cancellation, or failure the controller removes those owned artifacts and the manifest. Worker shutdown explicitly defers manifest-owned removal to that controller authority instead of reporting a false deletion failure. Cleanup is idempotent: an absent artifact or already-removed manifest is success, while a path that still exists and cannot be removed is a real failure and leaves the manifest for retry. At application startup the janitor reads only FlappedEar manifest files, rejects malformed records, skips a record whose PID is still active, and removes only paths proven by the valid manifest. Names such as `*.mkv` or `*.part.mp4` alone never authorize deletion.
 
 PID reuse can conservatively cause an old manifest to be retained when an unrelated process has reused its recorded PID. That may leave recoverable temporary files behind, but it never broadens deletion authority.
+# External input bounds
+
+Ownership manifests are external JSON inputs even though the application creates them. Reads are limited to 64 KiB and must prove exact transaction ownership before cleanup. An oversized or malformed manifest is skipped rather than being used to authorize deletion.

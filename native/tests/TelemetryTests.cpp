@@ -1,6 +1,7 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "app/AppController.h"
 #include "export/EncoderDetector.h"
+#include "export/BoundedProcessOutput.h"
 #include "export/ExportEngine.h"
 #include "export/ExportFormat.h"
 #include "export/ExportMediaProfile.h"
@@ -27,6 +28,8 @@
 #include "project/ProjectDocumentState.h"
 #include "project/ProjectRecoveryStore.h"
 #include "project/ProjectSourceReference.h"
+#include "project/BoundedJsonLoader.h"
+#include "project/ProjectLimits.h"
 
 #include <QFile>
 #include <QDateTime>
@@ -138,6 +141,10 @@ private slots:
     void throttlesDiagnosticHeartbeats();
     void tracksValidationSubstepStages();
     void parsesStructuredFfmpegProgress();
+    void boundsExternalJsonDocuments();
+    void boundsWidgetAndTemplateCardinality();
+    void boundsProcessOutputAndProgressLines();
+    void surfacesAndRetriesRecoveryPersistenceFailure();
     void calculatesEncodedOutputProgress();
     void preservesFrameIdentityThroughCompletedOverlayComposition();
     void preservesPremultipliedAlphaThroughOverlayComposition();
@@ -2320,6 +2327,116 @@ void TelemetryTests::opensProjectsTransactionally()
     QVERIFY(!migrated.value(QStringLiteral("sources")).toObject()
                  .value(QStringLiteral("telemetry")).toObject()
                  .value(QStringLiteral("fingerprint")).toObject().isEmpty());
+}
+
+void TelemetryTests::boundsExternalJsonDocuments()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString validPath = directory.filePath(QStringLiteral("valid.fetproject"));
+    const QByteArray valid = QJsonDocument(testProject(1.0)).toJson();
+    QVERIFY(writeBytes(validPath, valid));
+    const auto accepted = BoundedJsonLoader::loadFile(
+        validPath, valid.size(), QStringLiteral("Project"));
+    QVERIFY2(accepted.success(), qPrintable(accepted.error));
+
+    const QString oversizedPath = directory.filePath(QStringLiteral("oversized.fetproject"));
+    QVERIFY(writeBytes(oversizedPath, QByteArray(ProjectLimits::projectBytes + 1, ' ')));
+    const auto oversized = BoundedJsonLoader::loadFile(
+        oversizedPath, ProjectLimits::projectBytes, QStringLiteral("Project"));
+    QVERIFY(!oversized.success());
+    QVERIFY(oversized.error.contains(QStringLiteral("limit")));
+
+    const QString malformedPath = directory.filePath(QStringLiteral("malformed.fetproject"));
+    QVERIFY(writeBytes(malformedPath, QByteArrayLiteral("{ not JSON")));
+    const auto malformed = BoundedJsonLoader::loadFile(
+        malformedPath, ProjectLimits::projectBytes, QStringLiteral("Project"));
+    QVERIFY(!malformed.success());
+    QVERIFY(malformed.error.contains(QStringLiteral("invalid JSON")));
+}
+
+void TelemetryTests::boundsWidgetAndTemplateCardinality()
+{
+    QJsonArray widgets;
+    for (qsizetype index = 0; index <= ProjectLimits::maximumWidgets; ++index) {
+        widgets.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("w%1").arg(index)},
+                                   {QStringLiteral("type"), QStringLiteral("speed")},
+                                   {QStringLiteral("settings"), QJsonObject{}},
+                                   {QStringLiteral("cues"), QJsonArray{}}});
+    }
+    QJsonObject project = testProject(0.0);
+    project.insert(QStringLiteral("scene"), QJsonObject{{QStringLiteral("widgets"), widgets}});
+    QString error;
+    QVERIFY(!ProjectLimits::validateProject(project, &error));
+    QVERIFY(error.contains(QStringLiteral("Widget count")));
+
+    QJsonObject settings;
+    for (qsizetype index = 0; index <= ProjectLimits::maximumSettingsEntries; ++index) {
+        settings.insert(QStringLiteral("s%1").arg(index), 1);
+    }
+    project = testProject(0.0);
+    QJsonObject widget = project.value(QStringLiteral("scene")).toObject()
+                             .value(QStringLiteral("widgets")).toArray().first().toObject();
+    widget.insert(QStringLiteral("settings"), settings);
+    project.insert(QStringLiteral("scene"), QJsonObject{{QStringLiteral("widgets"), QJsonArray{widget}}});
+    QVERIFY(!ProjectLimits::validateProject(project, &error));
+    QVERIFY(error.contains(QStringLiteral("settings")));
+
+    QJsonArray templates;
+    const QJsonObject validTemplate{{QStringLiteral("id"), QStringLiteral("one")},
+                                    {QStringLiteral("name"), QStringLiteral("One")},
+                                    {QStringLiteral("description"), QStringLiteral("Normal")},
+                                    {QStringLiteral("widgets"), QJsonArray{project.value(QStringLiteral("scene")).toObject().value(QStringLiteral("widgets")).toArray().first()}}};
+    for (qsizetype index = 0; index <= ProjectLimits::maximumTemplateCount; ++index) templates.append(validTemplate);
+    QVERIFY(!ProjectLimits::validateTemplateStore(
+        QJsonObject{{QStringLiteral("schemaVersion"), 1}, {QStringLiteral("templates"), templates}}, &error));
+    QVERIFY(error.contains(QStringLiteral("Template store")));
+}
+
+void TelemetryTests::boundsProcessOutputAndProgressLines()
+{
+    BoundedProcessOutput payload(BoundedProcessOutput::Mode::CompletePayload, 8);
+    payload.append(QByteArrayLiteral("1234"));
+    payload.append(QByteArrayLiteral("56789"));
+    QVERIFY(payload.exceeded());
+    QCOMPARE(payload.observedBytes(), 9);
+    QCOMPARE(payload.bytes(), QByteArrayLiteral("1234"));
+
+    BoundedProcessOutput tail(BoundedProcessOutput::Mode::DiagnosticTail, 4);
+    tail.append(QByteArrayLiteral("1234"));
+    tail.append(QByteArrayLiteral("5678"));
+    QVERIFY(tail.truncated());
+    QCOMPARE(tail.bytes(), QByteArrayLiteral("5678"));
+
+    FfmpegProgressParser parser;
+    static_cast<void>(parser.append(QByteArray(ProcessOutputLimits::ffmpegProgressLineBytes + 1, 'x')));
+    QVERIFY(parser.overflowed());
+    const QList<FfmpegProgress> progress = parser.append(QByteArrayLiteral("frame=12\nprogress=end\n"));
+    QCOMPARE(progress.size(), 1);
+    QCOMPARE(progress.first().encodedFrames, qsizetype(12));
+}
+
+void TelemetryTests::surfacesAndRetriesRecoveryPersistenceFailure()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString recoveryPath = directory.filePath(QStringLiteral("recovery.json"));
+    QVERIFY(QDir().mkpath(recoveryPath)); // A directory cannot be atomically replaced as a snapshot file.
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    AppController controller(nullptr, recoveryPath);
+    controller.setSyncOffset(1.0);
+    QTRY_VERIFY(controller.recoveryDegraded());
+    QVERIFY(!controller.recoveryError().isEmpty());
+    QVERIFY(controller.dirty()); // Editing remains available while recovery is unavailable.
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath(QStringLiteral("manual.fetproject")))));
+    QVERIFY(!controller.dirty()); // Authoritative manual save is independent of recovery failure.
+
+    QVERIFY(QDir().rmdir(recoveryPath));
+    controller.setSyncOffset(2.0);
+    QTRY_VERIFY(!controller.recoveryDegraded());
+    QVERIFY(QFileInfo(recoveryPath).isFile());
 }
 
 void TelemetryTests::serializesPortableProjectSourcesAndMovesFolder()

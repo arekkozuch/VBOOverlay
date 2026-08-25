@@ -16,6 +16,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - Source-driven CFR HEVC/AAC MP4 export at the effective rational export rate, including runtime raster/profile checks, validated 8-bit and 10-bit SDR preservation, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
 - Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
+- Resource-bounded external JSON documents and subprocess output, with visible recovery-protection warnings when automatic snapshots cannot be persisted.
 
 ## Requirements
 
@@ -50,6 +51,8 @@ G-Force widgets can invert lateral and longitudinal presentation axes independen
 Templates have two explicit operations. **Save current** updates the custom template that was applied (or just created), preserving its ID, name, and description. Selecting a template alone does not make it editable, so Save current opens **Save as new** until that custom template is applied. Built-in templates are immutable and always use Save as new.
 
 A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup; QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
+
+External JSON documents are size- and structure-bounded before they can create editor models. FFprobe payloads, FFmpeg diagnostics, progress lines, and export-worker messages are bounded as well; diagnostic tails retain the newest useful output. If automatic recovery storage fails, the editor shows a persistent manual-save warning and retries safely after a backoff.
 
 Module details are in [docs/architecture.md](docs/architecture.md). The project source lives in [`native/src/project`](native/src/project).
 

@@ -2,6 +2,12 @@
 
 `.fetproject` remains version 2. Source metadata is an optional extension of that format, so old v2 documents do not require a version bump or manual conversion. Unknown top-level and nested fields are retained when the application overlays known edits and saves.
 
+## Resource limits
+
+External documents are validated before editor models are populated. Projects and recovery snapshots are capped at 4 MiB; imported templates at 2 MiB; and the local template store at 8 MiB. A project has at most 256 widgets, 256 cues per widget (4,096 total), and 128 settings entries per widget. Templates use the same widget rules; the store holds at most 128 custom templates. JSON nesting is capped at 32 levels, ordinary strings at 4,096 characters, IDs at 128 characters, template names at 160 characters, and descriptions at 2,048 characters. Over-limit or malformed input is rejected with a clear load error; it is never silently truncated.
+
+Saved project files are parsed and structurally validated on the existing project-load worker. Only its generation- and revision-checked canonical result commits on the UI thread.
+
 ## Source representation
 
 New saves use a `sources` object and remove the legacy top-level `videoPath` and `vboPath` fields. Each `video` or `telemetry` entry may contain:

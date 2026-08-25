@@ -95,3 +95,6 @@ Every final export is CFR at the effective exact rational export rate. For a sel
 The normal validation path records FFmpeg's final progress frame count and uses the independent final packet count as authoritative where the container exposes one. Full decoded frame counts remain part of deterministic integration tests rather than every production export, avoiding an unnecessary full decode of long media.
 
 For target-file transaction guarantees, see [export-output-safety.md](export-output-safety.md).
+# External process boundaries
+
+Every ffprobe/FFmpeg channel is treated as untrusted external input. FFprobe JSON is drained while the process runs and must fit within 4 MiB; overflow terminates the probe and reports the operation, limit, and observed bytes. FFmpeg stderr is retained as a 128 KiB newest-first diagnostic tail with truncation semantics. Machine-readable progress drops a pathological pending line above 16 KiB instead of growing indefinitely. The representative FFV1 storage sample counts and discards encoded stdout bytes, so sample output is not retained in RAM.

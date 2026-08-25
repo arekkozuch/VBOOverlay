@@ -46,6 +46,9 @@
   Both are required.
 - Untrusted/imported telemetry and media metadata must be resource-bounded before large allocation
   or recursion.
+- External JSON documents and subprocess outputs must be resource-bounded before they can cause
+  large application allocations. Failure to persist automatic recovery must be surfaced as degraded
+  data protection and retried safely.
 - Parser output timestamps must remain strictly monotonic. Public telemetry boundaries must not expose
   `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
 - Static telemetry geometry must not be rebuilt or repainted on playback-time updates. Dynamic
