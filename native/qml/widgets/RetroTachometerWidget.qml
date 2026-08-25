@@ -147,12 +147,6 @@ Item {
             ctx.fillStyle = settings.valuePlateColor || "#111a22";
             ctx.fill();
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = rimColor;
-            ctx.globalAlpha = 0.82;
-            ctx.lineWidth = Math.max(1, frame.sceneScale);
-            roundedPath(ctx, plateX, plateY, plateWidth, plateHeight, Math.max(3 * frame.sceneScale, plateHeight * 0.18));
-            ctx.stroke();
-            ctx.globalAlpha = 1;
             ctx.fillStyle = dialColor;
             ctx.font = "700 " + Math.max(17 * frame.sceneScale, plateHeight * 0.68) + "px " + frame.family;
             ctx.fillText(hasValue ? Math.round(value).toString() : "—", cx, plateY + plateHeight * 0.54);
