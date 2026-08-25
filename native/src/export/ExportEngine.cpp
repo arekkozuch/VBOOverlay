@@ -1022,7 +1022,7 @@ ExportResult ExportEngine::exportVideo(
             "[0:v]trim=start=%1,setpts=PTS-STARTPTS%4,"
             "fps=fps=%2:start_time=0:round=near:eof_action=round,"
             "trim=end_frame=%3,setpts=PTS-STARTPTS[sourceVideo];"
-            "[1:v]setpts=PTS-STARTPTS[temporaryOverlay];"
+            "[1:v]setpts=PTS-STARTPTS,setparams=alpha_mode=premultiplied[temporaryOverlay];"
             "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=%5[composited];"
             "[composited]format=pix_fmts=%6[video]")
                                             .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)

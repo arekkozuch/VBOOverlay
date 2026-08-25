@@ -211,6 +211,7 @@ AppController::AppController(QObject *parent, QString recoveryPath)
             return;
         }
         commitProjectLoad(result);
+        startProjectSources(result);
     });
     retireLegacyDocumentSettings();
     restoreStartupState();
@@ -1112,17 +1113,22 @@ bool AppController::beginProjectLoad(
     setProjectLoadState(true, QStringLiteral("Applying project"));
     commitProjectLoad(result);
 
+    startProjectSources(result);
+    return true;
+}
+
+void AppController::startProjectSources(const ProjectLoadResult &result)
+{
     m_pendingVideoPath = result.resolvedVideoPath;
     m_pendingVboPath = result.resolvedVboPath;
     if (!result.resolvedVideoPath.isEmpty()) {
-        startVideoProbe(result.resolvedVideoPath, generation, false,
+        startVideoProbe(result.resolvedVideoPath, result.generation, false,
                         result.videoReference.fingerprint, false);
     }
     if (!result.resolvedVboPath.isEmpty()) {
-        startVboLoad(result.resolvedVboPath, generation, false,
+        startVboLoad(result.resolvedVboPath, result.generation, false,
                      result.vboReference.fingerprint, false);
     }
-    return true;
 }
 
 void AppController::setProjectLoadState(bool loading, QString stage, QString error)

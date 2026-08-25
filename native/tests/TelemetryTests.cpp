@@ -2511,7 +2511,7 @@ void TelemetryTests::opensProjectsWithMissingSources()
 
     AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
     controller.requestOpenProject(QUrl::fromLocalFile(path));
-    QVERIFY(!controller.projectLoading());
+    QTRY_VERIFY(!controller.projectLoading());
     QCOMPARE(controller.videoLoadState(), QStringLiteral("missing"));
     QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
     QCOMPARE(controller.syncOffset(), 3.25);
@@ -2614,7 +2614,7 @@ void TelemetryTests::relinksTelemetryWithMismatchPolicy()
     QVERIFY(writeBytes(projectPath, QJsonDocument(project).toJson()));
     AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
     controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
-    QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("missing"));
     controller.relinkVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
     QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("mismatch"));
     QCOMPARE(controller.sourceMismatchType(), QStringLiteral("telemetry"));
@@ -2879,7 +2879,7 @@ void TelemetryTests::preservesEditsAfterDocumentFirstProjectOpen()
 
     AppController controller(nullptr, recoveryPath);
     controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
-    QVERIFY(!controller.projectLoading());
+    QTRY_VERIFY(!controller.projectLoading());
     QCOMPARE(controller.syncOffset(), 2.0);
     QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(projectPath).canonicalFilePath());
     controller.setSyncOffset(9.0);
@@ -3864,6 +3864,8 @@ void TelemetryTests::preservesPremultipliedAlphaThroughOverlayComposition()
     const QString primary = directory.filePath("primary.mkv");
     const QString overlay = directory.filePath("overlay.mkv");
     const QString composed = directory.filePath("composed.mkv");
+    const QString decodedPrimary = directory.filePath("decoded-primary.rgba");
+    const QString decodedOverlay = directory.filePath("decoded-overlay.rgba");
     const QString decoded = directory.filePath("decoded.rgba");
     const std::array<uchar, 4> background{20, 40, 80, 255};
     QByteArray primaryPixels(width * height * 4, '\0');
@@ -3903,8 +3905,19 @@ void TelemetryTests::preservesPremultipliedAlphaThroughOverlayComposition()
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format",
                "rgba", "-video_size", size, "-framerate", "30", "-i", overlayRaw, "-frames:v", "1",
                "-an", "-c:v", "ffv1", "-pix_fmt", "bgra", overlay});
+    const auto decodeRgba = [&runFfmpeg](const QString &input, const QString &output) {
+        runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", input, "-f", "rawvideo",
+                   "-pix_fmt", "rgba", output});
+        QFile decodedFile(output);
+        if (!decodedFile.open(QIODevice::ReadOnly)) return QByteArray{};
+        return decodedFile.readAll();
+    };
+    // Stage A changes transport to FFV1/BGRA only. It must not alter the
+    // premultiplied QRhi-readback bytes before Stage B interprets alpha.
+    QCOMPARE(decodeRgba(primary, decodedPrimary), primaryPixels);
+    QCOMPARE(decodeRgba(overlay, decodedOverlay), overlayPixels);
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", primary, "-i", overlay,
-               "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=rgb[v]",
+               "-filter_complex", "[1:v]setparams=alpha_mode=premultiplied[temporaryOverlay];[0:v][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=auto[v]",
                "-map", "[v]", "-c:v", "ffv1", "-pix_fmt", "bgra", composed});
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", composed, "-f", "rawvideo",
                "-pix_fmt", "rgba", decoded});
@@ -3926,7 +3939,7 @@ void TelemetryTests::preservesPremultipliedAlphaThroughOverlayComposition()
         const qsizetype offset = (y * width + x) * 4;
         for (int component = 0; component < 4; ++component) {
             const int actual = static_cast<uchar>(output[offset + component]);
-            QVERIFY2(std::abs(actual - expectedPixel[component]) <= 3,
+            QVERIFY2(std::abs(actual - expectedPixel[component]) <= 1,
                      qPrintable(QStringLiteral("pixel (%1,%2), component %3: expected %4, actual %5")
                                     .arg(x).arg(y).arg(component).arg(expectedPixel[component]).arg(actual)));
         }
