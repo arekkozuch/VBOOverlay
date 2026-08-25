@@ -15,6 +15,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Asynchronous video/VBO loading, transactional document commit, and stale-result rejection.
 - [x] Cooperative cancellation and defensive resource bounds for VBO parsing, GoPro probing/GPMF decoding, auto-sync, source replacement, and shutdown.
 - [x] Resource-bound project/template/recovery/manifest JSON, FFmpeg/ffprobe diagnostics and progress, asynchronous project parsing, and retriable visible recovery-persistence degradation.
+- [ ] Version recovery metadata so a snapshot left behind after a successful save but failed physical deletion is provably stale on the next launch.
 - [x] Monotonic/rollover-safe VBO timestamps and explicit missing-data semantics.
 - [x] Stable no-data-aware overlay presentation and gap/extrema-preserving analysis decimation.
 - [x] Cached static track geometry and time-independent track-marker rendering.

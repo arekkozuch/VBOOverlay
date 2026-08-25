@@ -8,6 +8,10 @@ External documents are validated before editor models are populated. Projects an
 
 Saved project files are parsed and structurally validated on the existing project-load worker. Only its generation- and revision-checked canonical result commits on the UI thread.
 
+## Recovery deletion residual
+
+After an authoritative project save, the application attempts to delete its prior recovery snapshot. If the filesystem refuses that deletion, the v1 snapshot format has no saved-document revision marker with which a later launch can prove the retained snapshot is stale. It may therefore still be offered for explicit user review; it is never applied silently. This deletion-failure distinction is intentionally deferred to a dedicated recovery-format/versioning change rather than weakening the current transactional save/recovery contract.
+
 ## Source representation
 
 New saves use a `sources` object and remove the legacy top-level `videoPath` and `vboPath` fields. Each `video` or `telemetry` entry may contain:
