@@ -40,7 +40,7 @@ Item {
             const maximum = Math.max(minimum + 1, Number(settings.maxValue ?? 8000));
             const steps = Math.max(4, Math.min(16, Math.round((maximum - minimum) / 1000)));
             const progress = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
-            const startAngle = Math.PI * 0.76;
+            const startAngle = Math.PI * 0.84;
             const sweep = Math.PI * 1.33;
             const endAngle = startAngle + sweep;
             const dialColor = settings.dialColor || "#f2f5f7";
@@ -99,7 +99,7 @@ Item {
                         ? frame.configuredFontSize() * frame.sceneScale
                         : Math.max(12 * frame.sceneScale, radius * 0.16)) + "px " + frame.family;
                     const edgeLabel = tick === 0 || tick === tickCount;
-                    const labelRadius = edgeLabel ? 0.82 : 0.64;
+                    const labelRadius = edgeLabel ? 0.95 : 0.64;
                     ctx.fillText(String(Math.round((minimum + (maximum - minimum) * ratio) / 1000)),
                                  cx + Math.cos(angle) * radius * labelRadius,
                                  cy + Math.sin(angle) * radius * labelRadius);
