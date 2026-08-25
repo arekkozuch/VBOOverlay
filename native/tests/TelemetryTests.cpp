@@ -100,6 +100,7 @@ private slots:
     void reportsAmbiguousGpsSpeed();
     void gatesWeakSyncCandidates();
     void rendersTelemetryAtExplicitTime();
+    void preservesPartialOverlapInAnalysisSeries();
     void probesMediaInfoJson();
     void parsesMediaSummaryJson();
     void modelsExtendedMediaCharacteristics();
@@ -2207,6 +2208,46 @@ void TelemetryTests::supervisesUnixExportProcessTree()
 #else
     QSKIP("Unix process-group behavior is runtime-tested on this platform only.");
 #endif
+}
+
+void TelemetryTests::preservesPartialOverlapInAnalysisSeries()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("analysis.vbo"));
+    QVERIFY(writeBytes(path,
+                       "[column names]\ntime ramp flat gapped\n[data]\n"
+                       "0 0 42 0\n1 10 42 10\n2 20 42 20\n3 30 42 30\n10 100 42 100\n11 110 42 110\n"));
+
+    AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
+    controller.loadVbo(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+
+    // A negative offset maps the beginning of the video before telemetry starts.
+    // The overlapping half must remain a plotted segment, not disappear wholesale.
+    controller.setSyncOffset(-2.0);
+    const QVariantMap ramp = controller.telemetrySeries(QStringLiteral("ramp"), 0.0, 6.0, 100);
+    const QVariantList rampSegments = ramp.value(QStringLiteral("segments")).toList();
+    QVERIFY(!rampSegments.isEmpty());
+    const QVariantList firstSegment = rampSegments.front().toList();
+    qsizetype totalRampPoints = 0;
+    for (const QVariant &segment : rampSegments) {
+        totalRampPoints += segment.toList().size();
+    }
+    QVERIFY(totalRampPoints >= 2);
+    const double firstX = firstSegment.front().toMap().value(QStringLiteral("x")).toDouble();
+    QVERIFY2(firstX >= 0.32 && firstX <= 0.34, qPrintable(QString::number(firstX)));
+
+    const QVariantMap constant = controller.telemetrySeries(QStringLiteral("flat"), 0.0, 6.0, 100);
+    QVERIFY(!constant.value(QStringLiteral("segments")).toList().isEmpty());
+    QCOMPARE(constant.value(QStringLiteral("minimum")).toDouble(), 42.0);
+    QCOMPARE(constant.value(QStringLiteral("maximum")).toDouble(), 42.0);
+
+    const QVariantMap gapped = controller.telemetrySeries(QStringLiteral("gapped"), 0.0, 14.0, 100);
+    QVERIFY(gapped.value(QStringLiteral("segments")).toList().size() >= 2);
 }
 
 void TelemetryTests::retainsTelemetryAfterFailedAsyncLoad()

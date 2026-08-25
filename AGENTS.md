@@ -53,6 +53,13 @@
   `NaN` or infinity; outside-range and missing telemetry are no data, and missing gaps are not bridged.
 - Static telemetry geometry must not be rebuilt or repainted on playback-time updates. Dynamic
   playback markers must update independently from static geometry.
+- At the supported 1180×720 editor minimum, every sidebar control must remain reachable through a
+  single coherent vertical scroll surface; never strand controls below a fixed nested scroller.
+- Very Verbose diagnostics must preserve the absolute historical viewport while detached from tail;
+  only an explicit jump-to-latest may resume following new output.
+- Playback transport shortcuts must be centrally disabled while a text or numeric editor is active.
+- Analysis chart rows must distinguish an empty overlapping range from a rendering/data-shape failure;
+  series transport must retain segment nesting so telemetry gaps remain disconnected.
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
   safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
 - Qt Quick offscreen frames use an explicit premultiplied-alpha contract from QRhi readback through

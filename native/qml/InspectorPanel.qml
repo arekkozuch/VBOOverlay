@@ -86,11 +86,15 @@ Rectangle {
             currentIndex: root.currentTab
 
             ScrollView {
+                id: widgetScroll
                 clip: true
+                contentWidth: availableWidth
+                contentHeight: widgetContent.implicitHeight
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 ColumnLayout {
-                    width: Math.max(300, root.width - 28)
-                    x: 14
+                    id: widgetContent
+                    width: widgetScroll.availableWidth
                     spacing: 7
 
                     Item {
@@ -1781,11 +1785,15 @@ Rectangle {
             }
 
             ScrollView {
+                id: dataScroll
                 clip: true
+                contentWidth: availableWidth
+                contentHeight: dataContent.implicitHeight
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 ColumnLayout {
-                    width: Math.max(300, root.width - 28)
-                    x: 14
+                    id: dataContent
+                    width: dataScroll.availableWidth
                     spacing: 7
                     Item {
                         height: 8
@@ -1934,11 +1942,15 @@ Rectangle {
             }
 
             ScrollView {
+                id: cuesScroll
                 clip: true
+                contentWidth: availableWidth
+                contentHeight: cuesContent.implicitHeight
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 ColumnLayout {
-                    width: Math.max(300, root.width - 28)
-                    x: 14
+                    id: cuesContent
+                    width: cuesScroll.availableWidth
                     spacing: 8
                     Item {
                         height: 8

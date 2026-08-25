@@ -11,9 +11,15 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - MP4/MOV playback with timeline controls and preview overlays.
 - RaceChrono and VBOX VBO telemetry import.
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
-- A visual widget editor, projects, built-in layouts, and shareable templates.
+- A visual widget editor, projects, built-in layouts, and shareable templates. Both editor sidebars remain fully scrollable at the supported 1180×720 minimum size.
 - Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.
 - Source-driven CFR HEVC/AAC MP4 export at the effective rational export rate, including runtime raster/profile checks, validated 8-bit and 10-bit SDR preservation, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
+
+## Keyboard controls
+
+Space plays or pauses. Left/Right seek five seconds; Shift+Left/Right seek thirty seconds; Home/End seek to timeline bounds. These playback shortcuts are disabled while typing or operating a focused editor control. Ctrl/Cmd+E opens Export, Ctrl/Cmd+Shift+A toggles Telemetry Analysis, and F11/Escape enter and leave full screen. Full-screen preview provides the same visible transport and scrubber as the editor.
+
+Very Verbose export diagnostics follow the live tail until the user scrolls into history. Historical inspection stays fixed while new lines arrive; **Jump to latest** explicitly resumes following.
 - Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
 - Resource-bounded external JSON documents and subprocess output, with visible recovery-protection warnings when automatic snapshots cannot be persisted.

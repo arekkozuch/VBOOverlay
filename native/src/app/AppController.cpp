@@ -881,7 +881,10 @@ QVariantMap AppController::telemetrySeries(
                 : (sample.x() - telemetryStart) / telemetrySpan;
             points.append(QVariantMap{{"x", normalizedTime}, {"y", sample.y()}});
         }
-        segments.append(points);
+        // QVariantList has an overload that appends another list's elements.
+        // Wrap the points list explicitly so QML receives segments -> points,
+        // preserving telemetry gaps as separate polylines.
+        segments.append(QVariant::fromValue(points));
     }
     const QString resolved = m_session->aliases.value(channelName, channelName);
     const auto channel = m_session->channels.constFind(resolved);

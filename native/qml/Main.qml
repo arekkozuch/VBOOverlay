@@ -25,6 +25,8 @@ ApplicationWindow {
     property bool fullScreenPreview: false
     property bool closeApproved: false
     property int editorVisibility: Window.Windowed
+    property bool fullScreenControlsVisible: false
+    property bool fullScreenScrubbing: false
     property bool welcomeVisible: !appController.projectPath && !appController.videoName
     property int selectedWidgetIndex: -1
     property var selectedWidgetIndices: []
@@ -342,6 +344,7 @@ ApplicationWindow {
             }
             Action {
                 text: qsTr("Export…")
+                shortcut: "Ctrl+E"
                 enabled: appController.videoLoadState === "ready"
                          && appController.vboLoadState === "ready"
                 onTriggered: exportDialog.open()
@@ -378,6 +381,29 @@ ApplicationWindow {
                 shortcut: "Ctrl+Shift+A"
                 onTriggered: appController.analysisVisible = checked
             }
+            MenuSeparator {}
+            Action {
+                text: qsTr("Keyboard Shortcuts")
+                shortcut: "F1"
+                onTriggered: shortcutHelpDialog.open()
+            }
+        }
+    }
+
+    Dialog {
+        id: shortcutHelpDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 450
+        title: qsTr("Keyboard Shortcuts")
+        standardButtons: Dialog.Close
+        contentItem: Label {
+            width: 390
+            text: qsTr("Space  Play / pause\n← / →  Seek 5 seconds\nShift+← / →  Seek 30 seconds\nHome / End  Beginning / end\nCtrl/Cmd+E  Export\nCtrl/Cmd+Shift+A  Telemetry Analysis\nCtrl/Cmd+G  Group · Ctrl/Cmd+Shift+G  Ungroup\nDelete / Backspace  Delete selected layer\nF11  Full screen · Escape  Exit or dismiss")
+            color: "#d8e0e9"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 12
         }
     }
 
@@ -397,10 +423,14 @@ ApplicationWindow {
         if (visibility !== Window.FullScreen)
             editorVisibility = visibility === Window.Maximized ? Window.Maximized : Window.Windowed;
         fullScreenPreview = true;
+        fullScreenControlsVisible = true;
         visibility = Window.FullScreen;
+        showFullScreenControls();
     }
     function exitFullScreen() {
         fullScreenPreview = false;
+        fullScreenControlsVisible = false;
+        fullScreenControlsTimer.stop();
         visibility = editorVisibility === Window.Maximized ? Window.Maximized : Window.Windowed;
     }
     function formatTime(milliseconds) {
@@ -439,6 +469,38 @@ ApplicationWindow {
             item = item.parent;
         }
         return false;
+    }
+    function playbackShortcutBlocked() {
+        let item = activeFocusItem;
+        while (item) {
+            if (item instanceof TextInput || item instanceof TextEdit || item instanceof Button
+                    || item instanceof CheckBox || item instanceof ComboBox || item instanceof Slider)
+                return true;
+            item = item.parent;
+        }
+        return false;
+    }
+    function togglePlayback() {
+        if (!appController.videoSource.toString())
+            return;
+        if (mediaPlayer.playbackState === MediaPlayer.PlayingState)
+            mediaPlayer.pause();
+        else
+            mediaPlayer.play();
+        window.showFullScreenControls();
+    }
+    function seekPlayback(deltaMilliseconds) {
+        if (!appController.videoSource.toString())
+            return;
+        mediaPlayer.position = Math.max(0, Math.min(Math.max(0, mediaPlayer.duration), mediaPlayer.position + deltaMilliseconds));
+        window.showFullScreenControls();
+    }
+    function showFullScreenControls() {
+        if (!fullScreenPreview && visibility !== Window.FullScreen)
+            return;
+        fullScreenControlsVisible = true;
+        if (mediaPlayer.playbackState === MediaPlayer.PlayingState && !fullScreenScrubbing)
+            fullScreenControlsTimer.restart();
     }
     function deleteSelectedWidget() {
         if (selectedWidgetIndex < 0 || selectedWidgetIndex >= appController.widgetModel.count || textEditorHasFocus())
@@ -493,6 +555,51 @@ ApplicationWindow {
         context: Qt.WindowShortcut
         enabled: window.fullScreenPreview || window.visibility === Window.FullScreen
         onActivated: window.exitFullScreen()
+    }
+    Shortcut { sequence: "Space"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.togglePlayback() }
+    Shortcut { sequence: "Left"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(-5000) }
+    Shortcut { sequence: "Right"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(5000) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(-30000) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(30000) }
+    Shortcut { sequence: "Home"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = 0; window.showFullScreenControls(); } }
+    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = Math.max(0, mediaPlayer.duration); window.showFullScreenControls(); } }
+    Shortcut {
+        sequence: "Ctrl+E"
+        context: Qt.WindowShortcut
+        enabled: appController.videoLoadState === "ready" && appController.vboLoadState === "ready"
+        onActivated: exportDialog.open()
+    }
+    Shortcut {
+        sequence: "Meta+E"
+        context: Qt.WindowShortcut
+        enabled: appController.videoLoadState === "ready" && appController.vboLoadState === "ready"
+        onActivated: exportDialog.open()
+    }
+    Shortcut {
+        sequence: "Return"
+        context: Qt.WindowShortcut
+        enabled: exportDialog.visible && exportDialog.canStartExport()
+                 && !exportResolution.popup.visible && !exportFrameRate.popup.visible
+                 && !exportQuality.popup.visible && !exportRangeMode.popup.visible
+        onActivated: exportDialog.startExport(false)
+    }
+    Shortcut {
+        sequence: "Enter"
+        context: Qt.WindowShortcut
+        enabled: exportDialog.visible && exportDialog.canStartExport()
+                 && !exportResolution.popup.visible && !exportFrameRate.popup.visible
+                 && !exportQuality.popup.visible && !exportRangeMode.popup.visible
+        onActivated: exportDialog.startExport(false)
+    }
+    Timer {
+        id: fullScreenControlsTimer
+        interval: 2600
+        repeat: false
+        onTriggered: {
+            if (window.fullScreenPreview && mediaPlayer.playbackState === MediaPlayer.PlayingState
+                    && !window.fullScreenScrubbing)
+                window.fullScreenControlsVisible = false;
+        }
     }
     Shortcut {
         sequence: "Delete"
@@ -599,6 +706,7 @@ ApplicationWindow {
         id: exportDialog
         title: qsTr("Export H.265 / HEVC")
         modal: true
+        closePolicy: Popup.CloseOnEscape
         width: 470
         anchors.centerIn: parent
         property url outputFile
@@ -644,6 +752,10 @@ ApplicationWindow {
             } else if (appController.exportState === "overwriteConfirmationRequired") {
                 exportOverwriteDialog.open();
             }
+        }
+        function canStartExport() {
+            return outputFile.toString().length > 0 && selectedSize().width > 0
+                && selectedRate().numerator > 0 && selectedBitrate > 0;
         }
         onAboutToShow: {
             formatOptions = appController.exportFormatOptions();
@@ -855,7 +967,7 @@ ApplicationWindow {
                 FeButton {
                     accent: true
                     text: qsTr("Export")
-                    enabled: exportDialog.outputFile.toString().length > 0
+                    enabled: exportDialog.canStartExport()
                     onClicked: exportDialog.startExport(false)
                 }
             }
@@ -971,11 +1083,7 @@ ApplicationWindow {
                 FeButton {
                     visible: exportVeryVerbose.visible && exportVeryVerbose.checked && !verboseText.followTail
                     text: qsTr("Jump to latest")
-                    onClicked: {
-                        verboseText.followTail = true;
-                        verboseText.cursorPosition = verboseText.length;
-                        verboseBar.position = Math.max(0, 1 - verboseBar.size);
-                    }
+                    onClicked: verboseText.jumpToLatest()
                 }
             }
             ScrollView {
@@ -1064,21 +1172,26 @@ ApplicationWindow {
                 ScrollBar.vertical: ScrollBar {
                     id: verboseBar
                     onPositionChanged: {
-                        if (pressed)
+                        if (pressed && !verboseText.programmaticScroll)
                             verboseText.followTail = position + size >= 0.98;
                     }
                 }
                 Connections {
                     target: verboseScroll.contentItem
-                    function onMovementStarted() { verboseText.followTail = false; }
+                    function onMovementStarted() {
+                        if (!verboseText.programmaticScroll)
+                            verboseText.followTail = false;
+                    }
                     function onMovementEnded() {
-                        verboseText.followTail = verboseBar.position + verboseBar.size >= 0.98;
+                        if (!verboseText.programmaticScroll && verboseText.followTail)
+                            verboseText.followTail = verboseBar.position + verboseBar.size >= 0.98;
                     }
                 }
                 TextArea {
                     id: verboseText
                     width: verboseScroll.availableWidth
                     property bool followTail: true
+                    property bool programmaticScroll: false
                     readOnly: true
                     selectByMouse: true
                     persistentSelection: true
@@ -1086,14 +1199,46 @@ ApplicationWindow {
                     color: "#aeb9c7"
                     font.pixelSize: 11
                     font.family: appController.fixedFontFamily
-                    text: appController.exportDiagnosticLog
-                    onTextChanged: {
-                        if (followTail) Qt.callLater(function() {
-                            verboseText.cursorPosition = verboseText.length;
+                    function jumpToLatest() {
+                        followTail = true;
+                        programmaticScroll = true;
+                        cursorPosition = length;
+                        Qt.callLater(function() {
                             verboseBar.position = Math.max(0, 1 - verboseBar.size);
+                            programmaticScroll = false;
                         });
                     }
+                    function updateLog(nextText) {
+                        const wasFollowing = followTail;
+                        const previousY = verboseScroll.contentItem.contentY;
+                        const previousCursor = cursorPosition;
+                        programmaticScroll = true;
+                        text = nextText;
+                        Qt.callLater(function() {
+                            if (wasFollowing) {
+                                cursorPosition = length;
+                                verboseBar.position = Math.max(0, 1 - verboseBar.size);
+                            } else {
+                                // Keep the same absolute historical content in view as the
+                                // diagnostic document grows; do not preserve a percentage.
+                                verboseScroll.contentItem.contentY = Math.max(0, Math.min(
+                                    previousY,
+                                    Math.max(0, verboseScroll.contentItem.contentHeight - verboseScroll.contentItem.height)));
+                                cursorPosition = Math.min(previousCursor, length);
+                            }
+                            programmaticScroll = false;
+                        });
+                    }
+                    Component.onCompleted: updateLog(appController.exportDiagnosticLog)
+                    Connections {
+                        target: appController
+                        function onExportDiagnosticLogChanged() {
+                            verboseText.updateLog(appController.exportDiagnosticLog);
+                        }
+                    }
                     Keys.onPressed: function(event) {
+                        if ([Qt.Key_PageUp, Qt.Key_Up, Qt.Key_Home].indexOf(event.key) >= 0)
+                            followTail = false;
                         if (event.matches(StandardKey.SelectAll)) {
                             selectAll();
                             event.accepted = true;
@@ -1201,6 +1346,12 @@ ApplicationWindow {
         source: appController.videoSource
         audioOutput: AudioOutput {}
         videoOutput: videoOutput
+        onPlaybackStateChanged: {
+            if (playbackState !== MediaPlayer.PlayingState)
+                window.fullScreenControlsVisible = true;
+            else
+                window.showFullScreenControls();
+        }
         onPositionChanged: function(position) {
             appController.playbackTime = position / 1000.0;
         }
@@ -1362,13 +1513,20 @@ ApplicationWindow {
                 color: "#0a0f15"
                 border.color: "#202a36"
 
-                ColumnLayout {
+                ScrollView {
+                    id: leftSidebarScroll
                     anchors.fill: parent
-                    anchors.topMargin: 14
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    anchors.bottomMargin: 12
-                    spacing: 8
+                    anchors.margins: 12
+                    clip: true
+                    contentWidth: availableWidth
+                    contentHeight: leftSidebarContent.implicitHeight
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                    ColumnLayout {
+                        id: leftSidebarContent
+                        width: leftSidebarScroll.availableWidth
+                        spacing: 8
 
                     SectionTitle {
                         text: qsTr("Layout template")
@@ -1533,15 +1691,10 @@ ApplicationWindow {
                         color: "#55e6a5"
                         font.pixelSize: 9
                     }
-                    ScrollView {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                        ColumnLayout {
-                            width: 210
-                            spacing: 5
-                            Repeater {
+                        spacing: 5
+                        Repeater {
                                 model: appController.widgetModel
                                 Rectangle {
                                     required property int index
@@ -1642,6 +1795,8 @@ ApplicationWindow {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.ArrowCursor
+                                hoverEnabled: true
+                                onPositionChanged: window.showFullScreenControls()
                                 onClicked: window.clearWidgetSelection()
                                 onDoubleClicked: window.toggleFullScreen()
                             }
@@ -1694,6 +1849,65 @@ ApplicationWindow {
                                 selectedIndices: window.selectedWidgetIndices
                                 onSelectionRequested: (index, additive) => window.selectWidget(index, additive)
                                 onFullScreenRequested: window.toggleFullScreen()
+                            }
+                            Rectangle {
+                                id: fullScreenTransport
+                                visible: window.fullScreenPreview && window.fullScreenControlsVisible
+                                z: 20
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 22
+                                height: 58
+                                radius: 10
+                                color: "#c40b1017"
+                                border.color: "#4d334253"
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 10
+                                    FeButton {
+                                        width: 38
+                                        implicitWidth: 38
+                                        compact: true
+                                        accent: mediaPlayer.playbackState === MediaPlayer.PlayingState
+                                        text: mediaPlayer.playbackState === MediaPlayer.PlayingState ? "Ⅱ" : "▶"
+                                        onClicked: window.togglePlayback()
+                                    }
+                                    Label {
+                                        text: window.formatTime(mediaPlayer.position)
+                                        color: "#dbe4ed"
+                                        font.family: "Menlo"
+                                        font.pixelSize: 10
+                                    }
+                                    FeSlider {
+                                        id: fullScreenTimeline
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: Math.max(1, mediaPlayer.duration)
+                                        value: mediaPlayer.position
+                                        onPressedChanged: {
+                                            window.fullScreenScrubbing = pressed;
+                                            if (pressed) {
+                                                fullScreenControlsTimer.stop();
+                                                window.fullScreenControlsVisible = true;
+                                            } else {
+                                                window.showFullScreenControls();
+                                            }
+                                        }
+                                        onMoved: {
+                                            mediaPlayer.position = value;
+                                            window.showFullScreenControls();
+                                        }
+                                    }
+                                    Label {
+                                        text: window.formatTime(mediaPlayer.duration)
+                                        color: "#9aa8b8"
+                                        font.family: "Menlo"
+                                        font.pixelSize: 10
+                                    }
+                                }
                             }
                         }
                     }

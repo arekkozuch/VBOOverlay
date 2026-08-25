@@ -96,6 +96,7 @@ Rectangle {
                             appController.telemetryDuration;
                             return appController.telemetrySeries(channelName, 0, root.durationSeconds, Math.max(100, Math.round(width * 1.5)));
                         }
+                        property bool hasData: (series.segments || []).length > 0
 
                         Item {
                             anchors.fill: parent
@@ -166,7 +167,7 @@ Rectangle {
                                     onHeightChanged: requestPaint()
                                     onPaint: {
                                         const context = getContext("2d");
-                                        context.reset();
+                                        context.clearRect(0, 0, width, height);
                                         context.strokeStyle = "#18232e";
                                         context.lineWidth = 1;
                                         for (let grid = 1; grid < 4; ++grid) {
@@ -179,8 +180,11 @@ Rectangle {
                                         const segments = plotSeries.segments || [];
                                         if (segments.length === 0)
                                             return;
-                                        const low = Number(plotSeries.minimum || 0);
-                                        const high = Number(plotSeries.maximum || 0);
+                                        const rawLow = Number(plotSeries.minimum);
+                                        const rawHigh = Number(plotSeries.maximum);
+                                        const padding = rawHigh === rawLow ? Math.max(0.5, Math.abs(rawLow) * 0.05) : 0;
+                                        const low = rawLow - padding;
+                                        const high = rawHigh + padding;
                                         const span = Math.max(0.000001, high - low);
                                         context.strokeStyle = chartRow.lineColor;
                                         context.lineWidth = 1.6;
@@ -191,7 +195,7 @@ Rectangle {
                                                 continue;
                                             context.beginPath();
                                             for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
-                                                const x = Number(points[pointIndex].x) * width;
+                                                const x = Math.max(0, Math.min(width, Number(points[pointIndex].x) * width));
                                                 const y = height - 3 - (Number(points[pointIndex].y) - low) / span * Math.max(1, height - 6);
                                                 if (pointIndex === 0)
                                                     context.moveTo(x, y);
@@ -199,8 +203,23 @@ Rectangle {
                                                     context.lineTo(x, y);
                                             }
                                             context.stroke();
+                                            if (points.length === 1) {
+                                                context.fillStyle = chartRow.lineColor;
+                                                context.beginPath();
+                                                context.arc(Math.max(0, Math.min(width, Number(points[0].x) * width)),
+                                                            height - 3 - (Number(points[0].y) - low) / span * Math.max(1, height - 6),
+                                                            2, 0, Math.PI * 2);
+                                                context.fill();
+                                            }
                                         }
                                     }
+                                }
+                                Label {
+                                    anchors.centerIn: parent
+                                    visible: !chartRow.hasData
+                                    text: qsTr("No data in selected range")
+                                    color: "#657386"
+                                    font.pixelSize: 10
                                 }
                                 Rectangle {
                                     x: Math.max(0, Math.min(parent.width - width, appController.playbackTime / root.durationSeconds * parent.width))

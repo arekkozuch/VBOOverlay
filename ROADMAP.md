@@ -6,7 +6,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 
 - [x] Native Qt 6/C++/QML application and local Qt Test target.
 - [x] VBO parsing, time-based telemetry lookup, synchronization, GoPro GPMF GPS extraction, and GPS-speed auto-sync.
-- [x] Widget editor, templates, projects, analysis workspace, and shared preview/export telemetry scene.
+- [x] Widget editor, templates, projects, analysis workspace, and shared preview/export telemetry scene, including minimum-size-reachable sidebars and synchronized keyboard/full-screen transport.
 - [x] HEVC/AAC export with custom source ranges, staged overlay validation, diagnostics, progress, and cancellation.
 - [x] Export output transactions, including explicit state-bound overwrite consent, changed-target refusal, and protected user targets.
 - [x] Atomic project saving and dirty-state safeguards for destructive project actions.

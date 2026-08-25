@@ -30,6 +30,19 @@ Window {
     function saveLayout() {
         appController.saveAnalysisWindowState(x, y, width, height, Math.max(220, contextColumn.width), Math.max(130, videoPane.height));
     }
+    function playbackShortcutBlocked() {
+        let item = activeFocusItem;
+        while (item) {
+            if (item instanceof TextInput || item instanceof TextEdit || item instanceof Button
+                    || item instanceof CheckBox || item instanceof ComboBox || item instanceof Slider)
+                return true;
+            item = item.parent;
+        }
+        return false;
+    }
+    function seekMainPlayback(deltaMilliseconds) {
+        seekRequested(Math.max(0, Math.min(Math.max(0, mediaDuration), playbackPosition + deltaMilliseconds)));
+    }
 
     onClosing: close => {
         saveLayout();
@@ -67,6 +80,14 @@ Window {
             }
         }
     }
+
+    Shortcut { sequence: "Space"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.togglePlaybackRequested() }
+    Shortcut { sequence: "Left"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(-5000) }
+    Shortcut { sequence: "Right"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(5000) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(-30000) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(30000) }
+    Shortcut { sequence: "Home"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekRequested(0) }
+    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekRequested(Math.max(0, mediaDuration)) }
 
     ColumnLayout {
         anchors.fill: parent
