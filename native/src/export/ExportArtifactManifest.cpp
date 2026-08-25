@@ -1,4 +1,6 @@
 #include "export/ExportArtifactManifest.h"
+#include "project/BoundedJsonLoader.h"
+#include "project/ProjectLimits.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -93,17 +95,15 @@ bool ExportArtifactManifest::update(const QString &manifestPath, const ExportArt
 
 bool ExportArtifactManifest::read(const QString &manifestPath, ExportArtifactManifestData *data, QString *error)
 {
-    QFile file(manifestPath);
-    if (!file.open(QIODevice::ReadOnly)) { if (error) *error = file.errorString(); return false; }
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    const QJsonObject object = document.object();
+    const auto loaded = BoundedJsonLoader::loadFile(
+        manifestPath, ProjectLimits::manifestBytes, QStringLiteral("Export ownership manifest"));
+    if (!loaded.success() || !loaded.document.isObject()) { if (error) *error = loaded.error; return false; }
+    const QJsonObject object = loaded.document.object();
     ExportArtifactManifestData parsed{object.value("exportId").toString(),
         object.value("createdUtcMilliseconds").toInteger(), object.value("temporaryOverlayPath").toString(),
         object.value("outputStagingPath").toString(), object.value("finalTargetPath").toString(),
         object.value("workerPid").toInteger(), object.value("state").toString()};
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()
-        || object.value("version").toInt() != version || !validOwnedData(manifestPath, parsed)) {
+    if (object.value("version").toInt() != version || !validOwnedData(manifestPath, parsed)) {
         if (error) *error = QStringLiteral("Manifest is malformed or does not prove artifact ownership.");
         return false;
     }

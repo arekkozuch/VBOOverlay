@@ -1,0 +1,96 @@
+#include "project/ProjectLimits.h"
+
+#include <QJsonArray>
+
+namespace FlappedEar::ProjectLimits {
+namespace {
+
+bool fail(QString *error, const QString &message)
+{
+    if (error) *error = message;
+    return false;
+}
+
+bool validateValue(const QJsonValue &value, const qsizetype depth, QString *error)
+{
+    if (depth > maximumJsonDepth) return fail(error, QStringLiteral("JSON nesting exceeds %1 levels.").arg(maximumJsonDepth));
+    if (value.isString() && value.toString().size() > maximumStringCharacters) {
+        return fail(error, QStringLiteral("JSON string exceeds %1 characters.").arg(maximumStringCharacters));
+    }
+    if (value.isArray()) {
+        const QJsonArray array = value.toArray();
+        for (const QJsonValue &item : array) if (!validateValue(item, depth + 1, error)) return false;
+    } else if (value.isObject()) {
+        const QJsonObject object = value.toObject();
+        for (auto it = object.begin(); it != object.end(); ++it) {
+            if (it.key().size() > maximumStringCharacters || !validateValue(it.value(), depth + 1, error)) return false;
+        }
+    }
+    return true;
+}
+
+bool validateWidgets(const QJsonArray &widgets, QString *error)
+{
+    if (widgets.size() > maximumWidgets) return fail(error, QStringLiteral("Widget count exceeds %1.").arg(maximumWidgets));
+    qsizetype totalCues = 0;
+    for (const QJsonValue &value : widgets) {
+        if (!value.isObject()) return fail(error, QStringLiteral("Each widget must be a JSON object."));
+        const QJsonObject widget = value.toObject();
+        const QString id = widget.value(QStringLiteral("id")).toString();
+        const QString type = widget.value(QStringLiteral("type")).toString();
+        if (id.isEmpty() || id.size() > maximumIdCharacters || type.isEmpty() || type.size() > maximumIdCharacters) {
+            return fail(error, QStringLiteral("Widget id or type is missing or too long."));
+        }
+        const QJsonValue settingsValue = widget.value(QStringLiteral("settings"));
+        if (!settingsValue.isUndefined() && !settingsValue.isObject()) return fail(error, QStringLiteral("Widget settings must be an object."));
+        if (settingsValue.toObject().size() > maximumSettingsEntries) {
+            return fail(error, QStringLiteral("Widget settings exceed %1 entries.").arg(maximumSettingsEntries));
+        }
+        const QJsonValue cuesValue = widget.value(QStringLiteral("cues"));
+        if (!cuesValue.isUndefined() && !cuesValue.isArray()) return fail(error, QStringLiteral("Widget cues must be an array."));
+        const qsizetype cues = cuesValue.toArray().size();
+        if (cues > maximumCuesPerWidget || (totalCues += cues) > maximumTotalCues) {
+            return fail(error, QStringLiteral("Widget cue count exceeds the project limit."));
+        }
+    }
+    return true;
+}
+}
+
+bool validateProject(const QJsonObject &project, QString *error)
+{
+    if (!validateValue(project, 0, error)) return false;
+    if (project.value(QStringLiteral("version")).toInt() != 2) return fail(error, QStringLiteral("Unsupported project version."));
+    const QJsonValue sceneValue = project.value(QStringLiteral("scene"));
+    if (!sceneValue.isObject() || !sceneValue.toObject().value(QStringLiteral("widgets")).isArray()) {
+        return fail(error, QStringLiteral("Project scene/widgets structure is missing."));
+    }
+    return validateWidgets(sceneValue.toObject().value(QStringLiteral("widgets")).toArray(), error);
+}
+
+bool validateTemplate(const QJsonObject &templateObject, QString *error)
+{
+    if (!validateValue(templateObject, 0, error)) return false;
+    const QString id = templateObject.value(QStringLiteral("id")).toString();
+    const QString name = templateObject.value(QStringLiteral("name")).toString();
+    const QString description = templateObject.value(QStringLiteral("description")).toString();
+    if (id.isEmpty() || id.size() > maximumIdCharacters || name.trimmed().isEmpty() || name.size() > maximumTemplateNameCharacters
+        || description.size() > maximumTemplateDescriptionCharacters || !templateObject.value(QStringLiteral("widgets")).isArray()) {
+        return fail(error, QStringLiteral("Template metadata is malformed or exceeds its limits."));
+    }
+    return validateWidgets(templateObject.value(QStringLiteral("widgets")).toArray(), error);
+}
+
+bool validateTemplateStore(const QJsonObject &store, QString *error)
+{
+    if (!validateValue(store, 0, error)) return false;
+    if (store.value(QStringLiteral("schemaVersion")).toInt() != 1 || !store.value(QStringLiteral("templates")).isArray()) {
+        return fail(error, QStringLiteral("Unsupported template store."));
+    }
+    const QJsonArray templates = store.value(QStringLiteral("templates")).toArray();
+    if (templates.size() > maximumTemplateCount) return fail(error, QStringLiteral("Template store exceeds %1 templates.").arg(maximumTemplateCount));
+    for (const QJsonValue &value : templates) if (!value.isObject() || !validateTemplate(value.toObject(), error)) return false;
+    return true;
+}
+
+} // namespace FlappedEar::ProjectLimits

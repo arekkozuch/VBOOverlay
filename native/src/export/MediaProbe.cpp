@@ -2,6 +2,7 @@
 
 #include "export/FfmpegTools.h"
 #include "export/ExportDiagnostics.h"
+#include "export/BoundedProcessOutput.h"
 
 #include <QElapsedTimer>
 #include <QJsonArray>
@@ -108,12 +109,23 @@ MediaInfo runProbe(
         progressCallback({MediaProbeEvent::Phase::Started, 0, executable, arguments, path, mode, 0});
     }
     DiagnosticHeartbeat heartbeat(500);
+    BoundedProcessOutput stdoutOutput(BoundedProcessOutput::Mode::CompletePayload, ProcessOutputLimits::ffprobeJsonBytes);
+    BoundedProcessOutput stderrOutput(BoundedProcessOutput::Mode::DiagnosticTail, ProcessOutputLimits::ffmpegDiagnosticTailBytes);
+    const auto drain = [&] {
+        stdoutOutput.append(process.readAllStandardOutput());
+        stderrOutput.append(process.readAllStandardError());
+    };
     bool finished = false;
     while (!finished && elapsed.elapsed() < timeoutMilliseconds) {
         if (cancellationCallback && cancellationCallback()) {
             stopAndReap(process);
             throw OperationCancelled(
                 QStringLiteral("ffprobe cancelled while probing: %1").arg(path).toStdString());
+        }
+        drain();
+        if (stdoutOutput.exceeded()) {
+            stopAndReap(process); drain();
+            throw std::runtime_error(QStringLiteral("ffprobe %1 output exceeded %2 bytes while probing %3 (observed %4 bytes).").arg(mode).arg(ProcessOutputLimits::ffprobeJsonBytes).arg(path).arg(stdoutOutput.observedBytes()).toStdString());
         }
         const qint64 remaining = timeoutMilliseconds - elapsed.elapsed();
         finished = process.waitForFinished(static_cast<int>(qMin<qint64>(250, remaining)));
@@ -124,17 +136,18 @@ MediaInfo runProbe(
     }
     if (!finished) {
         stopAndReap(process);
-        const QByteArray stdoutOutput = process.readAllStandardOutput();
-        const QByteArray stderrOutput = process.readAllStandardError();
+        drain();
         throw std::runtime_error(
             QStringLiteral("ffprobe timed out after %1 seconds while probing: %2 "
                            "(elapsed %3 seconds, stdout %4 bytes). stderr: %5")
                 .arg(secondsText(timeoutMilliseconds), path, secondsText(elapsed.elapsed()),
-                     QString::number(stdoutOutput.size()), stderrDiagnostic(stderrOutput)).toStdString());
+                     QString::number(stdoutOutput.observedBytes()), stderrDiagnostic(stderrOutput.bytes())).toStdString());
     }
 
-    const QByteArray stdoutOutput = process.readAllStandardOutput();
-    const QByteArray stderrOutput = process.readAllStandardError();
+    drain();
+    if (stdoutOutput.exceeded()) {
+        throw std::runtime_error(QStringLiteral("ffprobe %1 output exceeded %2 bytes while probing %3 (observed %4 bytes).").arg(mode).arg(ProcessOutputLimits::ffprobeJsonBytes).arg(path).arg(stdoutOutput.observedBytes()).toStdString());
+    }
     if (progressCallback) {
         progressCallback({MediaProbeEvent::Phase::Finished, elapsed.elapsed(), executable,
                           arguments, path, mode, process.exitCode()});
@@ -142,14 +155,14 @@ MediaInfo runProbe(
     if (process.exitStatus() != QProcess::NormalExit) {
         throw std::runtime_error(
             QStringLiteral("ffprobe crashed while probing: %1. stderr: %2")
-                .arg(path, stderrDiagnostic(stderrOutput)).toStdString());
+                .arg(path, stderrDiagnostic(stderrOutput.bytes())).toStdString());
     }
     if (process.exitCode() != 0) {
         throw std::runtime_error(
             QStringLiteral("ffprobe exited with code %1 while probing: %2. stderr: %3")
-                .arg(process.exitCode()).arg(path, stderrDiagnostic(stderrOutput)).toStdString());
+                .arg(process.exitCode()).arg(path, stderrDiagnostic(stderrOutput.bytes())).toStdString());
     }
-    return MediaProbe::parseJson(stdoutOutput, path);
+    return MediaProbe::parseJson(stdoutOutput.bytes(), path);
 }
 
 } // namespace

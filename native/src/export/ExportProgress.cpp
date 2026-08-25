@@ -1,4 +1,5 @@
 #include "export/ExportProgress.h"
+#include "export/BoundedProcessOutput.h"
 
 #include <QtGlobal>
 #include <cmath>
@@ -46,6 +47,10 @@ double ExportProgressEstimator::stageProgress(const QString &stage, const double
 QList<FfmpegProgress> FfmpegProgressParser::append(QByteArray data)
 {
     m_pending += std::move(data);
+    if (m_pending.size() > ProcessOutputLimits::ffmpegProgressLineBytes) {
+        m_pending.clear();
+        m_overflowed = true;
+    }
     QList<FfmpegProgress> updates;
     qsizetype newline = -1;
     while ((newline = m_pending.indexOf('\n')) >= 0) {
@@ -79,6 +84,8 @@ QList<FfmpegProgress> FfmpegProgressParser::append(QByteArray data)
     }
     return updates;
 }
+
+bool FfmpegProgressParser::overflowed() const { return m_overflowed; }
 
 double FfmpegProgressParser::overallPercent(const double outputSeconds, const double durationSeconds)
 {

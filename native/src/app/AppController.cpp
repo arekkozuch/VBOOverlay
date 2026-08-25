@@ -6,6 +6,8 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "export/ExportArtifactManifest.h"
 #include "export/PersistentExportLog.h"
+#include "project/BoundedJsonLoader.h"
+#include "project/ProjectLimits.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/VboParser.h"
 
@@ -403,6 +405,8 @@ bool AppController::projectLoading() const { return m_projectLoading; }
 QString AppController::projectLoadStage() const { return m_projectLoadStage; }
 QString AppController::projectLoadError() const { return m_projectLoadError; }
 bool AppController::recoveryPending() const { return m_recoveryPending; }
+bool AppController::recoveryDegraded() const { return m_recoveryDegraded; }
+QString AppController::recoveryError() const { return m_recoveryError; }
 QString AppController::sourceMismatchType() const { return m_sourceMismatchType; }
 QString AppController::sourceMismatchCandidateName() const
 {
@@ -1002,22 +1006,63 @@ void AppController::resolveStartupRecovery(const QString &decision)
 
 bool AppController::performOpenProject(const QUrl &url)
 {
-    AppLog::info(QStringLiteral("Project load started: %1").arg(url.toLocalFile()));
-    QFile file(url.toLocalFile());
-    if (!file.open(QIODevice::ReadOnly)) {
-        AppLog::error(QStringLiteral("Project load failed: %1: %2")
-                          .arg(url.toLocalFile(), file.errorString()));
-        setStatus(QStringLiteral("Project error: %1").arg(file.errorString()));
-        return false;
-    }
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    return beginProjectLoad(normalizedSourcePath(file.fileName()), document.object());
+    if (!url.isLocalFile()) return false;
+    const QString projectPath = normalizedSourcePath(url.toLocalFile());
+    AppLog::info(QStringLiteral("Project load started: %1").arg(projectPath));
+    const quint64 generation = beginSourceGeneration();
+    const quint64 documentRevision = m_documentState.revision();
+    m_projectLoadCancellation = std::make_shared<std::atomic_bool>(false);
+    const std::shared_ptr<std::atomic_bool> cancellation = m_projectLoadCancellation;
+    setProjectLoadState(true, QStringLiteral("Validating project"));
+    m_projectLoadWatcher.setFuture(QtConcurrent::run([projectPath, generation, documentRevision, cancellation] {
+        ProjectLoadResult result;
+        result.projectPath = projectPath;
+        result.generation = generation;
+        result.documentRevisionAtStart = documentRevision;
+        if (cancellation->load()) { result.cancelled = true; return result; }
+        const auto loaded = BoundedJsonLoader::loadFile(
+            projectPath, ProjectLimits::projectBytes, QStringLiteral("Project"));
+        if (!loaded.success() || !loaded.document.isObject()) { result.error = loaded.error; return result; }
+        const QJsonObject project = loaded.document.object();
+        QString validationError;
+        if (!ProjectLimits::validateProject(project, &validationError)) { result.error = validationError; return result; }
+        if (cancellation->load()) { result.cancelled = true; return result; }
+        const QJsonObject sync = project.value(QStringLiteral("sync")).toObject();
+        const double offset = sync.value(QStringLiteral("offset")).toDouble();
+        const double timeScale = sync.value(QStringLiteral("timeScale")).toDouble(1.0);
+        if (!std::isfinite(offset) || !std::isfinite(timeScale) || timeScale <= 0.0) {
+            result.error = QStringLiteral("Synchronization state is invalid."); return result;
+        }
+        const QJsonObject analysis = project.value(QStringLiteral("analysis")).toObject();
+        for (const QJsonValue &value : analysis.value(QStringLiteral("channels")).toArray()) {
+            if (!value.isString() || value.toString().size() > ProjectLimits::maximumStringCharacters) {
+                result.error = QStringLiteral("Analysis channels are malformed."); return result;
+            }
+            result.analysisChannels.append(value.toString());
+        }
+        result.success = true;
+        result.project = project;
+        result.widgets = project.value(QStringLiteral("scene")).toObject().value(QStringLiteral("widgets")).toArray();
+        result.sync = {offset, timeScale};
+        result.videoReference = ProjectSourceReferenceCodec::fromProject(project, QStringLiteral("video"), QStringLiteral("videoPath"));
+        result.vboReference = ProjectSourceReferenceCodec::fromProject(project, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
+        result.resolvedVideoPath = ProjectSourceReferenceCodec::resolve(result.videoReference, projectPath);
+        result.resolvedVboPath = ProjectSourceReferenceCodec::resolve(result.vboReference, projectPath);
+        return result;
+    }));
+    return true;
 }
 
 bool AppController::beginProjectLoad(
     QString projectPath, const QJsonObject &project, const bool recovered,
     const quint64 recoveredRevision, const quint64 recoveredLastSavedRevision)
 {
+    QString validationError;
+    if (!ProjectLimits::validateProject(project, &validationError)) {
+        AppLog::error(QStringLiteral("Project load failed: %1").arg(validationError));
+        setStatus(QStringLiteral("Project error: %1").arg(validationError));
+        return false;
+    }
     const QJsonObject scene = project.value("scene").toObject();
     WidgetModel candidateWidgets;
     if (project.value("version").toInt() != 2 || !scene.value("widgets").isArray()
@@ -1491,6 +1536,8 @@ bool AppController::startExport(
     // cleanup after completion.
     m_exportConfig->close();
     m_exportStdout.clear();
+    m_exportStderr = BoundedProcessOutput(BoundedProcessOutput::Mode::DiagnosticTail,
+                                          ProcessOutputLimits::ffmpegDiagnosticTailBytes);
     m_exportProgress = 0;
     m_exportError.clear();
     m_exportMetrics.clear();
@@ -1771,6 +1818,15 @@ void AppController::handleExportOutput()
         return;
     }
     m_exportStdout.append(m_exportProcess->readAllStandardOutput());
+    m_exportStderr.append(m_exportProcess->readAllStandardError());
+    if (m_exportStdout.size() > ProcessOutputLimits::workerMessageBytes) {
+        m_exportStdout.clear();
+        m_exportError = QStringLiteral("Export worker emitted a message longer than %1 bytes.")
+                            .arg(ProcessOutputLimits::workerMessageBytes);
+        AppLog::error(m_exportError);
+        if (m_exportSupervisor) static_cast<void>(m_exportSupervisor->stopAndWait());
+        return;
+    }
     qsizetype newline = -1;
     while ((newline = m_exportStdout.indexOf('\n')) >= 0) {
         const QByteArray line = m_exportStdout.left(newline);
@@ -1895,9 +1951,8 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
 {
     handleExportOutput();
     const bool cancelled = QFileInfo::exists(m_exportCancelPath);
-    const QString workerError = m_exportProcess
-        ? QString::fromUtf8(m_exportProcess->readAllStandardError()).trimmed()
-        : QString();
+    if (m_exportProcess) m_exportStderr.append(m_exportProcess->readAllStandardError());
+    const QString workerError = m_exportStderr.text();
     QString persistentResult;
     QString persistentError;
     if (cancelled) {
@@ -2087,6 +2142,8 @@ void AppController::markPersistentChange()
 void AppController::scheduleRecoveryWrite()
 {
     if (!m_recoveryPending && m_documentState.dirty()) {
+        // A normal edit retries immediately; a failed write below schedules a
+        // bounded backoff so a broken filesystem cannot cause a busy loop.
         m_recoveryTimer.start();
     }
 }
@@ -2106,7 +2163,17 @@ void AppController::writeRecoverySnapshot()
     QString error;
     if (!m_recoveryStore.write(snapshot, &error)) {
         AppLog::error(QStringLiteral("Recovery snapshot write failed: %1").arg(error));
+        const bool changed = !m_recoveryDegraded || m_recoveryError != error;
+        m_recoveryDegraded = true;
+        m_recoveryError = error;
+        if (changed) emit recoveryChanged();
+        m_recoveryTimer.start(5'000);
         return;
+    }
+    if (m_recoveryDegraded) {
+        m_recoveryDegraded = false;
+        m_recoveryError.clear();
+        emit recoveryChanged();
     }
     AppLog::info(QStringLiteral("Recovery snapshot written"));
 }

@@ -1,4 +1,6 @@
 #include "widgets/WidgetModel.h"
+#include "project/BoundedJsonLoader.h"
+#include "project/ProjectLimits.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -31,7 +33,9 @@ const QJsonObject &templateCatalog()
         if (!file.open(QIODevice::ReadOnly)) {
             return QJsonObject();
         }
-        return QJsonDocument::fromJson(file.readAll()).object();
+        const auto loaded = BoundedJsonLoader::loadFile(
+            file.fileName(), ProjectLimits::templateBytes, QStringLiteral("Built-in template catalog"));
+        return loaded.success() && loaded.document.isObject() ? loaded.document.object() : QJsonObject();
     }();
     return catalog;
 }
@@ -124,8 +128,7 @@ QString templateStorePath()
 
 bool validTemplateObject(const QJsonObject &item)
 {
-    if (item.value("id").toString().isEmpty() || item.value("name").toString().trimmed().isEmpty()
-        || !item.value("widgets").isArray()) {
+    if (!ProjectLimits::validateTemplate(item)) {
         return false;
     }
     for (const QJsonValue &value : item.value("widgets").toArray()) {
@@ -660,11 +663,12 @@ QString WidgetModel::importTemplate(const QUrl &url)
     if (!url.isLocalFile()) {
         return {};
     }
-    QFile file(url.toLocalFile());
-    if (!file.open(QIODevice::ReadOnly)) {
+    const auto loaded = BoundedJsonLoader::loadFile(
+        url.toLocalFile(), ProjectLimits::templateBytes, QStringLiteral("Template"));
+    if (!loaded.success() || !loaded.document.isObject()) {
         return {};
     }
-    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+    const QJsonObject root = loaded.document.object();
     QJsonObject item = root.value("template").toObject();
     if (item.isEmpty()) {
         item = root;
@@ -692,12 +696,13 @@ void WidgetModel::reloadTemplates()
 
 void WidgetModel::loadUserTemplates()
 {
-    QFile file(templateStorePath());
-    if (!file.open(QIODevice::ReadOnly)) {
+    const auto loaded = BoundedJsonLoader::loadFile(
+        templateStorePath(), ProjectLimits::templateStoreBytes, QStringLiteral("Template store"));
+    if (!loaded.success() || !loaded.document.isObject()) {
         return;
     }
-    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
-    if (root.value("schemaVersion").toInt() != 1) {
+    const QJsonObject root = loaded.document.object();
+    if (!ProjectLimits::validateTemplateStore(root)) {
         return;
     }
     for (const QJsonValue &value : root.value("templates").toArray()) {
@@ -754,6 +759,9 @@ QJsonArray WidgetModel::toJson() const
 
 bool WidgetModel::fromJson(const QJsonArray &array)
 {
+    const QJsonObject document{{QStringLiteral("version"), 2},
+                               {QStringLiteral("scene"), QJsonObject{{QStringLiteral("widgets"), array}}}};
+    if (!ProjectLimits::validateProject(document)) return false;
     QList<WidgetData> widgets;
     for (const QJsonValue &entry : array) {
         const QJsonObject object = entry.toObject();

@@ -1,4 +1,6 @@
 #include "project/ProjectRecoveryStore.h"
+#include "project/BoundedJsonLoader.h"
+#include "project/ProjectLimits.h"
 
 #include <QDir>
 #include <QFile>
@@ -27,19 +29,19 @@ bool ProjectRecoveryStore::exists() const { return QFileInfo(m_path).isFile(); }
 
 bool ProjectRecoveryStore::load(ProjectRecoverySnapshot *snapshot, QString *error) const
 {
-    QFile file(m_path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = file.errorString();
+    const auto loaded = BoundedJsonLoader::loadFile(
+        m_path, ProjectLimits::recoveryBytes, QStringLiteral("Recovery snapshot"));
+    if (!loaded.success() || !loaded.document.isObject()) {
+        if (error) *error = loaded.error;
         return false;
     }
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    const QJsonObject root = document.object();
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()
-        || root.value(QStringLiteral("recoveryVersion")).toInt() != RecoveryFormatVersion
+    const QJsonObject root = loaded.document.object();
+    QString projectError;
+    if (root.value(QStringLiteral("recoveryVersion")).toInt() != RecoveryFormatVersion
         || root.value(QStringLiteral("dirty")).toBool() != true
-        || !root.value(QStringLiteral("project")).isObject()) {
-        if (error) *error = QStringLiteral("invalid or unsupported recovery snapshot");
+        || !root.value(QStringLiteral("project")).isObject()
+        || !ProjectLimits::validateProject(root.value(QStringLiteral("project")).toObject(), &projectError)) {
+        if (error) *error = QStringLiteral("invalid or unsupported recovery snapshot: %1").arg(projectError);
         return false;
     }
     bool revisionOk = false;

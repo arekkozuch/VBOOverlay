@@ -1796,10 +1796,18 @@ ApplicationWindow {
                 anchors.rightMargin: 14
                 Label {
                     Layout.fillWidth: true
-                    text: appController.statusText
-                    color: "#718092"
+                    text: appController.recoveryDegraded
+                          ? qsTr("Automatic recovery could not be saved. Save the project manually to protect your changes.")
+                          : appController.statusText
+                    color: appController.recoveryDegraded ? "#ffbf5b" : "#718092"
                     font.pixelSize: 10
                     elide: Text.ElideRight
+                }
+                FeButton {
+                    visible: appController.recoveryDegraded
+                    compact: true
+                    text: qsTr("SAVE")
+                    onClicked: appController.saveCurrentProject()
                 }
                 Label {
                     text: qsTr("%1 widgets").arg(appController.widgetModel.count)

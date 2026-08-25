@@ -15,6 +15,8 @@ qt_add_library(flappedear_core STATIC
     src/app/AppLog.h
     src/export/EncoderDetector.cpp
     src/export/EncoderDetector.h
+    src/export/BoundedProcessOutput.cpp
+    src/export/BoundedProcessOutput.h
     src/export/ExportDiagnostics.cpp
     src/export/ExportDiagnostics.h
     src/export/ExportArtifactManifest.cpp
@@ -50,6 +52,10 @@ qt_add_library(flappedear_core STATIC
     src/gopro/GoProTelemetrySource.h
     src/project/ProjectWriter.cpp
     src/project/ProjectWriter.h
+    src/project/BoundedJsonLoader.cpp
+    src/project/BoundedJsonLoader.h
+    src/project/ProjectLimits.cpp
+    src/project/ProjectLimits.h
     src/project/ProjectDocumentState.cpp
     src/project/ProjectDocumentState.h
     src/project/ProjectRecoveryStore.cpp

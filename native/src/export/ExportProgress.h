@@ -30,10 +30,12 @@ class FfmpegProgressParser final {
 public:
     [[nodiscard]] QList<FfmpegProgress> append(QByteArray data);
     [[nodiscard]] static double overallPercent(double outputSeconds, double durationSeconds);
+    [[nodiscard]] bool overflowed() const;
 
 private:
     QByteArray m_pending;
     FfmpegProgress m_current;
+    bool m_overflowed = false;
 };
 
 class ExportProgressEstimator final {

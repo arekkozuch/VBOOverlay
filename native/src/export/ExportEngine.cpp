@@ -1,4 +1,5 @@
 #include "export/ExportEngine.h"
+#include "export/BoundedProcessOutput.h"
 
 #include "export/EncoderDetector.h"
 #include "export/ExportArtifactManifest.h"
@@ -148,11 +149,12 @@ OverlaySampleResult sampleTemporaryOverlay(
         result.error = QStringLiteral("Could not start FFmpeg representative sample: %1").arg(process.errorString());
         return result;
     }
-    QByteArray encoded;
-    QString standardErrorText;
+    BoundedProcessOutput encoded(BoundedProcessOutput::Mode::ByteCountOnly, 0);
+    BoundedProcessOutput standardError(BoundedProcessOutput::Mode::DiagnosticTail,
+                                      ProcessOutputLimits::ffmpegDiagnosticTailBytes);
     const auto drain = [&] {
         encoded.append(process.readAllStandardOutput());
-        standardErrorText += QString::fromUtf8(process.readAllStandardError());
+        standardError.append(process.readAllStandardError());
     };
     RawFrameTransport transport(
         process, {}, [&settings] { return isCancelled(settings); }, drain,
@@ -210,12 +212,12 @@ OverlaySampleResult sampleTemporaryOverlay(
         static_cast<void>(supervisor.stopAndWait());
         return result;
     }
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || encoded.isEmpty()) {
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || encoded.observedBytes() == 0) {
         result.error = QStringLiteral("FFmpeg representative sample failed: %1")
-                           .arg(standardErrorText.trimmed());
+                           .arg(standardError.text());
         return result;
     }
-    result.encodedBytes = encoded.size();
+    result.encodedBytes = encoded.observedBytes();
     return result;
 }
 
@@ -600,7 +602,8 @@ ExportResult ExportEngine::exportVideo(
         }
         FfmpegProgressParser progressParser;
         FfmpegProgress lastFfmpegProgress;
-        QString standardErrorText;
+        BoundedProcessOutput standardErrorOutput(BoundedProcessOutput::Mode::DiagnosticTail,
+                                                 ProcessOutputLimits::ffmpegDiagnosticTailBytes);
         QElapsedTimer activityTimer;
         activityTimer.start();
         QElapsedTimer storageMonitorTimer;
@@ -673,7 +676,7 @@ ExportResult ExportEngine::exportVideo(
             if (!stdoutData.isEmpty() || !stderrData.isEmpty()) {
                 activityTimer.restart();
             }
-            standardErrorText += QString::fromUtf8(stderrData);
+            standardErrorOutput.append(stderrData);
             const QList<FfmpegProgress> updates = progressParser.append(stdoutData);
             for (const FfmpegProgress &update : updates) {
                 lastFfmpegProgress = update;
@@ -711,7 +714,7 @@ ExportResult ExportEngine::exportVideo(
                 result.maximumQueuedBytes,
                 temporaryOverlayPath,
                 result.temporaryOverlayBytes,
-                standardErrorText.right(16 * 1024),
+                standardErrorOutput.text(),
                 temporaryFilesystemNow.root,
                 temporaryFilesystemNow.availableBytes,
                 temporaryFilesystemNow.totalBytes,
@@ -847,7 +850,7 @@ ExportResult ExportEngine::exportVideo(
                 static_cast<void>(ffmpegSupervisor.stopAndWait());
                 pumpFfmpeg();
                 result.diagnostics = formatDiagnostics(
-                    ffmpeg, lastFfmpegProgress, standardErrorText, QStringLiteral("Stage A overlay"), overlayArguments,
+                    ffmpeg, lastFfmpegProgress, standardErrorOutput.text(), QStringLiteral("Stage A overlay"), overlayArguments,
                     temporaryOverlayPath, result.temporaryOverlayBytes, stageAStdinCloseReason);
                 return result;
             }
@@ -862,7 +865,7 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("flushTemporaryOverlay"),
                 QStringLiteral("Stage A FFmpeg exited · code %1").arg(ffmpeg.exitCode()),
                 QStringLiteral("ffmpeg"), {{"exitCode", ffmpeg.exitCode()},
-                                            {"stderr", standardErrorText.right(16 * 1024)}});
+                                            {"stderr", standardErrorOutput.text()}});
         if (!QFileInfo(temporaryOverlayPath).isFile()
             || QFileInfo(temporaryOverlayPath).size() <= 0) {
             result.error = QStringLiteral("FFmpeg did not create the temporary telemetry overlay.");
@@ -1005,7 +1008,8 @@ ExportResult ExportEngine::exportVideo(
         activeSupervisor = &compositorSupervisor;
         progressParser = FfmpegProgressParser{};
         lastFfmpegProgress = {};
-        standardErrorText.clear();
+        standardErrorOutput = BoundedProcessOutput(BoundedProcessOutput::Mode::DiagnosticTail,
+                                                   ProcessOutputLimits::ffmpegDiagnosticTailBytes);
         activityTimer.restart();
         compositing = true;
         finalizing = false;
@@ -1131,7 +1135,7 @@ ExportResult ExportEngine::exportVideo(
                 static_cast<void>(compositorSupervisor.stopAndWait());
                 pumpFfmpeg();
                 result.diagnostics = formatDiagnostics(
-                    compositor, lastFfmpegProgress, standardErrorText, QStringLiteral("Stage B composition"),
+                    compositor, lastFfmpegProgress, standardErrorOutput.text(), QStringLiteral("Stage B composition"),
                     compositionArguments, temporaryOverlayPath, result.temporaryOverlayBytes,
                     stageAStdinCloseReason);
                 return result;
@@ -1141,7 +1145,7 @@ ExportResult ExportEngine::exportVideo(
                 static_cast<void>(compositorSupervisor.stopAndWait());
                 pumpFfmpeg();
                 result.diagnostics = formatDiagnostics(
-                    compositor, lastFfmpegProgress, standardErrorText, QStringLiteral("Stage B composition"),
+                    compositor, lastFfmpegProgress, standardErrorOutput.text(), QStringLiteral("Stage B composition"),
                     compositionArguments, temporaryOverlayPath, result.temporaryOverlayBytes,
                     stageAStdinCloseReason);
                 return result;
@@ -1153,7 +1157,7 @@ ExportResult ExportEngine::exportVideo(
         if (compositor.exitStatus() != QProcess::NormalExit || compositor.exitCode() != 0) {
             result.error = QStringLiteral("FFmpeg composition failed.");
             result.diagnostics = formatDiagnostics(
-                compositor, lastFfmpegProgress, standardErrorText, QStringLiteral("Stage B composition"),
+                compositor, lastFfmpegProgress, standardErrorOutput.text(), QStringLiteral("Stage B composition"),
                 compositionArguments, temporaryOverlayPath, result.temporaryOverlayBytes,
                 stageAStdinCloseReason);
             return result;
@@ -1162,7 +1166,7 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("flushOutputContainer"),
                 QStringLiteral("Stage B FFmpeg exited · code %1").arg(compositor.exitCode()),
                 QStringLiteral("ffmpeg"), {{"exitCode", compositor.exitCode()},
-                                            {"stderr", standardErrorText.right(16 * 1024)}});
+                                            {"stderr", standardErrorOutput.text()}});
         if (lastFfmpegProgress.encodedFrames != expectedFrames) {
             observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
                     QStringLiteral("compareProgressFrameCount"),

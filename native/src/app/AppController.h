@@ -8,6 +8,7 @@
 #include "export/ExportOutputTransaction.h"
 #include "export/ExportProcessSupervisor.h"
 #include "export/PersistentExportLog.h"
+#include "export/BoundedProcessOutput.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -82,6 +83,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QString projectLoadStage READ projectLoadStage NOTIFY projectLoadChanged)
     Q_PROPERTY(QString projectLoadError READ projectLoadError NOTIFY projectLoadChanged)
     Q_PROPERTY(bool recoveryPending READ recoveryPending NOTIFY recoveryChanged)
+    Q_PROPERTY(bool recoveryDegraded READ recoveryDegraded NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryError READ recoveryError NOTIFY recoveryChanged)
     Q_PROPERTY(QString sourceMismatchType READ sourceMismatchType NOTIFY sourceMismatchChanged)
     Q_PROPERTY(QString sourceMismatchCandidateName READ sourceMismatchCandidateName NOTIFY sourceMismatchChanged)
     Q_PROPERTY(QString selectedTemplateId READ selectedTemplateId NOTIFY templateUiStateChanged)
@@ -142,6 +145,8 @@ public:
     [[nodiscard]] QString projectLoadStage() const;
     [[nodiscard]] QString projectLoadError() const;
     [[nodiscard]] bool recoveryPending() const;
+    [[nodiscard]] bool recoveryDegraded() const;
+    [[nodiscard]] QString recoveryError() const;
     [[nodiscard]] QString sourceMismatchType() const;
     [[nodiscard]] QString sourceMismatchCandidateName() const;
     [[nodiscard]] QString selectedTemplateId() const;
@@ -337,6 +342,8 @@ private:
     ProjectRecoverySnapshot m_pendingRecovery;
     QTimer m_recoveryTimer;
     bool m_recoveryPending = false;
+    bool m_recoveryDegraded = false;
+    QString m_recoveryError;
     QUrl m_pendingOpenProject;
     bool m_suppressDirtyTracking = false;
     double m_playbackTime = 0.0;
@@ -369,6 +376,8 @@ private:
     std::unique_ptr<QTemporaryFile> m_exportConfig;
     std::unique_ptr<ExportOutputTransaction> m_exportOutputTransaction;
     QByteArray m_exportStdout;
+    BoundedProcessOutput m_exportStderr{BoundedProcessOutput::Mode::DiagnosticTail,
+                                        ProcessOutputLimits::ffmpegDiagnosticTailBytes};
     QString m_exportCancelPath;
     QString m_exportSupervisionReadyPath;
     QString m_exportManifestPath;
