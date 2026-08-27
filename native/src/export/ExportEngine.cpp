@@ -378,6 +378,40 @@ StageBSourceAccess ExportEngine::stageBSourceAccess(
             sourceRangeEnd - inputSeekSeconds};
 }
 
+QString ExportEngine::stageBVideoFilterGraph(
+    const StageBSourceAccess &sourceAccess,
+    const QSize &sourceSize,
+    const QSize &outputSize,
+    const MediaRational &frameRate,
+    const qsizetype expectedFrames,
+    const ExportMediaProfile &mediaProfile)
+{
+    const bool requiresStraightOverlay = mediaProfile.outputBitDepth == 10;
+    const QString overlayPreparation = requiresStraightOverlay
+        ? QStringLiteral("format=pix_fmts=gbrap,unpremultiply=inplace=1,setparams=alpha_mode=straight")
+        : QStringLiteral("setparams=alpha_mode=premultiplied");
+    const QString overlayAlpha = requiresStraightOverlay
+        ? QStringLiteral("straight") : QStringLiteral("premultiplied");
+    const QString overlayFormat = requiresStraightOverlay
+        ? QStringLiteral("yuv420p10") : QStringLiteral("auto");
+    return QStringLiteral(
+        "[0:v]trim=start=%1,setpts=PTS-STARTPTS%4,"
+        "fps=fps=%2:start_time=0:round=near:eof_action=round,"
+        "trim=end_frame=%3,setpts=PTS-STARTPTS[sourceVideo];"
+        "[1:v]setpts=PTS-STARTPTS,%5[temporaryOverlay];"
+        "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=%6:format=%7[composited];"
+        "[composited]format=pix_fmts=%8[video]")
+            .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)
+            .arg(rateString(frameRate))
+            .arg(expectedFrames)
+            .arg(sourceSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
+                .arg(outputSize.width()).arg(outputSize.height()))
+            .arg(overlayPreparation)
+            .arg(overlayAlpha)
+            .arg(overlayFormat)
+            .arg(mediaProfile.outputPixelFormat);
+}
+
 ExportResult ExportEngine::exportVideo(
     const ExportSettings &settings, TelemetryFrameRenderer &renderer)
 {
@@ -1013,25 +1047,12 @@ ExportResult ExportEngine::exportVideo(
         activityTimer.restart();
         compositing = true;
         finalizing = false;
-        const QString overlayFormat = result.mediaProfile.outputBitDepth == 10
-            ? QStringLiteral("yuv420p10") : QStringLiteral("auto");
         constexpr double stageBSeekPrerollSeconds = 5.0;
         const StageBSourceAccess sourceAccess = stageBSourceAccess(
             sourceRangeStart, sourceRangeEnd, stageBSeekPrerollSeconds);
-        const QString timeRangeFilter = QStringLiteral(
-            "[0:v]trim=start=%1,setpts=PTS-STARTPTS%4,"
-            "fps=fps=%2:start_time=0:round=near:eof_action=round,"
-            "trim=end_frame=%3,setpts=PTS-STARTPTS[sourceVideo];"
-            "[1:v]setpts=PTS-STARTPTS,setparams=alpha_mode=premultiplied[temporaryOverlay];"
-            "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=premultiplied:format=%5[composited];"
-            "[composited]format=pix_fmts=%6[video]")
-                                            .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)
-                                            .arg(rateString(exportFrameRate))
-                                            .arg(expectedFrames)
-                                            .arg(source.videoSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
-                                                .arg(outputSize.width()).arg(outputSize.height()))
-                                            .arg(overlayFormat)
-                                            .arg(result.mediaProfile.outputPixelFormat);
+        const QString timeRangeFilter = stageBVideoFilterGraph(
+            sourceAccess, source.videoSize, outputSize, exportFrameRate,
+            expectedFrames, result.mediaProfile);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
             "-ss", QString::number(sourceAccess.inputSeekSeconds, 'f', 9),

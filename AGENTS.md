@@ -65,7 +65,9 @@
 - Preserve the staged, frame-correct telemetry-overlay export architecture unless evidence establishes a
   safer replacement. Do not restore the unsafe live-overlay FFmpeg approach.
 - Qt Quick offscreen frames use an explicit premultiplied-alpha contract from QRhi readback through
-  Stage A and Stage B composition. Do not rely on implicit alpha interpretation.
+  Stage A. For 10-bit YUV Stage B, explicitly unpremultiply the staged BGRA overlay and mark it
+  straight before straight-alpha composition; premultiplied YUV blending corrupts transparent chroma
+  offsets. Do not rely on implicit alpha interpretation.
 - Raw-frame transport into encoder processes uses bounded byte-oriented backpressure. Never assume
   `QProcess` can buffer complete raw frames. Partial, rejected, or timed-out writes must never be
   treated as successful frame submission.

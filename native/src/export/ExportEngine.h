@@ -117,6 +117,13 @@ public:
         double startTime, qsizetype frameIndex, const MediaRational &frameRate);
     [[nodiscard]] static StageBSourceAccess stageBSourceAccess(
         double sourceRangeStart, double sourceRangeEnd, double prerollSeconds = 5.0);
+    [[nodiscard]] static QString stageBVideoFilterGraph(
+        const StageBSourceAccess &sourceAccess,
+        const QSize &sourceSize,
+        const QSize &outputSize,
+        const MediaRational &frameRate,
+        qsizetype expectedFrames,
+        const ExportMediaProfile &mediaProfile);
 };
 
 } // namespace FlappedEar

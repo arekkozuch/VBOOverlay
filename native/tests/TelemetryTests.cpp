@@ -130,6 +130,7 @@ private slots:
     void rejectsUnsupportedExportDisplayTransforms();
     void validatesHighResolutionCapabilitiesAndCache();
     void preservesTenBitSdrThroughComposition();
+    void preservesTenBitFullRangeColorThroughVideoToolboxExport();
     void preservesExactExportRateRationals();
     void plansBoundedStageBSourceAccess();
     void preservesCfrCadenceForCommonRates();
@@ -4015,6 +4016,131 @@ void TelemetryTests::preservesTenBitSdrThroughComposition()
     QCOMPARE(info.sourceColorClass, SourceColorClass::Sdr);
     QVERIFY(info.averageFrameRate.isEquivalentTo({30, 1}));
     QVERIFY(!info.audioCodecs.isEmpty());
+}
+
+void TelemetryTests::preservesTenBitFullRangeColorThroughVideoToolboxExport()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the Main10 color-fidelity test.");
+    QProcess encoderQuery;
+    encoderQuery.start(ffmpeg, {QStringLiteral("-hide_banner"), QStringLiteral("-h"),
+                                QStringLiteral("encoder=hevc_videotoolbox")});
+    if (!encoderQuery.waitForStarted() || !encoderQuery.waitForFinished(10'000)
+        || encoderQuery.exitCode() != 0) {
+        QSKIP("This FFmpeg build does not provide VideoToolbox HEVC encoding.");
+    }
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    constexpr int width = 320;
+    constexpr int height = 192;
+    constexpr int frameCount = 3;
+    const QString size = QStringLiteral("%1x%2").arg(width).arg(height);
+    const QString sourceRaw = directory.filePath(QStringLiteral("source.rgb"));
+    const QString overlayRaw = directory.filePath(QStringLiteral("overlay.rgba"));
+    const QString source = directory.filePath(QStringLiteral("source-main10.mp4"));
+    const QString overlay = directory.filePath(QStringLiteral("overlay.mkv"));
+    const QString output = directory.filePath(QStringLiteral("output-main10.mp4"));
+    const QString referenceRaw = directory.filePath(QStringLiteral("reference.rgb"));
+    const QString decodedRaw = directory.filePath(QStringLiteral("decoded.rgb"));
+    constexpr std::array<std::array<uchar, 3>, 8> colors{{
+        {128, 128, 128}, {220, 32, 32}, {32, 200, 64}, {32, 64, 220},
+        {198, 134, 105}, {16, 20, 24}, {240, 240, 220}, {32, 200, 200},
+    }};
+    QByteArray sourcePixels(width * height * 3 * frameCount, '\0');
+    for (int frame = 0; frame < frameCount; ++frame) {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const int tile = (y >= height / 2 ? 4 : 0) + qMin(3, x * 4 / width);
+                const qsizetype offset = (qsizetype(frame) * width * height
+                                          + qsizetype(y) * width + x) * 3;
+                for (int component = 0; component < 3; ++component) {
+                    sourcePixels[offset + component] = static_cast<char>(colors[tile][component]);
+                }
+            }
+        }
+    }
+    QVERIFY(writeBytes(sourceRaw, sourcePixels));
+    QVERIFY(writeBytes(overlayRaw, QByteArray(width * height * 4 * frameCount, '\0')));
+
+    const auto runFfmpeg = [&ffmpeg](const QStringList &arguments) {
+        QProcess process;
+        process.start(ffmpeg, arguments);
+        QVERIFY2(process.waitForStarted(), qPrintable(process.errorString()));
+        QVERIFY2(process.waitForFinished(120'000), qPrintable(process.errorString()));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    };
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo",
+               "-pixel_format", "rgb24", "-video_size", size, "-framerate", "30", "-i",
+               sourceRaw, "-frames:v", QString::number(frameCount), "-vf",
+               "format=pix_fmts=yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast",
+               "-profile:v", "main10", "-pix_fmt", "yuv420p10le", "-color_range", "pc",
+               "-colorspace", "bt709", "-color_trc", "bt709", "-color_primaries", "bt709",
+               "-x265-params",
+               "lossless=1:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=full", source});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo",
+               "-pixel_format", "rgba", "-video_size", size, "-framerate", "30", "-i",
+               overlayRaw, "-frames:v", QString::number(frameCount), "-an", "-c:v", "ffv1",
+               "-pix_fmt", "bgra", "-f", "matroska", overlay});
+    const MediaInfo sourceInfo = MediaProbe::probe(source);
+    const ExportMediaProfile profile = ExportMediaProfile::derive(
+        sourceInfo, {width, height}, {30, 1}, 5'000'000,
+        QStringLiteral("hevc_videotoolbox"));
+    QVERIFY2(profile.supported, qPrintable(profile.error));
+    const QString stageBFilter = ExportEngine::stageBVideoFilterGraph(
+        ExportEngine::stageBSourceAccess(0.0, 0.1), sourceInfo.videoSize,
+        {width, height}, {30, 1}, frameCount, profile);
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", source, "-i", overlay,
+               "-filter_complex", stageBFilter,
+               "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", "hevc_videotoolbox",
+               "-b:v", "5000000", "-tag:v", "hvc1", "-profile:v", "main10", "-pix_fmt",
+               "p010le", "-color_range", "pc", "-colorspace", "bt709", "-color_trc",
+               "bt709", "-color_primaries", "bt709", output});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-hwaccel", "none", "-i",
+               source, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", referenceRaw});
+    runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-hwaccel", "none", "-i",
+               output, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", decodedRaw});
+
+    QFile referenceFile(referenceRaw);
+    QFile decodedFile(decodedRaw);
+    QVERIFY(referenceFile.open(QIODevice::ReadOnly));
+    QVERIFY(decodedFile.open(QIODevice::ReadOnly));
+    const QByteArray reference = referenceFile.readAll();
+    const QByteArray decoded = decodedFile.readAll();
+    QCOMPARE(reference.size(), width * height * 3);
+    QCOMPARE(decoded.size(), reference.size());
+    std::array<qint64, 3> absoluteError{};
+    for (qsizetype offset = 0; offset < reference.size(); offset += 3) {
+        for (int component = 0; component < 3; ++component) {
+            absoluteError[component] += std::abs(
+                int(static_cast<uchar>(reference[offset + component]))
+                - int(static_cast<uchar>(decoded[offset + component])));
+        }
+    }
+    const double pixelCount = width * height;
+    std::array<double, 3> meanAbsoluteErrors{};
+    for (int component = 0; component < 3; ++component) {
+        meanAbsoluteErrors[component] = absoluteError[component] / pixelCount;
+        QVERIFY2(meanAbsoluteErrors[component] <= 12.0,
+                 qPrintable(QStringLiteral("RGB component %1 mean absolute error %2 exceeds 12")
+                                .arg(component).arg(meanAbsoluteErrors[component], 0, 'f', 3)));
+    }
+    qInfo().noquote() << QStringLiteral(
+        "Main10 VideoToolbox RGB MAE: R=%1 G=%2 B=%3 (limit 12.0)")
+                             .arg(meanAbsoluteErrors[0], 0, 'f', 3)
+                             .arg(meanAbsoluteErrors[1], 0, 'f', 3)
+                             .arg(meanAbsoluteErrors[2], 0, 'f', 3);
+
+    const MediaInfo info = MediaProbe::probe(output);
+    QCOMPARE(info.videoCodec, QStringLiteral("hevc"));
+    QCOMPARE(info.bitDepth, std::optional<int>(10));
+    QCOMPARE(info.pixelFormat, QStringLiteral("yuv420p10le"));
+    QCOMPARE(info.colorRange, QStringLiteral("pc"));
+    QCOMPARE(info.colorSpace, QStringLiteral("bt709"));
+    QCOMPARE(info.colorTransfer, QStringLiteral("bt709"));
+    QCOMPARE(info.colorPrimaries, QStringLiteral("bt709"));
+    QVERIFY(info.averageFrameRate.isEquivalentTo({30, 1}));
 }
 
 void TelemetryTests::preservesExactExportRateRationals()
