@@ -32,9 +32,10 @@
 #include "project/BoundedJsonLoader.h"
 #include "project/ProjectLimits.h"
 
-#include <QFile>
+#include <QColor>
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QJsonDocument>
 #include <QProcess>
 #include <QSettings>
@@ -129,6 +130,8 @@ private slots:
     void derivesSourceDrivenExportProfiles();
     void rejectsUnsupportedExportDisplayTransforms();
     void validatesHighResolutionCapabilitiesAndCache();
+    void rendersCanvasWidgetsInFirstOffscreenFrames_data();
+    void rendersCanvasWidgetsInFirstOffscreenFrames();
     void preservesTenBitSdrThroughComposition();
     void preservesTenBitFullRangeColorThroughVideoToolboxExport();
     void preservesExactExportRateRationals();
@@ -3957,6 +3960,85 @@ void TelemetryTests::validatesHighResolutionCapabilitiesAndCache()
     static_cast<void>(cache.verify(request, probe));
     QCOMPARE(probes, 2);
     QCOMPARE(cache.size(), qsizetype(2));
+}
+
+void TelemetryTests::rendersCanvasWidgetsInFirstOffscreenFrames_data()
+{
+    QTest::addColumn<QString>("widgetType");
+    QTest::newRow("retroTachometer") << QStringLiteral("retroTachometer");
+    QTest::newRow("arcGauge") << QStringLiteral("arcGauge");
+    QTest::newRow("dialGauge") << QStringLiteral("dialGauge");
+    QTest::newRow("retroGrandPrix") << QStringLiteral("retroGrandPrix");
+    QTest::newRow("retroSpeedArc") << QStringLiteral("retroSpeedArc");
+}
+
+void TelemetryTests::rendersCanvasWidgetsInFirstOffscreenFrames()
+{
+    QFETCH(QString, widgetType);
+
+    TelemetrySession session = speedSession(0.0, 2.0, 0.0);
+    session.aliases.insert(QStringLiteral("rpm"), QStringLiteral("speed"));
+    WidgetModel widgets;
+    const int index = widgets.addWidget(widgetType);
+    QVERIFY(index >= 0);
+    widgets.moveWidget(index, 0.1, 0.1);
+    widgets.resizeWidget(index, 0.8, 0.8);
+    widgets.setSetting(index, QStringLiteral("showBackground"), false);
+    widgets.setSetting(index, QStringLiteral("showBorder"), false);
+    widgets.setSetting(index, QStringLiteral("padding"), 0);
+    widgets.setSetting(index, QStringLiteral("source"), QStringLiteral("speed"));
+    widgets.setSetting(index, QStringLiteral("rpmSource"), QStringLiteral("speed"));
+    widgets.setSetting(index, QStringLiteral("speedSource"), QStringLiteral("speed"));
+    widgets.setSetting(index, QStringLiteral("gearSource"), QStringLiteral("speed"));
+    widgets.setSetting(index, QStringLiteral("throttleSource"), QStringLiteral("speed"));
+    widgets.setSetting(index, QStringLiteral("brakeSource"), QStringLiteral("speed"));
+    widgets.setSetting(index, QStringLiteral("textColor"), QStringLiteral("#010101"));
+    widgets.setSetting(index, QStringLiteral("secondaryTextColor"), QStringLiteral("#010101"));
+    for (const QString &setting : {
+             QStringLiteral("accentColor"), QStringLiteral("trackColor"),
+             QStringLiteral("tickColor"), QStringLiteral("needleColor"),
+             QStringLiteral("panelColor"), QStringLiteral("dialColor"),
+             QStringLiteral("warningColor"), QStringLiteral("rimColor"),
+             QStringLiteral("lowColor"), QStringLiteral("midColor"),
+             QStringLiteral("highColor"), QStringLiteral("emptyColor"),
+             QStringLiteral("throttleColor"), QStringLiteral("brakeColor"),
+             QStringLiteral("brakeActiveColor")}) {
+        widgets.setSetting(index, setting, QStringLiteral("#ff00ff"));
+    }
+    widgets.setSetting(index, QStringLiteral("panelOpacity"), 1.0);
+
+    TelemetryFrameRenderer renderer;
+    QVERIFY2(renderer.initialize(
+                 &widgets, &session, nullptr, SyncTransform{}, QSize(640, 480)),
+             qPrintable(renderer.errorString()));
+    const auto signaturePixelCount = [](const QImage &image) {
+        qsizetype count = 0;
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                const QColor pixel = image.pixelColor(x, y);
+                if (pixel.alpha() >= 40 && pixel.red() >= 120 && pixel.blue() >= 120
+                    && pixel.green() <= 40) {
+                    ++count;
+                }
+            }
+        }
+        return count;
+    };
+    QList<QImage> frames;
+    for (const auto &[label, time] : {
+             std::pair{QStringLiteral("first non-zero-range"), 1.0},
+             std::pair{QStringLiteral("same-time reference"), 1.0},
+             std::pair{QStringLiteral("later"), 1.8}}) {
+        const QImage image = renderer.renderFrame(time);
+        QVERIFY2(!image.isNull(), qPrintable(renderer.errorString()));
+        const qsizetype pixels = signaturePixelCount(image);
+        QVERIFY2(pixels >= 25,
+                 qPrintable(QStringLiteral(
+                     "%1 %2 offscreen frame contains only %3 Canvas signature pixels")
+                                .arg(widgetType, label).arg(pixels)));
+        frames.append(image);
+    }
+    QCOMPARE(frames[0], frames[1]);
 }
 
 void TelemetryTests::preservesTenBitSdrThroughComposition()

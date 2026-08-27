@@ -3,6 +3,7 @@
 #include "widgets/WidgetModel.h"
 #include "export/ExportFormat.h"
 
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -167,6 +168,23 @@ bool TelemetryFrameRenderer::initialize(
     QQuickRenderTarget target = QQuickRenderTarget::fromRhiRenderTarget(m_impl->renderTarget.get());
     target.setDevicePixelRatio(1.0);
     m_impl->window->setRenderTarget(target);
+    // The export worker drives Qt Quick directly and never enters the GUI event
+    // loop. Dispatch component-initialization events now that the offscreen
+    // window and render target are complete, so asynchronous visual primitives
+    // such as QML Canvas can create their rendering context before frame zero.
+    QCoreApplication::sendPostedEvents();
+    m_impl->renderControl->polishItems();
+    m_impl->renderControl->beginFrame();
+    if (!m_impl->renderControl->sync()) {
+        m_impl->renderControl->endFrame();
+        m_error = QStringLiteral("Qt Quick could not prepare the offscreen scene.");
+        m_rootItem = nullptr;
+        m_impl.reset();
+        return false;
+    }
+    m_impl->renderControl->render();
+    m_impl->renderControl->endFrame();
+    QCoreApplication::sendPostedEvents();
     return true;
 }
 

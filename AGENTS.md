@@ -68,6 +68,9 @@
   Stage A. For 10-bit YUV Stage B, explicitly unpremultiply the staged BGRA overlay and mark it
   straight before straight-alpha composition; premultiplied YUV blending corrupts transparent chroma
   offsets. Do not rely on implicit alpha interpretation.
+- Offscreen export must dispatch pending component initialization, complete one scene-graph preparation
+  frame, and dispatch its completion events before frame zero. This is the deterministic readiness
+  boundary for asynchronous visual primitives such as QML Canvas; never replace it with sleeps.
 - Raw-frame transport into encoder processes uses bounded byte-oriented backpressure. Never assume
   `QProcess` can buffer complete raw frames. Partial, rejected, or timed-out writes must never be
   treated as successful frame submission.

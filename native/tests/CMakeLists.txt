@@ -18,6 +18,17 @@ qt_add_executable(flappedear_native_tests
 target_compile_features(flappedear_native_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_native_tests PRIVATE flappedear_core Qt6::Concurrent Qt6::Gui Qt6::Test)
 flappedear_enable_warnings(flappedear_native_tests)
+qt_add_resources(flappedear_native_tests "flappedear_test_qml"
+    PREFIX "/qt/qml/FlappedEar/qml"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../qml"
+    FILES
+        ../qml/TelemetryScene.qml
+        ../qml/widgets/ArcGaugeWidget.qml
+        ../qml/widgets/DialGaugeWidget.qml
+        ../qml/widgets/RetroGrandPrixWidget.qml
+        ../qml/widgets/RetroSpeedArcWidget.qml
+        ../qml/widgets/RetroTachometerWidget.qml
+)
 target_compile_definitions(flappedear_native_tests PRIVATE
     TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/basic.vbo"
     TRACK_WIDGET_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/widgets/TrackWidget.qml"
