@@ -47,6 +47,13 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 
 ## Product work
 
+### Lap timing and session analysis
+
+- [ ] Parse bounded source-defined RaceChrono timing gates without making malformed timing metadata fatal to otherwise valid telemetry.
+- [ ] Derive robust same-direction Start passages, complete timed laps, and fastest-lap state from raw GPS and raw telemetry time.
+- [ ] Add a minimal lap list and lap-start seek to the existing Analysis workspace, backed by deterministic tests and optional private-fixture validation.
+- [ ] Later: manual Start/Finish override, sectors/theoretical best, reference-lap comparisons and deltas, and lap overlays.
+
 ### Multi-chapter GoPro timelines
 
 - [ ] Model ordered GoPro MP4/MOV chunks as one continuous time-based source.
