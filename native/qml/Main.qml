@@ -745,8 +745,8 @@ ApplicationWindow {
                 size.width, size.height, rate.numerator, rate.denominator, bitrate,
                 exportAudio.checked,
                 exportRangeMode.currentIndex === 1,
-                Number(exportRangeStart.text),
-                Number(exportRangeEnd.text),
+                exportRangeStart.text,
+                exportRangeEnd.text,
                 overwriteAllowed)) {
                 close();
             } else if (appController.exportState === "overwriteConfirmationRequired") {
@@ -762,9 +762,9 @@ ApplicationWindow {
             exportQuality.currentIndex = 1;
             selectSourceFormat();
             Qt.callLater(selectSourceFormat);
-            const duration = Number(appController.exportSourceInfo.duration || 0);
-            exportRangeStart.text = "0.000";
-            exportRangeEnd.text = duration.toFixed(3);
+            const rate = selectedRate();
+            exportRangeStart.text = appController.exportFullRangeTimecode(rate.numerator, rate.denominator, false);
+            exportRangeEnd.text = appController.exportFullRangeTimecode(rate.numerator, rate.denominator, true);
         }
         onOpened: selectSourceFormat()
         background: Rectangle {
@@ -927,26 +927,24 @@ ApplicationWindow {
                 rowSpacing: 6
                 visible: exportRangeMode.currentIndex === 1
                 Label {
-                    text: qsTr("Start (seconds)")
+                    text: qsTr("IN")
                     color: "#8b98a8"
                     font.pixelSize: 11
                 }
                 FeTextField {
                     id: exportRangeStart
                     Layout.fillWidth: true
-                    inputMethodHints: Qt.ImhFormattedNumbersOnly
-                    validator: DoubleValidator { bottom: 0 }
+                    inputMethodHints: Qt.ImhNoPredictiveText
                 }
                 Label {
-                    text: qsTr("End (seconds)")
+                    text: qsTr("OUT")
                     color: "#8b98a8"
                     font.pixelSize: 11
                 }
                 FeTextField {
                     id: exportRangeEnd
                     Layout.fillWidth: true
-                    inputMethodHints: Qt.ImhFormattedNumbersOnly
-                    validator: DoubleValidator { bottom: 0 }
+                    inputMethodHints: Qt.ImhNoPredictiveText
                 }
             }
             Label {

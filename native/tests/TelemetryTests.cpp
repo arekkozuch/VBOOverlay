@@ -135,6 +135,7 @@ private slots:
     void preservesTenBitSdrThroughComposition();
     void preservesTenBitFullRangeColorThroughVideoToolboxExport();
     void preservesExactExportRateRationals();
+    void schedulesFrameAddressedExportRangesExactly();
     void plansBoundedStageBSourceAccess();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
@@ -4233,6 +4234,49 @@ void TelemetryTests::preservesExactExportRateRationals()
     QVERIFY((!MediaRational{30'000, 1'001}.isEquivalentTo({30, 1})));
     QVERIFY(qAbs(ExportEngine::outputDuration(600, {30'000, 1'001}) - 20.02) < 0.0000001);
     QVERIFY(qAbs(ExportEngine::outputDuration(60, {60'000, 1'001}) - 1.001) < 0.0000001);
+}
+
+void TelemetryTests::schedulesFrameAddressedExportRangesExactly()
+{
+    const MediaRational ntsc{60'000, 1'001};
+    MediaInfo source;
+    source.frameRate = ntsc;
+    source.averageFrameRate = ntsc;
+    source.timeBase = {1, 60'000};
+    source.videoDurationTicks = 78'350'272;
+    source.videoFrameCount = 78'272;
+
+    const auto fullRange = ExportEngine::fullVideoFrameRange(source, ntsc);
+    QVERIFY(fullRange.has_value());
+    QCOMPARE(fullRange->firstFrame, qint64(0));
+    QCOMPARE(fullRange->lastFrame, qint64(78'271));
+    QCOMPARE(fullRange->frameCount(), qint64(78'272));
+
+    const auto regressionRange = ExportEngine::frameRangeForSourceTimecode(
+        source, ntsc, QStringLiteral("00:00:00:00"), QStringLiteral("00:21:44:31"));
+    QVERIFY(regressionRange.has_value());
+    QCOMPARE(regressionRange->frameCount(), qint64(78'272));
+    QCOMPARE(ExportEngine::formatSmpteTimecode(regressionRange->lastFrame, ntsc),
+             QStringLiteral("00:21:44:31"));
+
+    const auto inclusiveRange = ExportEngine::frameRangeFromInclusiveFrames(100, 199);
+    QVERIFY(inclusiveRange.has_value());
+    QCOMPARE(inclusiveRange->frameCount(), qint64(100));
+    const auto singleFrame = ExportEngine::frameRangeFromInclusiveFrames(100, 100);
+    QVERIFY(singleFrame.has_value());
+    QCOMPARE(singleFrame->frameCount(), qint64(1));
+
+    for (const MediaRational &rate : {MediaRational{24, 1}, MediaRational{25, 1},
+                                      MediaRational{30, 1}, MediaRational{30'000, 1'001},
+                                      MediaRational{50, 1}, MediaRational{60'000, 1'001}}) {
+        const qint64 frame = rate.numerator == 60'000 ? 78'271 : 12'345;
+        const QString timecode = ExportEngine::formatSmpteTimecode(frame, rate);
+        const auto parsed = ExportEngine::parseSmpteTimecode(timecode, rate);
+        QVERIFY2(parsed.has_value(), qPrintable(timecode));
+        QCOMPARE(*parsed, frame);
+    }
+    QVERIFY(!ExportEngine::parseSmpteTimecode(QStringLiteral("00:00:00:60"), ntsc));
+    QVERIFY(!ExportEngine::parseSmpteTimecode(QStringLiteral("not-a-timecode"), ntsc));
 }
 
 void TelemetryTests::preservesCfrCadenceForCommonRates()

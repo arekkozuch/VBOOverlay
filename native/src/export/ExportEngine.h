@@ -7,10 +7,19 @@
 #include <QVariantMap>
 #include <QString>
 #include <functional>
+#include <optional>
 
 namespace FlappedEar {
 
 class TelemetryFrameRenderer;
+
+struct ExportFrameRange {
+    qint64 firstFrame = 0;
+    qint64 lastFrame = -1;
+
+    [[nodiscard]] bool isValid() const { return firstFrame >= 0 && lastFrame >= firstFrame; }
+    [[nodiscard]] qint64 frameCount() const { return isValid() ? lastFrame - firstFrame + 1 : 0; }
+};
 
 struct ExportObservation {
     QString type = QStringLiteral("status");
@@ -46,6 +55,7 @@ struct ExportSettings {
     QString outputPath;
     QSize outputSize;
     MediaRational frameRate;
+    ExportFrameRange frameRange;
     double startTime = 0.0;
     double endTime = 0.0;
     QString encoder;
@@ -68,6 +78,11 @@ struct ExportResult {
     MediaInfo mediaInfo;
     ExportMediaProfile mediaProfile;
     MediaRational exportFrameRate;
+    qint64 firstFrame = 0;
+    qint64 lastFrame = -1;
+    qint64 sourceFrameCount = 0;
+    qint64 finalFrameCount = 0;
+    qint64 frameDeficit = 0;
     qsizetype expectedFrames = 0;
     qsizetype generatedFrames = 0;
     qsizetype renderedFrames = 0;
@@ -105,6 +120,17 @@ public:
         const ExportSettings &settings, TelemetryFrameRenderer &renderer);
     [[nodiscard]] static qsizetype frameCount(
         double sourceRangeStart, double sourceRangeEnd, const MediaRational &frameRate);
+    [[nodiscard]] static std::optional<ExportFrameRange> frameRangeFromInclusiveFrames(
+        qint64 firstFrame, qint64 lastFrame);
+    [[nodiscard]] static std::optional<ExportFrameRange> fullVideoFrameRange(
+        const MediaInfo &source, const MediaRational &exportFrameRate);
+    [[nodiscard]] static QString formatSmpteTimecode(
+        qint64 frame, const MediaRational &frameRate);
+    [[nodiscard]] static std::optional<qint64> parseSmpteTimecode(
+        const QString &timecode, const MediaRational &frameRate);
+    [[nodiscard]] static std::optional<ExportFrameRange> frameRangeForSourceTimecode(
+        const MediaInfo &source, const MediaRational &exportFrameRate,
+        const QString &inTimecode, const QString &outTimecode);
     [[nodiscard]] static double audioDurationForRange(
         const MediaInfo &source, double sourceRangeStart, double sourceRangeEnd);
     [[nodiscard]] static double exportRelativeTime(

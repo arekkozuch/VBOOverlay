@@ -181,10 +181,12 @@ public:
         qint64 videoBitrate,
         bool audioEnabled,
         bool customRange,
-        double rangeStart,
-        double rangeEnd,
+        const QString &rangeIn,
+        const QString &rangeOut,
         bool overwriteAllowed = false);
     Q_INVOKABLE QVariantMap exportFormatOptions() const;
+    Q_INVOKABLE QString exportFullRangeTimecode(
+        qint64 frameRateNumerator, qint64 frameRateDenominator, bool outPoint) const;
     Q_INVOKABLE qint64 recommendedExportBitrate(int width, int height, qint64 numerator, qint64 denominator, const QString &quality) const;
     Q_INVOKABLE qint64 estimateExportSize(qint64 videoBitrate, bool audioEnabled, double seconds) const;
     Q_INVOKABLE QString formatEstimatedExportSize(qint64 bytes) const;

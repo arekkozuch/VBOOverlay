@@ -90,9 +90,9 @@ Audio is trimmed from the requested source interval and reset to output time zer
 
 ## CFR and VFR status
 
-Every final export is CFR at the effective exact rational export rate. For a selected source interval `[start, end)`, `expectedFrames` is `ceil((end - start) * rate)` and output video duration is `expectedFrames / rate`; the final frame's PTS is `(expectedFrames - 1) / rate`. Telemetry frame `N` remains evaluated at `start + N / rate`, while the output timeline begins at zero.
+Every final export is CFR at the effective exact rational export rate. Authoritative scheduling uses the inclusive integer range `[firstFrame, lastFrame]`, so `expectedFrames = lastFrame - firstFrame + 1`. Full video comes from `nb_frames` when available, with exact `duration_ts/time_base` as fallback; container/decimal duration never chooses the count. Custom IN and OUT are C++-parsed `HH:MM:SS:FF` values and both are included; QML carries strings only. Presentation seconds are derived only after this decision for rendering and FFmpeg diagnostics.
 
-The normal validation path records FFmpeg's final progress frame count and uses the independent final packet count as authoritative where the container exposes one. Full decoded frame counts remain part of deterministic integration tests rather than every production export, avoiding an unnecessary full decode of long media.
+The normal validation path records FFmpeg's final progress frame count and uses the independent final packet count as authoritative where the container exposes one. Exact count is success. If every codec/raster/rate/bit-depth/profile/color/audio/staging/transaction check passes and only 1 through 10 terminal frames are missing, the staged MP4 is committed as **SuccessWithWarning**; a larger deficit or any surplus is failure. Full decoded frame counts remain part of deterministic integration tests rather than every production export, avoiding an unnecessary full decode of long media.
 
 For target-file transaction guarantees, see [export-output-safety.md](export-output-safety.md).
 # External process boundaries

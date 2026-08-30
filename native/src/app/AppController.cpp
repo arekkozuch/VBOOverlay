@@ -1486,8 +1486,8 @@ bool AppController::startExport(
     const qint64 videoBitrate,
     const bool audioEnabled,
     const bool customRange,
-    const double rangeStart,
-    const double rangeEnd,
+    const QString &rangeIn,
+    const QString &rangeOut,
     const bool overwriteAllowed)
 {
     AppLog::info(QStringLiteral("Export requested: %1").arg(output.toLocalFile()));
@@ -1551,15 +1551,12 @@ bool AppController::startExport(
         m_exportError = QStringLiteral("Export format is invalid. Choose an even, non-upscaled size, supported frame rate, and 0.5–500 Mbps bitrate.");
         m_exportState = QStringLiteral("failed"); emit exportChanged(); return false;
     }
-    const double sourceDuration = m_exportSourceInfo.duration;
-    const double startTime = customRange ? rangeStart : 0.0;
-    const double endTime = customRange ? rangeEnd : sourceDuration;
-    if (!std::isfinite(sourceDuration) || sourceDuration <= 0.0 || !std::isfinite(startTime)
-        || !std::isfinite(endTime) || startTime < 0.0 || endTime <= startTime
-        || endTime > sourceDuration) {
-        m_exportError = QStringLiteral(
-            "Export range must satisfy 0 ≤ start < end ≤ source duration (%1 s).")
-                            .arg(sourceDuration, 0, 'f', 3);
+    const auto fullRange = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, outputRate);
+    const auto selectedRange = customRange
+        ? ExportEngine::frameRangeForSourceTimecode(m_exportSourceInfo, outputRate, rangeIn, rangeOut)
+        : fullRange;
+    if (!selectedRange) {
+        m_exportError = QStringLiteral("Export range must use valid inclusive SMPTE IN and OUT timecodes within the source frame domain.");
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();
@@ -1628,8 +1625,8 @@ bool AppController::startExport(
         {"frameRateNumerator", outputRate.numerator}, {"frameRateDenominator", outputRate.denominator},
         {"videoBitrate", videoBitrate},
         {"audioEnabled", audioEnabled},
-        {"startTime", startTime},
-        {"endTime", endTime},
+        {"firstFrame", selectedRange->firstFrame},
+        {"lastFrame", selectedRange->lastFrame},
         {"cancelPath", m_exportCancelPath},
         {"supervisionReadyPath", m_exportSupervisionReadyPath},
         {"temporaryOverlayPath", temporaryOverlayPath},
@@ -1681,7 +1678,7 @@ bool AppController::startExport(
         "  Requested: %11x%12, %13 fps\n"
         "  Video bitrate: %14 bps\n"
         "  Audio: %15\n\n"
-        "Range: %16 -> %17 s\n")
+        "Range: %16 -> %17 (inclusive)\n")
         .arg(exportStarted.toString(Qt::ISODate), exportId, QCoreApplication::applicationVersion(), inputPath)
         .arg(m_exportSourceInfo.videoSize.width()).arg(m_exportSourceInfo.videoSize.height())
         .arg(sourceRate, m_exportSourceInfo.videoCodec)
@@ -1691,7 +1688,8 @@ bool AppController::startExport(
         .arg(videoBitrate)
         .arg(audioEnabled ? QStringLiteral("enabled, AAC %1 bps").arg(ExportFormat::audioBitrate)
                            : QStringLiteral("disabled"))
-        .arg(startTime, 0, 'f', 3).arg(endTime, 0, 'f', 3);
+        .arg(ExportEngine::formatSmpteTimecode(selectedRange->firstFrame, outputRate),
+             ExportEngine::formatSmpteTimecode(selectedRange->lastFrame, outputRate));
     QString exportLogError;
     m_persistentExportLog = PersistentExportLog::create(
         exportLogDirectory, exportId, exportHeader, &exportLogError, exportStarted);
@@ -1785,6 +1783,15 @@ bool AppController::startExport(
     supervisionReady.close();
     emit exportChanged();
     return true;
+}
+
+QString AppController::exportFullRangeTimecode(
+    const qint64 frameRateNumerator, const qint64 frameRateDenominator, const bool outPoint) const
+{
+    const MediaRational rate{frameRateNumerator, frameRateDenominator};
+    const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    return range ? ExportEngine::formatSmpteTimecode(
+        outPoint ? range->lastFrame : range->firstFrame, rate) : QString();
 }
 
 void AppController::cancelExport()
@@ -2045,7 +2052,10 @@ void AppController::handleExportOutput()
                                    QStringLiteral("exportFrameRateNumerator"),
                                    QStringLiteral("exportFrameRateDenominator"),
                                    QStringLiteral("exportFrameRate"), QStringLiteral("diagnostics"),
-                                   QStringLiteral("warning")}) {
+                                   QStringLiteral("warning"), QStringLiteral("sourceFrameCount"),
+                                   QStringLiteral("sourceFrameCountSource"), QStringLiteral("firstFrame"),
+                                   QStringLiteral("lastFrame"), QStringLiteral("finalFrameCount"),
+                                   QStringLiteral("frameDeficit"), QStringLiteral("resultClassification")}) {
             if (event.contains(key)) m_exportProgressInfo.insert(key, event.value(key).toVariant());
         }
         if (!state.isEmpty()) m_exportProgressInfo.insert("stage", state);
@@ -2095,7 +2105,8 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         setStatus("Export cancelled.");
         persistentResult = QStringLiteral("CANCELLED");
     } else if (exitStatus == QProcess::NormalExit && exitCode == 0
-               && m_exportState == QStringLiteral("complete")) {
+               && (m_exportState == QStringLiteral("complete")
+                   || m_exportState == QStringLiteral("validationWarning"))) {
         QString commitError;
         if (m_exportOutputTransaction && m_exportOutputTransaction->commit(&commitError)) {
             ExportArtifactManifestData manifest;
@@ -2104,12 +2115,14 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
                 static_cast<void>(ExportArtifactManifest::update(m_exportManifestPath, manifest));
             }
             m_exportProgress = 100;
-            m_exportState = QStringLiteral("complete");
+            const bool warning = m_exportState == QStringLiteral("validationWarning");
+            m_exportState = warning ? QStringLiteral("validationWarning") : QStringLiteral("complete");
             m_exportError.clear();
             AppLog::info(QStringLiteral("Export succeeded: %1")
                              .arg(m_exportOutputTransaction->userTargetPath()));
-            setStatus("HEVC export finished and passed validation.");
-            persistentResult = QStringLiteral("SUCCESS");
+            setStatus(warning ? QStringLiteral("HEVC export finished with a validation warning.")
+                              : QStringLiteral("HEVC export finished and passed validation."));
+            persistentResult = warning ? QStringLiteral("SUCCESS_WITH_WARNING") : QStringLiteral("SUCCESS");
         } else {
             m_exportState = QStringLiteral("failed");
             m_exportError = commitError.isEmpty()

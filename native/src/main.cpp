@@ -400,8 +400,18 @@ int exportWorker(const QString &configPath)
         settings.outputSize = outputSize;
         settings.frameRate = {config.value("frameRateNumerator").toInteger(), config.value("frameRateDenominator").toInteger(1)};
         if (!settings.frameRate.isValid()) settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
-        settings.startTime = config.value("startTime").toDouble();
-        settings.endTime = config.value("endTime").toDouble(input.duration);
+        settings.frameRange = {config.value("firstFrame").toInteger(),
+                               config.value("lastFrame").toInteger(-1)};
+        if (!settings.frameRange.isValid()) {
+            const auto fullRange = FlappedEar::ExportEngine::fullVideoFrameRange(input, settings.frameRate);
+            if (!fullRange) {
+                emitEvent({{"type", "log"}, {"state", "failed"}, {"level", "error"},
+                           {"operation", "resolveSourceFrameDomain"},
+                           {"message", "Could not determine the usable source video-frame domain"}});
+                return EXIT_FAILURE;
+            }
+            settings.frameRange = *fullRange;
+        }
         settings.videoBitrate = config.value("videoBitrate").toInteger();
         if (settings.videoBitrate <= 0) {
             settings.videoBitrate = FlappedEar::ExportFormat::recommendedVideoBitrate(
@@ -411,11 +421,12 @@ int exportWorker(const QString &configPath)
         settings.cancellationFilePath = config.value("cancelPath").toString();
         settings.temporaryOverlayPath = config.value("temporaryOverlayPath").toString();
         settings.manifestPath = config.value("manifestPath").toString();
-        const double sourceRangeStart = settings.startTime;
-        const double sourceRangeEnd = settings.endTime;
+        const double sourceRangeStart = FlappedEar::ExportEngine::exportRelativeTime(
+            static_cast<qsizetype>(settings.frameRange.firstFrame), settings.frameRate);
+        const double sourceRangeEnd = FlappedEar::ExportEngine::exportRelativeTime(
+            static_cast<qsizetype>(settings.frameRange.lastFrame + 1), settings.frameRate);
         const double exportDuration = sourceRangeEnd - sourceRangeStart;
-        const qsizetype expectedFrames = FlappedEar::ExportEngine::frameCount(
-            settings.startTime, settings.endTime, settings.frameRate);
+        const qsizetype expectedFrames = static_cast<qsizetype>(settings.frameRange.frameCount());
         FlappedEar::ExportProgressEstimator rendererProgress;
         qint64 lastUpdate = -125;
         emitEvent({{"type", "status"}, {"state", "preparing"},
@@ -529,6 +540,11 @@ int exportWorker(const QString &configPath)
                           {"renderedFrames", static_cast<qint64>(result.renderedFrames)},
                           {"generatedFrames", static_cast<qint64>(result.generatedFrames)},
                           {"expectedFrames", static_cast<qint64>(result.expectedFrames)},
+                          {"sourceFrameCount", result.sourceFrameCount},
+                          {"firstFrame", result.firstFrame}, {"lastFrame", result.lastFrame},
+                          {"finalFrameCount", result.finalFrameCount},
+                          {"frameDeficit", result.frameDeficit},
+                          {"resultClassification", result.validationWarning.isEmpty() ? "Success" : "SuccessWithWarning"},
                           {"elapsedMilliseconds", result.elapsedMilliseconds},
                           {"renderMilliseconds", result.renderMilliseconds},
                           {"renderNanoseconds", result.renderNanoseconds},

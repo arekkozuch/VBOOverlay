@@ -76,6 +76,8 @@
   treated as successful frame submission.
 - Final exports are CFR at one authoritative rational export rate. Preserve that exact rate across
   overlay staging, source conversion, progress, and validation; do not reconstruct it from doubles.
+- Authoritative export ranges are inclusive integer frame addresses. Decimal/container duration must
+  never determine scheduled frame count; C++ owns SMPTE IN/OUT parsing and formatting.
 - Cloud CI is intentionally disabled. Local build/tests are the current required gate, and real-media
   validation must be reported separately from synthetic tests.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke

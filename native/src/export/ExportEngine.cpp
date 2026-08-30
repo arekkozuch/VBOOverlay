@@ -23,6 +23,7 @@
 #include <QUuid>
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 
 namespace FlappedEar {
 namespace {
@@ -292,6 +293,49 @@ FilesystemSnapshot filesystemSnapshot(const QString &path)
             filesystem.availableBytes, filesystem.totalBytes};
 }
 
+bool checkedMultiply(const qint64 left, const qint64 right, qint64 *result)
+{
+    if (left < 0 || right < 0 || (right != 0 && left > std::numeric_limits<qint64>::max() / right)) return false;
+    *result = left * right;
+    return true;
+}
+
+bool checkedAdd(const qint64 left, const qint64 right, qint64 *result)
+{
+    if (left < 0 || right < 0 || left > std::numeric_limits<qint64>::max() - right) return false;
+    *result = left + right;
+    return true;
+}
+
+std::optional<qint64> multiplyDivideFloor(
+    qint64 firstNumerator, qint64 secondNumerator, qint64 thirdNumerator,
+    qint64 firstDenominator, qint64 secondDenominator)
+{
+    if (firstNumerator < 0 || secondNumerator < 0 || thirdNumerator < 0
+        || firstDenominator <= 0 || secondDenominator <= 0) return std::nullopt;
+    qint64 numerators[] = {firstNumerator, secondNumerator, thirdNumerator};
+    qint64 denominators[] = {firstDenominator, secondDenominator};
+    for (qint64 &denominator : denominators) {
+        for (qint64 &numerator : numerators) {
+            const qint64 divisor = std::gcd(numerator, denominator);
+            numerator /= divisor;
+            denominator /= divisor;
+        }
+    }
+    qint64 product = 0;
+    if (!checkedMultiply(numerators[0], numerators[1], &product)
+        || !checkedMultiply(product, numerators[2], &product)) return std::nullopt;
+    return product;
+}
+
+std::optional<qint64> nominalTimecodeRate(const MediaRational &frameRate)
+{
+    if (!frameRate.isValid() || frameRate.numerator > std::numeric_limits<qint64>::max()
+            - frameRate.denominator / 2) return std::nullopt;
+    const qint64 rate = (frameRate.numerator + frameRate.denominator / 2) / frameRate.denominator;
+    return rate > 0 && rate <= 999 ? std::optional<qint64>(rate) : std::nullopt;
+}
+
 } // namespace
 
 qsizetype ExportEngine::frameCount(
@@ -304,6 +348,85 @@ qsizetype ExportEngine::frameCount(
     return static_cast<qsizetype>(
         std::ceil((sourceRangeEnd - sourceRangeStart) * static_cast<double>(frameRate.numerator)
                   / static_cast<double>(frameRate.denominator) - 1e-9));
+}
+
+std::optional<ExportFrameRange> ExportEngine::frameRangeFromInclusiveFrames(
+    const qint64 firstFrame, const qint64 lastFrame)
+{
+    const ExportFrameRange range{firstFrame, lastFrame};
+    return range.isValid() ? std::optional<ExportFrameRange>(range) : std::nullopt;
+}
+
+std::optional<ExportFrameRange> ExportEngine::fullVideoFrameRange(
+    const MediaInfo &source, const MediaRational &exportFrameRate)
+{
+    if (source.videoFrameCount > 0
+        && source.videoFrameCount <= static_cast<qsizetype>(std::numeric_limits<qint64>::max())) {
+        return frameRangeFromInclusiveFrames(0, static_cast<qint64>(source.videoFrameCount) - 1);
+    }
+    if (!source.timeBase.isValid() || source.videoDurationTicks <= 0 || !exportFrameRate.isValid()) {
+        return std::nullopt;
+    }
+    const auto count = multiplyDivideFloor(
+        source.videoDurationTicks, source.timeBase.numerator, exportFrameRate.numerator,
+        source.timeBase.denominator, exportFrameRate.denominator);
+    if (!count || *count <= 0) return std::nullopt;
+    return frameRangeFromInclusiveFrames(0, *count - 1);
+}
+
+QString ExportEngine::formatSmpteTimecode(const qint64 frame, const MediaRational &frameRate)
+{
+    const auto nominalRate = nominalTimecodeRate(frameRate);
+    if (frame < 0 || !nominalRate) return {};
+    const qint64 framesPerMinute = *nominalRate * 60;
+    const qint64 framesPerHour = framesPerMinute * 60;
+    const qint64 hours = frame / framesPerHour;
+    const qint64 withinHour = frame % framesPerHour;
+    const qint64 minutes = withinHour / framesPerMinute;
+    const qint64 withinMinute = withinHour % framesPerMinute;
+    const qint64 seconds = withinMinute / *nominalRate;
+    const qint64 frames = withinMinute % *nominalRate;
+    return QStringLiteral("%1:%2:%3:%4")
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0'))
+        .arg(frames, 2, 10, QLatin1Char('0'));
+}
+
+std::optional<qint64> ExportEngine::parseSmpteTimecode(
+    const QString &timecode, const MediaRational &frameRate)
+{
+    const auto nominalRate = nominalTimecodeRate(frameRate);
+    const QStringList pieces = timecode.split(QLatin1Char(':'));
+    if (!nominalRate || pieces.size() != 4 || timecode.contains(QLatin1Char(';'))) return std::nullopt;
+    qint64 fields[4]{};
+    for (int index = 0; index < 4; ++index) {
+        bool ok = false;
+        fields[index] = pieces[index].toLongLong(&ok);
+        if (!ok || fields[index] < 0) return std::nullopt;
+    }
+    if (fields[1] >= 60 || fields[2] >= 60 || fields[3] >= *nominalRate) return std::nullopt;
+    qint64 total = 0;
+    qint64 component = 0;
+    if (!checkedMultiply(fields[0], 3600, &component)
+        || !checkedAdd(total, component, &total)
+        || !checkedMultiply(fields[1], 60, &component)
+        || !checkedAdd(total, component, &total)
+        || !checkedAdd(total, fields[2], &total)
+        || !checkedMultiply(total, *nominalRate, &total)
+        || !checkedAdd(total, fields[3], &total)) return std::nullopt;
+    return total;
+}
+
+std::optional<ExportFrameRange> ExportEngine::frameRangeForSourceTimecode(
+    const MediaInfo &source, const MediaRational &exportFrameRate,
+    const QString &inTimecode, const QString &outTimecode)
+{
+    const auto fullRange = fullVideoFrameRange(source, exportFrameRate);
+    const auto firstFrame = parseSmpteTimecode(inTimecode, exportFrameRate);
+    const auto lastFrame = parseSmpteTimecode(outTimecode, exportFrameRate);
+    if (!fullRange || !firstFrame || !lastFrame || *lastFrame > fullRange->lastFrame) return std::nullopt;
+    return frameRangeFromInclusiveFrames(*firstFrame, *lastFrame);
 }
 
 double ExportEngine::audioDurationForRange(
@@ -442,19 +565,36 @@ ExportResult ExportEngine::exportVideo(
         // One exact rational governs overlay generation, framesync conversion,
         // progress, and final-media validation.
         const MediaRational exportFrameRate = effectiveFrameRate(source, settings.frameRate);
-        const double sourceRangeStart = qMax(0.0, settings.startTime);
-        const double sourceRangeEnd = settings.endTime > sourceRangeStart
-            ? settings.endTime : source.duration;
-        if (sourceRangeEnd > source.duration + 1.0 / exportFrameRate.value()) {
-            result.error = QStringLiteral(
-                "Requested source range (%1 to %2 s) exceeds the probed source duration (%3 s).")
-                               .arg(sourceRangeStart, 0, 'f', 3)
-                               .arg(sourceRangeEnd, 0, 'f', 3)
-                               .arg(source.duration, 0, 'f', 3);
+        const auto fullRange = fullVideoFrameRange(source, exportFrameRate);
+        const ExportFrameRange scheduledRange = settings.frameRange.isValid()
+            ? settings.frameRange : fullRange.value_or(ExportFrameRange{});
+        if (!fullRange || !scheduledRange.isValid()
+            || scheduledRange.firstFrame < fullRange->firstFrame
+            || scheduledRange.lastFrame > fullRange->lastFrame
+            || scheduledRange.frameCount() > std::numeric_limits<qsizetype>::max()) {
+            result.error = QStringLiteral("Requested frame range is outside the usable video-frame domain.");
             return result;
         }
-        const qsizetype expectedFrames = frameCount(
-            sourceRangeStart, sourceRangeEnd, exportFrameRate);
+        const qsizetype expectedFrames = static_cast<qsizetype>(scheduledRange.frameCount());
+        result.firstFrame = scheduledRange.firstFrame;
+        result.lastFrame = scheduledRange.lastFrame;
+        result.sourceFrameCount = source.videoFrameCount <= static_cast<qsizetype>(std::numeric_limits<qint64>::max())
+            ? static_cast<qint64>(source.videoFrameCount) : 0;
+        observe(settings, QStringLiteral("log"), QStringLiteral("preparing"),
+                QStringLiteral("resolveSourceFrameDomain"),
+                QStringLiteral("Authoritative export frame range resolved"), QStringLiteral("schedule"),
+                {{"sourceFrameCount", result.sourceFrameCount},
+                 {"sourceFrameCountSource", source.videoFrameCount > 0 ? QStringLiteral("nb_frames")
+                                                                    : QStringLiteral("duration_ts/time_base")},
+                 {"firstFrame", result.firstFrame}, {"lastFrame", result.lastFrame},
+                 {"expectedFrames", static_cast<qint64>(expectedFrames)},
+                 {"resultClassification", QStringLiteral("Pending")}});
+        // These doubles are presentation/filter diagnostics derived from an already-authoritative
+        // frame range. They never choose a frame boundary or expected count.
+        const double sourceRangeStart = exportRelativeTime(
+            static_cast<qsizetype>(scheduledRange.firstFrame), exportFrameRate);
+        const double sourceRangeEnd = exportRelativeTime(
+            static_cast<qsizetype>(scheduledRange.lastFrame + 1), exportFrameRate);
         if (expectedFrames == 0 || !outputSize.isValid()) {
             result.error = QStringLiteral("Export range or frame rate is invalid.");
             return result;
@@ -1267,10 +1407,16 @@ ExportResult ExportEngine::exportVideo(
         const bool colorTransferOk = preservedTag(result.mediaProfile.colorTransfer, result.mediaInfo.colorTransfer);
         const bool colorPrimariesOk = preservedTag(result.mediaProfile.colorPrimaries, result.mediaInfo.colorPrimaries);
         const bool packetCountAvailable = result.mediaInfo.videoPacketCount > 0;
-        const bool packetCountOk = !packetCountAvailable
-            || result.mediaInfo.videoPacketCount == expectedFrames;
+        const qint64 finalFrameCount = packetCountAvailable
+            ? static_cast<qint64>(result.mediaInfo.videoPacketCount) : 0;
+        const qint64 expectedFrameCount = static_cast<qint64>(expectedFrames);
+        const qint64 frameDeficit = packetCountAvailable ? expectedFrameCount - finalFrameCount : 0;
+        const bool terminalDeficitAllowed = packetCountAvailable && frameDeficit >= 1 && frameDeficit <= 10;
+        const bool packetCountOk = !packetCountAvailable || frameDeficit == 0 || terminalDeficitAllowed;
         if (packetCountAvailable) {
             result.encodedFrames = result.mediaInfo.videoPacketCount;
+            result.finalFrameCount = finalFrameCount;
+            result.frameDeficit = frameDeficit;
         }
         const double videoStartTolerance = result.mediaInfo.timeBase.isValid()
             ? result.mediaInfo.timeBase.value() : frameInterval;
@@ -1378,6 +1524,16 @@ ExportResult ExportEngine::exportVideo(
             || !videoStartOk || !durationOk || !audioOk) {
             result.error = QStringLiteral("Export failed final media or timing validation.");
             return result;
+        }
+        if (terminalDeficitAllowed) {
+            result.validationWarning = QStringLiteral(
+                "Export completed with warning\n\nThe final video ended %1 frames earlier than scheduled.\n\nExpected: %2 frames\nEncoded: %3 frames\nDifference: %1 frames\n\nThe exported file was preserved.")
+                .arg(frameDeficit).arg(expectedFrameCount).arg(finalFrameCount);
+            observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
+                    QStringLiteral("terminalFrameDeficitAccepted"), result.validationWarning,
+                    QStringLiteral("validation"),
+                    {{"expectedFrames", expectedFrameCount}, {"finalFrameCount", finalFrameCount},
+                     {"frameDeficit", frameDeficit}, {"resultClassification", QStringLiteral("SuccessWithWarning")}});
         }
         observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
                 QStringLiteral("validationComplete"), QStringLiteral("Final validation passed"),

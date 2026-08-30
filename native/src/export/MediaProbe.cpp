@@ -222,7 +222,7 @@ MediaInfo MediaProbe::probeSummary(
     const QStringList arguments{
         "-v", "error",
         "-show_entries",
-        "format=duration,start_time:stream=index,codec_type,codec_name,profile,width,height,coded_width,coded_height,r_frame_rate,avg_frame_rate,time_base,start_time,duration,nb_frames,nb_read_frames,nb_packets,nb_read_packets,sample_rate,pix_fmt,bits_per_raw_sample,bit_rate,sample_aspect_ratio,color_range,color_space,color_transfer,color_primaries:stream_side_data=rotation,side_data_type,max_content,mastering_display_metadata",
+        "format=duration,start_time:stream=index,codec_type,codec_name,profile,width,height,coded_width,coded_height,r_frame_rate,avg_frame_rate,time_base,start_time,duration,duration_ts,nb_frames,nb_read_frames,nb_packets,nb_read_packets,sample_rate,pix_fmt,bits_per_raw_sample,bit_rate,sample_aspect_ratio,color_range,color_space,color_transfer,color_primaries:stream_side_data=rotation,side_data_type,max_content,mastering_display_metadata",
         "-of", "json",
         path,
     };
@@ -291,6 +291,7 @@ MediaInfo MediaProbe::parseJson(const QByteArray &json, const QString &path)
                                               QStringLiteral("nb_frames"));
             info.videoPacketCount = jsonCount(stream, QStringLiteral("nb_read_packets"),
                                                QStringLiteral("nb_packets"));
+            info.videoDurationTicks = jsonInteger(stream.value("duration_ts")).value_or(0);
             info.videoStartTime = jsonNumber(stream.value("start_time"), info.startTime);
             info.videoDuration = jsonNumber(stream.value("duration"), info.duration);
             info.startTime = info.videoStartTime;

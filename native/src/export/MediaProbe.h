@@ -37,6 +37,7 @@ struct MediaInfo {
     MediaRational frameRate;
     MediaRational averageFrameRate;
     MediaRational timeBase;
+    qint64 videoDurationTicks = 0;
     QString videoCodec;
     QString videoCodecProfile;
     QString pixelFormat;
