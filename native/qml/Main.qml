@@ -485,14 +485,17 @@ ApplicationWindow {
             return;
         if (mediaPlayer.playbackState === MediaPlayer.PlayingState)
             mediaPlayer.pause();
-        else
+        else {
+            if (mediaPlayer.position >= appController.previewEndPositionMilliseconds())
+                mediaPlayer.position = 0;
             mediaPlayer.play();
+        }
         window.showFullScreenControls();
     }
     function seekPlayback(deltaMilliseconds) {
         if (!appController.videoSource.toString())
             return;
-        mediaPlayer.position = Math.max(0, Math.min(Math.max(0, mediaPlayer.duration), mediaPlayer.position + deltaMilliseconds));
+        mediaPlayer.position = appController.clampPreviewPositionMilliseconds(mediaPlayer.position + deltaMilliseconds);
         window.showFullScreenControls();
     }
     function showFullScreenControls() {
@@ -562,7 +565,7 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+Left"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(-30000) }
     Shortcut { sequence: "Shift+Right"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(30000) }
     Shortcut { sequence: "Home"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = 0; window.showFullScreenControls(); } }
-    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = Math.max(0, mediaPlayer.duration); window.showFullScreenControls(); } }
+    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = appController.previewEndPositionMilliseconds(); window.showFullScreenControls(); } }
     Shortcut {
         sequence: "Ctrl+E"
         context: Qt.WindowShortcut
@@ -1353,6 +1356,12 @@ ApplicationWindow {
         onPositionChanged: function(position) {
             appController.playbackTime = position / 1000.0;
         }
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.EndOfMedia) {
+                pause();
+                position = appController.previewEndPositionMilliseconds();
+            }
+        }
     }
 
     Loader {
@@ -1363,9 +1372,9 @@ ApplicationWindow {
                 videoSource: appController.videoSource
                 playbackPosition: mediaPlayer.position
                 playbackRunning: mediaPlayer.playbackState === MediaPlayer.PlayingState
-                mediaDuration: mediaPlayer.duration
-                onSeekRequested: milliseconds => mediaPlayer.position = milliseconds
-                onTogglePlaybackRequested: mediaPlayer.playbackState === MediaPlayer.PlayingState ? mediaPlayer.pause() : mediaPlayer.play()
+                mediaDuration: appController.previewEndPositionMilliseconds()
+                onSeekRequested: milliseconds => mediaPlayer.position = appController.clampPreviewPositionMilliseconds(milliseconds)
+                onTogglePlaybackRequested: window.togglePlayback()
             }
         }
     }
@@ -1785,10 +1794,18 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            VideoOutput {
-                                id: videoOutput
-                                anchors.fill: parent
-                                fillMode: VideoOutput.PreserveAspectFit
+                            Item {
+                                id: videoViewport
+                                property var geometry: appController.previewViewport(stageFrame.width, stageFrame.height)
+                                x: geometry.x
+                                y: geometry.y
+                                width: geometry.width
+                                height: geometry.height
+                                VideoOutput {
+                                    id: videoOutput
+                                    anchors.fill: parent
+                                    fillMode: VideoOutput.PreserveAspectFit
+                                }
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -1838,11 +1855,11 @@ ApplicationWindow {
                             }
                             WidgetOverlay {
                                 id: overlay
-                                x: videoOutput.contentRect.x
-                                y: videoOutput.contentRect.y
-                                width: videoOutput.contentRect.width
-                                height: videoOutput.contentRect.height
-                                visible: width > 0 && height > 0
+                                x: videoViewport.x
+                                y: videoViewport.y
+                                width: videoViewport.width
+                                height: videoViewport.height
+                                visible: appController.videoLoadState === "ready" && width > 0 && height > 0
                                 selectedIndex: window.selectedWidgetIndex
                                 selectedIndices: window.selectedWidgetIndices
                                 onSelectionRequested: (index, additive) => window.selectWidget(index, additive)
@@ -1874,7 +1891,7 @@ ApplicationWindow {
                                         onClicked: window.togglePlayback()
                                     }
                                     Label {
-                                        text: window.formatTime(mediaPlayer.position)
+                                        text: appController.previewTimecodeForPositionMilliseconds(mediaPlayer.position)
                                         color: "#dbe4ed"
                                         font.family: "Menlo"
                                         font.pixelSize: 10
@@ -1883,7 +1900,7 @@ ApplicationWindow {
                                         id: fullScreenTimeline
                                         Layout.fillWidth: true
                                         from: 0
-                                        to: Math.max(1, mediaPlayer.duration)
+                                        to: Math.max(1, appController.previewEndPositionMilliseconds())
                                         value: mediaPlayer.position
                                         onPressedChanged: {
                                             window.fullScreenScrubbing = pressed;
@@ -1895,12 +1912,12 @@ ApplicationWindow {
                                             }
                                         }
                                         onMoved: {
-                                            mediaPlayer.position = value;
+                                            mediaPlayer.position = appController.clampPreviewPositionMilliseconds(value);
                                             window.showFullScreenControls();
                                         }
                                     }
                                     Label {
-                                        text: window.formatTime(mediaPlayer.duration)
+                                        text: appController.previewEndTimecode()
                                         color: "#9aa8b8"
                                         font.family: "Menlo"
                                         font.pixelSize: 10
@@ -1927,10 +1944,10 @@ ApplicationWindow {
                                 enabled: !!appController.videoSource.toString()
                                 accent: mediaPlayer.playbackState === MediaPlayer.PlayingState
                                 text: mediaPlayer.playbackState === MediaPlayer.PlayingState ? "Ⅱ" : "▶"
-                                onClicked: mediaPlayer.playbackState === MediaPlayer.PlayingState ? mediaPlayer.pause() : mediaPlayer.play()
+                                onClicked: window.togglePlayback()
                             }
                             Label {
-                                text: window.formatTime(mediaPlayer.position)
+                                text: appController.previewTimecodeForPositionMilliseconds(mediaPlayer.position)
                                 color: "#d2dae4"
                                 font.family: "Menlo"
                                 font.pixelSize: 10
@@ -1943,17 +1960,17 @@ ApplicationWindow {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     from: 0
-                                    to: Math.max(1, mediaPlayer.duration)
+                                    to: Math.max(1, appController.previewEndPositionMilliseconds())
                                     value: mediaPlayer.position
-                                    onMoved: mediaPlayer.position = value
+                                    onMoved: mediaPlayer.position = appController.clampPreviewPositionMilliseconds(value)
                                 }
                                 Repeater {
                                     model: window.selectedWidgetCues()
                                     Rectangle {
                                         required property var modelData
-                                        x: Math.max(0, Math.min(parent.width, Number(modelData.start || 0) * 1000 / Math.max(1, mediaPlayer.duration) * parent.width))
+                                        x: Math.max(0, Math.min(parent.width, Number(modelData.start || 0) * 1000 / Math.max(1, appController.previewEndPositionMilliseconds()) * parent.width))
                                         y: 1
-                                        width: Math.max(3, Math.min(parent.width - x, Number(modelData.duration || 0) * 1000 / Math.max(1, mediaPlayer.duration) * parent.width))
+                                        width: Math.max(3, Math.min(parent.width - x, Number(modelData.duration || 0) * 1000 / Math.max(1, appController.previewEndPositionMilliseconds()) * parent.width))
                                         height: 4
                                         radius: 2
                                         color: "#55e6a5"
@@ -1962,7 +1979,7 @@ ApplicationWindow {
                                 }
                             }
                             Label {
-                                text: window.formatTime(mediaPlayer.duration)
+                                text: appController.previewEndTimecode()
                                 color: "#6f7e90"
                                 font.family: "Menlo"
                                 font.pixelSize: 10

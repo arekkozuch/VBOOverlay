@@ -56,8 +56,6 @@ struct ExportSettings {
     QSize outputSize;
     MediaRational frameRate;
     ExportFrameRange frameRange;
-    double startTime = 0.0;
-    double endTime = 0.0;
     QString encoder;
     qint64 videoBitrate = 0;
     qint64 audioBitrate = 192'000;
@@ -107,9 +105,9 @@ struct ExportResult {
 // The requested range is expressed on the source's original FFmpeg timeline;
 // trim arguments are expressed on FFmpeg's zero-based, post-seek timeline.
 struct StageBSourceAccess {
-    double inputSeekSeconds = 0.0;
-    double localTrimStartSeconds = 0.0;
-    double localTrimEndSeconds = 0.0;
+    QString inputSeekTimestamp;
+    QString localTrimStartTimestamp;
+    QString localTrimEndTimestamp;
 };
 
 class ExportEngine final {
@@ -118,8 +116,6 @@ public:
         const MediaInfo &source, const MediaRational &requested = {});
     [[nodiscard]] static ExportResult exportVideo(
         const ExportSettings &settings, TelemetryFrameRenderer &renderer);
-    [[nodiscard]] static qsizetype frameCount(
-        double sourceRangeStart, double sourceRangeEnd, const MediaRational &frameRate);
     [[nodiscard]] static std::optional<ExportFrameRange> frameRangeFromInclusiveFrames(
         qint64 firstFrame, qint64 lastFrame);
     [[nodiscard]] static std::optional<ExportFrameRange> fullVideoFrameRange(
@@ -141,8 +137,9 @@ public:
         double sourceRangeStart, qsizetype frameIndex, const MediaRational &frameRate);
     [[nodiscard]] static double framePresentationTime(
         double startTime, qsizetype frameIndex, const MediaRational &frameRate);
-    [[nodiscard]] static StageBSourceAccess stageBSourceAccess(
-        double sourceRangeStart, double sourceRangeEnd, double prerollSeconds = 5.0);
+    [[nodiscard]] static std::optional<StageBSourceAccess> stageBSourceAccess(
+        const MediaInfo &source, const ExportFrameRange &range,
+        const MediaRational &frameRate, qint64 prerollSeconds = 5);
     [[nodiscard]] static QString stageBVideoFilterGraph(
         const StageBSourceAccess &sourceAccess,
         const QSize &sourceSize,

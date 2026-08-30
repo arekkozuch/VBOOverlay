@@ -190,6 +190,11 @@ public:
     Q_INVOKABLE qint64 recommendedExportBitrate(int width, int height, qint64 numerator, qint64 denominator, const QString &quality) const;
     Q_INVOKABLE qint64 estimateExportSize(qint64 videoBitrate, bool audioEnabled, double seconds) const;
     Q_INVOKABLE QString formatEstimatedExportSize(qint64 bytes) const;
+    Q_INVOKABLE QVariantMap previewViewport(int availableWidth, int availableHeight) const;
+    Q_INVOKABLE qint64 previewEndPositionMilliseconds() const;
+    Q_INVOKABLE qint64 clampPreviewPositionMilliseconds(qint64 requestedMilliseconds) const;
+    Q_INVOKABLE QString previewTimecodeForPositionMilliseconds(qint64 positionMilliseconds) const;
+    Q_INVOKABLE QString previewEndTimecode() const;
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void cancelExportAndQuit();
     Q_INVOKABLE void dismissExportProgress();

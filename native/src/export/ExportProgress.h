@@ -20,6 +20,7 @@ struct ExportProgressSnapshot {
 // QProcess so its parsing and progress semantics remain deterministic in tests.
 struct FfmpegProgress {
     qsizetype encodedFrames = 0;
+    bool encodedFramesAvailable = false;
     qint64 outputMicroseconds = -1;
     double encoderFps = 0.0;
     double realtimeFactor = 0.0;

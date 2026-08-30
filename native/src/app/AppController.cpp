@@ -1,4 +1,5 @@
 #include "app/AppController.h"
+#include "app/PreviewPlayback.h"
 #include "export/ExportFormat.h"
 #include "export/ExportEngine.h"
 #include "export/ExportCancellation.h"
@@ -428,6 +429,46 @@ qint64 AppController::estimateExportSize(const qint64 videoBitrate, const bool a
 QString AppController::formatEstimatedExportSize(const qint64 bytes) const
 {
     return ExportFormat::formatEstimatedSize(bytes);
+}
+QVariantMap AppController::previewViewport(const int availableWidth, const int availableHeight) const
+{
+    const QSize sourceSize = m_exportSourceInfo.displayVideoSize.isValid()
+        ? m_exportSourceInfo.displayVideoSize : m_exportSourceInfo.videoSize;
+    const QRect viewport = PreviewPlayback::aspectFitViewport({availableWidth, availableHeight}, sourceSize);
+    return {{"x", viewport.x()}, {"y", viewport.y()},
+            {"width", viewport.width()}, {"height", viewport.height()}};
+}
+qint64 AppController::previewEndPositionMilliseconds() const
+{
+    const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
+    const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    const auto position = range ? PreviewPlayback::framePositionMilliseconds(range->lastFrame, rate) : std::nullopt;
+    return position.value_or(0);
+}
+qint64 AppController::clampPreviewPositionMilliseconds(const qint64 requestedMilliseconds) const
+{
+    const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
+    const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    const auto position = range
+        ? PreviewPlayback::clampPositionMilliseconds(requestedMilliseconds, range->lastFrame, rate)
+        : std::nullopt;
+    return position.value_or(0);
+}
+QString AppController::previewTimecodeForPositionMilliseconds(const qint64 positionMilliseconds) const
+{
+    const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
+    const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    if (!range || !rate.isValid() || positionMilliseconds < 0) return {};
+    const qint64 bounded = clampPreviewPositionMilliseconds(positionMilliseconds);
+    const qint64 frame = static_cast<qint64>(bounded) * rate.numerator / (rate.denominator * 1'000);
+    return ExportEngine::formatSmpteTimecode(qBound(range->firstFrame, frame, range->lastFrame), rate);
+}
+QString AppController::previewEndTimecode() const
+{
+    return previewTimecodeForPositionMilliseconds(previewEndPositionMilliseconds());
 }
 qint64 AppController::recommendedExportBitrate(const int width, const int height, const qint64 numerator,
                                                const qint64 denominator, const QString &quality) const

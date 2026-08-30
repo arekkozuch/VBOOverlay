@@ -1,8 +1,10 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "app/AppController.h"
+#include "app/PreviewPlayback.h"
 #include "export/EncoderDetector.h"
 #include "export/BoundedProcessOutput.h"
 #include "export/ExportEngine.h"
+#include "export/FinalOutputValidation.h"
 #include "export/ExportFormat.h"
 #include "export/ExportMediaProfile.h"
 #include "export/ExportDiagnostics.h"
@@ -136,6 +138,8 @@ private slots:
     void preservesTenBitFullRangeColorThroughVideoToolboxExport();
     void preservesExactExportRateRationals();
     void schedulesFrameAddressedExportRangesExactly();
+    void enforcesStrictTerminalFrameDeficitEvidence();
+    void derivesStablePreviewViewportAndLastFrameAdapter();
     void plansBoundedStageBSourceAccess();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
@@ -3725,11 +3729,7 @@ void TelemetryTests::cancelsEncoderDiscovery()
 
 void TelemetryTests::calculatesTimestampDrivenExportFrames()
 {
-    QCOMPARE(ExportEngine::frameCount(120.0, 140.0, {30'000, 1001}), qsizetype(600));
-    QCOMPARE(ExportEngine::frameCount(0.0, 1.0, {60'000, 1001}), qsizetype(60));
-    QCOMPARE(ExportEngine::frameCount(1.0, 1.0, {30, 1}), qsizetype(0));
     const MediaRational ntscRate{60'000, 1001};
-    QCOMPARE(ExportEngine::frameCount(30.0, 150.0, ntscRate), qsizetype(7'193));
     QCOMPARE(ExportEngine::sourceVideoTime(30.0, 0, ntscRate), 30.0);
     QVERIFY(qAbs(ExportEngine::sourceVideoTime(30.0, 1, ntscRate) - (30.0 + 1001.0 / 60'000.0)) < 0.000001);
     QVERIFY(ExportEngine::sourceVideoTime(30.0, 7'192, ntscRate) < 150.0);
@@ -3747,28 +3747,21 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
 
 void TelemetryTests::plansBoundedStageBSourceAccess()
 {
-    const StageBSourceAccess nearStart = ExportEngine::stageBSourceAccess(0.0, 30.0);
-    QCOMPARE(nearStart.inputSeekSeconds, 0.0);
-    QCOMPARE(nearStart.localTrimStartSeconds, 0.0);
-    QCOMPARE(nearStart.localTrimEndSeconds, 30.0);
+    MediaInfo source;
+    source.timeBase = {1, 60'000};
+    source.videoStartTicks = 120'000;
+    const MediaRational rate{60'000, 1'001};
+    const auto access = ExportEngine::stageBSourceAccess(source, {60, 359}, rate);
+    QVERIFY(access.has_value());
+    QCOMPARE(access->inputSeekTimestamp, QStringLiteral("0"));
+    QCOMPARE(access->localTrimStartTimestamp, QStringLiteral("3.001"));
+    QCOMPARE(access->localTrimEndTimestamp, QStringLiteral("8.006"));
 
-    const StageBSourceAccess lateRange = ExportEngine::stageBSourceAccess(240.0, 270.0);
-    QCOMPARE(lateRange.inputSeekSeconds, 235.0);
-    QCOMPARE(lateRange.localTrimStartSeconds, 5.0);
-    QCOMPARE(lateRange.localTrimEndSeconds, 35.0);
-
-    const StageBSourceAccess shorterThanPreroll = ExportEngine::stageBSourceAccess(3.0, 4.0);
-    QCOMPARE(shorterThanPreroll.inputSeekSeconds, 0.0);
-    QCOMPARE(shorterThanPreroll.localTrimStartSeconds, 3.0);
-    QCOMPARE(shorterThanPreroll.localTrimEndSeconds, 4.0);
-
-    // Source streams may begin at non-zero PTS. Their timestamps remain on the
-    // absolute source timeline for -ss; the filter sees only the local delta.
-    const StageBSourceAccess nonZeroSourcePts = ExportEngine::stageBSourceAccess(3.0, 8.0, 1.0);
-    QCOMPARE(nonZeroSourcePts.inputSeekSeconds, 2.0);
-    QCOMPARE(nonZeroSourcePts.localTrimStartSeconds, 1.0);
-    QCOMPARE(nonZeroSourcePts.localTrimEndSeconds, 6.0);
-    QCOMPARE(ExportEngine::frameCount(240.0, 270.0, {60'000, 1'001}), qsizetype(1'799));
+    const auto late = ExportEngine::stageBSourceAccess(source, {14'388, 16'186}, rate);
+    QVERIFY(late.has_value());
+    QCOMPARE(late->inputSeekTimestamp, QStringLiteral("237.0398"));
+    QCOMPARE(late->localTrimStartTimestamp, QStringLiteral("5"));
+    QCOMPARE(late->localTrimEndTimestamp, QStringLiteral("35.013316666666"));
 }
 
 void TelemetryTests::resolvesExplicitExportFormats()
@@ -3806,7 +3799,7 @@ void TelemetryTests::resolvesExplicitExportFormats()
     QVERIFY(ExportFormat::estimatedBytes(10'000'000, true, 60) > 75'000'000);
     QCOMPARE(ExportFormat::formatEstimatedSize(qint64(850) * 1024 * 1024), QStringLiteral("~850 MiB"));
     QCOMPARE(ExportFormat::formatEstimatedSize(qint64(46) * 1024 * 1024 * 1024 / 10), QStringLiteral("~4.60 GiB"));
-    QCOMPARE(ExportEngine::frameCount(0, 10, rates.at(1)), qsizetype(300));
+    QCOMPARE(ExportEngine::frameRangeFromInclusiveFrames(0, 299)->frameCount(), qint64(300));
 
     const QList<QSize> fiveK = ExportFormat::resolutionOptions({5312, 2988});
     QCOMPARE(fiveK.first(), QSize(5312, 2988));
@@ -4171,9 +4164,10 @@ void TelemetryTests::preservesTenBitFullRangeColorThroughVideoToolboxExport()
         sourceInfo, {width, height}, {30, 1}, 5'000'000,
         QStringLiteral("hevc_videotoolbox"));
     QVERIFY2(profile.supported, qPrintable(profile.error));
+    const auto stageBAccess = ExportEngine::stageBSourceAccess(sourceInfo, {0, frameCount - 1}, {30, 1});
+    QVERIFY(stageBAccess.has_value());
     const QString stageBFilter = ExportEngine::stageBVideoFilterGraph(
-        ExportEngine::stageBSourceAccess(0.0, 0.1), sourceInfo.videoSize,
-        {width, height}, {30, 1}, frameCount, profile);
+        *stageBAccess, sourceInfo.videoSize, {width, height}, {30, 1}, frameCount, profile);
     runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-i", source, "-i", overlay,
                "-filter_complex", stageBFilter,
                "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", "hevc_videotoolbox",
@@ -4251,6 +4245,14 @@ void TelemetryTests::schedulesFrameAddressedExportRangesExactly()
     QCOMPARE(fullRange->firstFrame, qint64(0));
     QCOMPARE(fullRange->lastFrame, qint64(78'271));
     QCOMPARE(fullRange->frameCount(), qint64(78'272));
+    MediaInfo fallbackSource = source;
+    fallbackSource.videoFrameCount = 0;
+    const auto fallbackRange = ExportEngine::fullVideoFrameRange(fallbackSource, ntsc);
+    QVERIFY(fallbackRange.has_value());
+    QCOMPARE(fallbackRange->frameCount(), qint64(78'272));
+    const auto halfRateRange = ExportEngine::fullVideoFrameRange(source, {30'000, 1'001});
+    QVERIFY(halfRateRange.has_value());
+    QCOMPARE(halfRateRange->frameCount(), qint64(39'136));
 
     const auto regressionRange = ExportEngine::frameRangeForSourceTimecode(
         source, ntsc, QStringLiteral("00:00:00:00"), QStringLiteral("00:21:44:31"));
@@ -4279,6 +4281,77 @@ void TelemetryTests::schedulesFrameAddressedExportRangesExactly()
     QVERIFY(!ExportEngine::parseSmpteTimecode(QStringLiteral("not-a-timecode"), ntsc));
 }
 
+void TelemetryTests::enforcesStrictTerminalFrameDeficitEvidence()
+{
+    const auto evidence = [](const qint64 actualFrames) {
+        FinalOutputEvidence value;
+        value.expectedFrames = 100;
+        value.stageAGeneratedFrames = 100;
+        value.stageASubmittedFrames = 100;
+        value.temporaryOverlayFrames = 100;
+        value.stageBProgressFrames = actualFrames;
+        value.finalFrameCount = actualFrames;
+        value.frameRate = {60'000, 1'001};
+        value.finalMedia.timeBase = {1, 60'000};
+        value.finalMedia.videoStartTicks = 0;
+        value.finalMedia.videoDurationTicks = actualFrames * 1'001;
+        value.otherValidationPassed = true;
+        value.outputTransactionSafe = true;
+        return value;
+    };
+
+    QCOMPARE(FinalOutputValidation::evaluate(evidence(100)).classification,
+             FinalOutputClassification::Success);
+    QCOMPARE(FinalOutputValidation::evaluate(evidence(99)).classification,
+             FinalOutputClassification::SuccessWithWarning);
+    QCOMPARE(FinalOutputValidation::evaluate(evidence(90)).classification,
+             FinalOutputClassification::SuccessWithWarning);
+    QCOMPARE(FinalOutputValidation::evaluate(evidence(89)).classification,
+             FinalOutputClassification::Failure);
+    QCOMPARE(FinalOutputValidation::evaluate(evidence(101)).classification,
+             FinalOutputClassification::Failure);
+
+    auto stageAGeneratedShort = evidence(99);
+    stageAGeneratedShort.stageAGeneratedFrames = 99;
+    QCOMPARE(FinalOutputValidation::evaluate(stageAGeneratedShort).classification,
+             FinalOutputClassification::Failure);
+    auto stageASubmittedShort = evidence(99);
+    stageASubmittedShort.stageASubmittedFrames = 99;
+    QCOMPARE(FinalOutputValidation::evaluate(stageASubmittedShort).classification,
+             FinalOutputClassification::Failure);
+    auto temporaryOverlayShort = evidence(99);
+    temporaryOverlayShort.temporaryOverlayFrames = 99;
+    QCOMPARE(FinalOutputValidation::evaluate(temporaryOverlayShort).classification,
+             FinalOutputClassification::Failure);
+    auto progressMismatch = evidence(98);
+    progressMismatch.stageBProgressFrames = 99;
+    QCOMPARE(FinalOutputValidation::evaluate(progressMismatch).classification,
+             FinalOutputClassification::Failure);
+    auto discontinuousTiming = evidence(99);
+    discontinuousTiming.finalMedia.videoDurationTicks = 100 * 1'001;
+    QCOMPARE(FinalOutputValidation::evaluate(discontinuousTiming).classification,
+             FinalOutputClassification::Failure);
+    auto otherFailure = evidence(99);
+    otherFailure.otherValidationPassed = false;
+    QCOMPARE(FinalOutputValidation::evaluate(otherFailure).classification,
+             FinalOutputClassification::Failure);
+}
+
+void TelemetryTests::derivesStablePreviewViewportAndLastFrameAdapter()
+{
+    QCOMPARE(PreviewPlayback::aspectFitViewport({1600, 900}, {3840, 2160}), QRect(0, 0, 1600, 900));
+    QCOMPARE(PreviewPlayback::aspectFitViewport({1600, 1000}, {3840, 2160}), QRect(0, 50, 1600, 900));
+    QCOMPARE(PreviewPlayback::aspectFitViewport({1000, 900}, {3840, 2160}), QRect(0, 169, 1000, 562));
+    QCOMPARE(PreviewPlayback::lastFrame(1), std::optional<qint64>(0));
+    QCOMPARE(PreviewPlayback::lastFrame(78'272), std::optional<qint64>(78'271));
+    QCOMPARE(PreviewPlayback::framePositionMilliseconds(59, {60, 1}),
+             std::optional<qint64>(983));
+    QCOMPARE(PreviewPlayback::framePositionMilliseconds(59'940, {60'000, 1'001}),
+             std::optional<qint64>(999'999));
+    QCOMPARE(PreviewPlayback::clampPositionMilliseconds(2'000, 59, {60, 1}),
+             std::optional<qint64>(983));
+}
+
 void TelemetryTests::preservesCfrCadenceForCommonRates()
 {
     const QString ffmpeg = FfmpegTools::ffmpegPath();
@@ -4296,7 +4369,7 @@ void TelemetryTests::preservesCfrCadenceForCommonRates()
     for (const MediaRational &rate : {MediaRational{30, 1}, MediaRational{30'000, 1'001},
                                       MediaRational{60'000, 1'001}}) {
         const QString rateText = QStringLiteral("%1/%2").arg(rate.numerator).arg(rate.denominator);
-        const qsizetype expectedFrames = ExportEngine::frameCount(0.0, 1.0, rate);
+        const qsizetype expectedFrames = rate.numerator == 60'000 ? 60 : 30;
         const QString source = directory.filePath(QStringLiteral("source-%1.mkv").arg(rate.numerator));
         const QString output = directory.filePath(QStringLiteral("output-%1.mp4").arg(rate.numerator));
         runFfmpeg({"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
@@ -4495,7 +4568,7 @@ void TelemetryTests::composes5994SixtySecondNonZeroRange()
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const MediaRational rate{60'000, 1'001};
-    const qsizetype expectedFrames = ExportEngine::frameCount(30.0, 90.0, rate);
+    const qsizetype expectedFrames = 3'597;
     QCOMPARE(expectedFrames, qsizetype(3'597));
     const QString source = directory.filePath(QStringLiteral("source.mp4"));
     const QString overlay = directory.filePath(QStringLiteral("overlay.mkv"));
@@ -4610,7 +4683,9 @@ void TelemetryTests::convertsVfrInputToCfrWithFrameCorrectOverlay()
     QVERIFY(sourceInfo.likelyVariableFrameRate);
     const MediaRational exportRate = sourceInfo.averageFrameRate;
     QVERIFY(exportRate.isValid());
-    const qsizetype expectedFrames = ExportEngine::frameCount(0.0, sourceInfo.duration, exportRate);
+    const auto sourceRange = ExportEngine::fullVideoFrameRange(sourceInfo, exportRate);
+    QVERIFY(sourceRange.has_value());
+    const qsizetype expectedFrames = static_cast<qsizetype>(sourceRange->frameCount());
     QCOMPARE(expectedFrames, qsizetype(24));
     QFile rawFile(rawOverlay);
     QVERIFY(rawFile.open(QIODevice::WriteOnly));

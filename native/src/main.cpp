@@ -190,7 +190,6 @@ int exportTest(const QString &inputPath, const QString &outputPath)
     settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
     settings.videoBitrate = FlappedEar::ExportFormat::recommendedVideoBitrate(
         settings.outputSize, settings.frameRate, input.bitDepth.value_or(8));
-    settings.endTime = input.duration;
     const FlappedEar::ExportResult result = FlappedEar::ExportEngine::exportVideo(settings, renderer);
     if (!result.success) {
         qCritical().noquote() << result.error;

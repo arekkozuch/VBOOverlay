@@ -13,6 +13,8 @@ endfunction()
 qt_add_library(flappedear_core STATIC
     src/app/AppLog.cpp
     src/app/AppLog.h
+    src/app/PreviewPlayback.cpp
+    src/app/PreviewPlayback.h
     src/export/EncoderDetector.cpp
     src/export/EncoderDetector.h
     src/export/BoundedProcessOutput.cpp
@@ -24,6 +26,8 @@ qt_add_library(flappedear_core STATIC
     src/export/ExportCancellation.cpp
     src/export/ExportCancellation.h
     src/export/ExportEngine.cpp
+    src/export/FinalOutputValidation.cpp
+    src/export/FinalOutputValidation.h
     src/export/ExportMediaProfile.cpp
     src/export/ExportMediaProfile.h
     src/export/ExportFormat.cpp
@@ -42,6 +46,7 @@ qt_add_library(flappedear_core STATIC
     src/export/FfmpegTools.h
     src/export/MediaProbe.cpp
     src/export/MediaProbe.h
+    src/app/PreviewPlayback.h
     src/export/PersistentExportLog.cpp
     src/export/PersistentExportLog.h
     src/export/RawFrameTransport.cpp

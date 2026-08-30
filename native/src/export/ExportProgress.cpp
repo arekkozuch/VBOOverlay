@@ -65,7 +65,10 @@ QList<FfmpegProgress> FfmpegProgressParser::append(QByteArray data)
         bool valid = false;
         if (key == "frame") {
             const qlonglong frame = value.toLongLong(&valid);
-            if (valid && frame >= 0) m_current.encodedFrames = static_cast<qsizetype>(frame);
+            if (valid && frame >= 0) {
+                m_current.encodedFrames = static_cast<qsizetype>(frame);
+                m_current.encodedFramesAvailable = true;
+            }
         } else if (key == "out_time_us" || key == "out_time_ms") {
             const qlonglong time = value.toLongLong(&valid);
             if (valid && time >= 0) m_current.outputMicroseconds = time;

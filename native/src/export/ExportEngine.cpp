@@ -7,6 +7,7 @@
 #include "export/ExportProcessSupervisor.h"
 #include "export/ExportStoragePolicy.h"
 #include "export/ExportFormat.h"
+#include "export/FinalOutputValidation.h"
 #include "export/ExportMediaProfile.h"
 #include "export/FfmpegTools.h"
 #include "export/ExportProgress.h"
@@ -336,19 +337,107 @@ std::optional<qint64> nominalTimecodeRate(const MediaRational &frameRate)
     return rate > 0 && rate <= 999 ? std::optional<qint64>(rate) : std::nullopt;
 }
 
-} // namespace
+struct ExactSeconds {
+    qint64 numerator = 0;
+    qint64 denominator = 1;
+};
 
-qsizetype ExportEngine::frameCount(
-    const double sourceRangeStart, const double sourceRangeEnd, const MediaRational &frameRate)
+std::optional<ExactSeconds> reduceSeconds(qint64 numerator, qint64 denominator)
 {
-    if (!frameRate.isValid() || !std::isfinite(sourceRangeStart) || !std::isfinite(sourceRangeEnd)
-        || sourceRangeEnd <= sourceRangeStart) {
-        return 0;
-    }
-    return static_cast<qsizetype>(
-        std::ceil((sourceRangeEnd - sourceRangeStart) * static_cast<double>(frameRate.numerator)
-                  / static_cast<double>(frameRate.denominator) - 1e-9));
+    if (numerator < 0 || denominator <= 0) return std::nullopt;
+    const qint64 divisor = std::gcd(numerator, denominator);
+    return ExactSeconds{numerator / divisor, denominator / divisor};
 }
+
+std::optional<ExactSeconds> addSeconds(const ExactSeconds &left, const ExactSeconds &right)
+{
+    qint64 leftNumerator = left.numerator;
+    qint64 rightNumerator = right.numerator;
+    qint64 leftDenominator = left.denominator;
+    qint64 rightDenominator = right.denominator;
+    const qint64 divisor = std::gcd(leftDenominator, rightDenominator);
+    leftDenominator /= divisor;
+    rightDenominator /= divisor;
+    qint64 leftScaled = 0;
+    qint64 rightScaled = 0;
+    qint64 denominator = 0;
+    qint64 numerator = 0;
+    if (!checkedMultiply(leftNumerator, rightDenominator, &leftScaled)
+        || !checkedMultiply(rightNumerator, leftDenominator, &rightScaled)
+        || !checkedAdd(leftScaled, rightScaled, &numerator)
+        || !checkedMultiply(leftDenominator, right.denominator, &denominator)) return std::nullopt;
+    return reduceSeconds(numerator, denominator);
+}
+
+std::optional<ExactSeconds> subtractSeconds(const ExactSeconds &left, const ExactSeconds &right)
+{
+    qint64 leftNumerator = left.numerator;
+    qint64 rightNumerator = right.numerator;
+    qint64 leftDenominator = left.denominator;
+    qint64 rightDenominator = right.denominator;
+    const qint64 divisor = std::gcd(leftDenominator, rightDenominator);
+    leftDenominator /= divisor;
+    rightDenominator /= divisor;
+    qint64 leftScaled = 0;
+    qint64 rightScaled = 0;
+    qint64 denominator = 0;
+    if (!checkedMultiply(leftNumerator, rightDenominator, &leftScaled)
+        || !checkedMultiply(rightNumerator, leftDenominator, &rightScaled)
+        || leftScaled < rightScaled
+        || !checkedMultiply(leftDenominator, right.denominator, &denominator)) return std::nullopt;
+    return reduceSeconds(leftScaled - rightScaled, denominator);
+}
+
+bool secondsLessThan(const ExactSeconds &left, const ExactSeconds &right)
+{
+    qint64 leftNumerator = left.numerator;
+    qint64 rightNumerator = right.numerator;
+    qint64 leftDenominator = left.denominator;
+    qint64 rightDenominator = right.denominator;
+    const qint64 divisor = std::gcd(leftDenominator, rightDenominator);
+    leftDenominator /= divisor;
+    rightDenominator /= divisor;
+    qint64 leftScaled = 0;
+    qint64 rightScaled = 0;
+    return checkedMultiply(leftNumerator, rightDenominator, &leftScaled)
+        && checkedMultiply(rightNumerator, leftDenominator, &rightScaled)
+        && leftScaled < rightScaled;
+}
+
+QString decimalSeconds(const ExactSeconds &value)
+{
+    QString result = QString::number(value.numerator / value.denominator);
+    qint64 remainder = value.numerator % value.denominator;
+    if (remainder == 0) return result;
+    result += QLatin1Char('.');
+    constexpr int precision = 12;
+    for (int digit = 0; digit < precision && remainder != 0; ++digit) {
+        if (remainder > std::numeric_limits<qint64>::max() / 10) break;
+        remainder *= 10;
+        result += QLatin1Char(static_cast<char>('0' + remainder / value.denominator));
+        remainder %= value.denominator;
+    }
+    while (result.endsWith(QLatin1Char('0'))) result.chop(1);
+    if (result.endsWith(QLatin1Char('.'))) result.chop(1);
+    return result;
+}
+
+std::optional<ExactSeconds> sourceFrameTimestamp(
+    const MediaInfo &source, const qint64 frame, const MediaRational &frameRate)
+{
+    if (frame < 0 || source.videoStartTicks < 0 || !source.timeBase.isValid() || !frameRate.isValid()) {
+        return std::nullopt;
+    }
+    qint64 originNumerator = 0;
+    qint64 frameNumerator = 0;
+    if (!checkedMultiply(source.videoStartTicks, source.timeBase.numerator, &originNumerator)
+        || !checkedMultiply(frame, frameRate.denominator, &frameNumerator)) return std::nullopt;
+    const auto origin = reduceSeconds(originNumerator, source.timeBase.denominator);
+    const auto frameOffset = reduceSeconds(frameNumerator, frameRate.numerator);
+    return origin && frameOffset ? addSeconds(*origin, *frameOffset) : std::nullopt;
+}
+
+} // namespace
 
 std::optional<ExportFrameRange> ExportEngine::frameRangeFromInclusiveFrames(
     const qint64 firstFrame, const qint64 lastFrame)
@@ -360,7 +449,8 @@ std::optional<ExportFrameRange> ExportEngine::frameRangeFromInclusiveFrames(
 std::optional<ExportFrameRange> ExportEngine::fullVideoFrameRange(
     const MediaInfo &source, const MediaRational &exportFrameRate)
 {
-    if (source.videoFrameCount > 0
+    const MediaRational sourceRate = effectiveFrameRate(source);
+    if (source.videoFrameCount > 0 && sourceRate.isEquivalentTo(exportFrameRate)
         && source.videoFrameCount <= static_cast<qsizetype>(std::numeric_limits<qint64>::max())) {
         return frameRangeFromInclusiveFrames(0, static_cast<qint64>(source.videoFrameCount) - 1);
     }
@@ -482,23 +572,22 @@ double ExportEngine::sourceVideoTime(
     return sourceRangeStart + exportRelativeTime(frameIndex, frameRate);
 }
 
-StageBSourceAccess ExportEngine::stageBSourceAccess(
-    const double sourceRangeStart, const double sourceRangeEnd, const double prerollSeconds)
+std::optional<StageBSourceAccess> ExportEngine::stageBSourceAccess(
+    const MediaInfo &source, const ExportFrameRange &range,
+    const MediaRational &frameRate, const qint64 prerollSeconds)
 {
-    if (!std::isfinite(sourceRangeStart) || !std::isfinite(sourceRangeEnd)
-        || sourceRangeEnd <= sourceRangeStart || !std::isfinite(prerollSeconds)
-        || prerollSeconds < 0.0) {
-        return {};
-    }
-
-    // The existing Stage B trim receives original source timestamps, including
-    // streams whose first packet has a non-zero PTS. FFmpeg rebases timestamps
-    // after an input -ss, so retain those absolute values for seeking and use
-    // only their difference for all post-seek filters. Do not use a stream's
-    // start_time as another offset: that would select a different frame.
-    const double inputSeekSeconds = qMax(0.0, sourceRangeStart - prerollSeconds);
-    return {inputSeekSeconds, sourceRangeStart - inputSeekSeconds,
-            sourceRangeEnd - inputSeekSeconds};
+    if (!range.isValid() || prerollSeconds < 0) return std::nullopt;
+    const auto start = sourceFrameTimestamp(source, range.firstFrame, frameRate);
+    if (range.lastFrame == std::numeric_limits<qint64>::max()) return std::nullopt;
+    const auto end = sourceFrameTimestamp(source, range.lastFrame + 1, frameRate);
+    const auto preroll = reduceSeconds(prerollSeconds, 1);
+    if (!start || !end || !preroll || secondsLessThan(*end, *start)) return std::nullopt;
+    const ExactSeconds inputSeek = secondsLessThan(*start, *preroll)
+        ? ExactSeconds{} : *subtractSeconds(*start, *preroll);
+    const auto localStart = subtractSeconds(*start, inputSeek);
+    const auto localEnd = subtractSeconds(*end, inputSeek);
+    if (!localStart || !localEnd) return std::nullopt;
+    return StageBSourceAccess{decimalSeconds(inputSeek), decimalSeconds(*localStart), decimalSeconds(*localEnd)};
 }
 
 QString ExportEngine::stageBVideoFilterGraph(
@@ -524,7 +613,7 @@ QString ExportEngine::stageBVideoFilterGraph(
         "[1:v]setpts=PTS-STARTPTS,%5[temporaryOverlay];"
         "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=%6:format=%7[composited];"
         "[composited]format=pix_fmts=%8[video]")
-            .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)
+            .arg(sourceAccess.localTrimStartTimestamp)
             .arg(rateString(frameRate))
             .arg(expectedFrames)
             .arg(sourceSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
@@ -1187,15 +1276,17 @@ ExportResult ExportEngine::exportVideo(
         activityTimer.restart();
         compositing = true;
         finalizing = false;
-        constexpr double stageBSeekPrerollSeconds = 5.0;
-        const StageBSourceAccess sourceAccess = stageBSourceAccess(
-            sourceRangeStart, sourceRangeEnd, stageBSeekPrerollSeconds);
+        const auto sourceAccess = stageBSourceAccess(source, scheduledRange, exportFrameRate);
+        if (!sourceAccess) {
+            result.error = QStringLiteral("Could not derive exact Stage B source timestamps from the frame range.");
+            return result;
+        }
         const QString timeRangeFilter = stageBVideoFilterGraph(
-            sourceAccess, source.videoSize, outputSize, exportFrameRate,
+            *sourceAccess, source.videoSize, outputSize, exportFrameRate,
             expectedFrames, result.mediaProfile);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
-            "-ss", QString::number(sourceAccess.inputSeekSeconds, 'f', 9),
+            "-ss", sourceAccess->inputSeekTimestamp,
             "-i", settings.inputPath, "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
@@ -1237,8 +1328,8 @@ ExportResult ExportEngine::exportVideo(
         if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
             compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
                 ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
-                .arg(sourceAccess.localTrimStartSeconds, 0, 'f', 9)
-                .arg(sourceAccess.localTrimEndSeconds, 0, 'f', 9);
+                .arg(sourceAccess->localTrimStartTimestamp)
+                .arg(sourceAccess->localTrimEndTimestamp);
             compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", QString::number(settings.audioBitrate)});
         } else {
             compositionArguments.append("-an");
@@ -1253,9 +1344,9 @@ ExportResult ExportEngine::exportVideo(
                                              {"arguments", compositionArguments},
                                              {"sourceRangeStart", sourceRangeStart},
                                              {"sourceRangeEnd", sourceRangeEnd},
-                                             {"inputSeekSeconds", sourceAccess.inputSeekSeconds},
-                                             {"localTrimStartSeconds", sourceAccess.localTrimStartSeconds},
-                                             {"localTrimEndSeconds", sourceAccess.localTrimEndSeconds}});
+                                             {"inputSeekTimestamp", sourceAccess->inputSeekTimestamp},
+                                             {"localTrimStartTimestamp", sourceAccess->localTrimStartTimestamp},
+                                             {"localTrimEndTimestamp", sourceAccess->localTrimEndTimestamp}});
         compositor.setProcessChannelMode(QProcess::SeparateChannels);
         qInfo().noquote() << QStringLiteral("Stage B FFmpeg arguments: %1").arg(formatArgumentList(compositionArguments));
         if (!updateManifestState(settings, QStringLiteral("stageB"))) {
@@ -1284,8 +1375,8 @@ ExportResult ExportEngine::exportVideo(
                         QStringLiteral("Stage B produced its first output frame in %1 ms")
                             .arg(stageBTimer.elapsed()), QStringLiteral("ffmpeg"),
                         {{"timeToFirstStageBOutputFrame", stageBTimer.elapsed()},
-                         {"inputSeekSeconds", sourceAccess.inputSeekSeconds},
-                         {"localTrimStartSeconds", sourceAccess.localTrimStartSeconds},
+                         {"inputSeekTimestamp", sourceAccess->inputSeekTimestamp},
+                         {"localTrimStartTimestamp", sourceAccess->localTrimStartTimestamp},
                          {"sourceRangeStart", sourceRangeStart},
                          {"sourceRangeEnd", sourceRangeEnd}});
             }
@@ -1410,20 +1501,8 @@ ExportResult ExportEngine::exportVideo(
         const qint64 finalFrameCount = packetCountAvailable
             ? static_cast<qint64>(result.mediaInfo.videoPacketCount) : 0;
         const qint64 expectedFrameCount = static_cast<qint64>(expectedFrames);
-        const qint64 frameDeficit = packetCountAvailable ? expectedFrameCount - finalFrameCount : 0;
-        const bool terminalDeficitAllowed = packetCountAvailable && frameDeficit >= 1 && frameDeficit <= 10;
-        const bool packetCountOk = !packetCountAvailable || frameDeficit == 0 || terminalDeficitAllowed;
-        if (packetCountAvailable) {
-            result.encodedFrames = result.mediaInfo.videoPacketCount;
-            result.finalFrameCount = finalFrameCount;
-            result.frameDeficit = frameDeficit;
-        }
-        const double videoStartTolerance = result.mediaInfo.timeBase.isValid()
-            ? result.mediaInfo.timeBase.value() : frameInterval;
-        const bool videoStartOk = qAbs(result.mediaInfo.videoStartTime) <= videoStartTolerance;
         const double videoDuration = result.mediaInfo.videoDuration > 0.0
             ? result.mediaInfo.videoDuration : result.mediaInfo.duration;
-        const bool durationOk = qAbs(videoDuration - exportDuration) <= frameInterval;
         const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty();
         // Audio can legitimately end before the video stream (as on real action-camera
         // recordings). Validate against the selected audio-timeline intersection.
@@ -1441,6 +1520,29 @@ ExportResult ExportEngine::exportVideo(
         const bool audioDurationOk = !audioExpected
             || qAbs(result.mediaInfo.audioDuration - expectedAudioDuration) <= audioTimingTolerance;
         const bool audioOk = !audioExpected || (audioPresent && audioStartOk && audioDurationOk);
+        const bool otherValidationPassed = codecOk && dimensionsOk && averageRateOk && nominalRateOk
+            && pixelFormatOk && bitDepthOk && encoderProfileOk && colorRangeOk && colorSpaceOk
+            && colorTransferOk && colorPrimariesOk && audioOk;
+        const FinalOutputValidationResult outputValidation = FinalOutputValidation::evaluate({
+            expectedFrameCount,
+            static_cast<qint64>(result.generatedFrames),
+            static_cast<qint64>(result.renderedFrames),
+            static_cast<qint64>(stagedEncodedFrames),
+            lastFfmpegProgress.encodedFramesAvailable
+                ? std::optional<qint64>(static_cast<qint64>(lastFfmpegProgress.encodedFrames))
+                : std::nullopt,
+            finalFrameCount,
+            result.mediaInfo,
+            exportFrameRate,
+            otherValidationPassed,
+            outputExists && !settings.manifestPath.isEmpty(),
+        });
+        result.encodedFrames = packetCountAvailable ? result.mediaInfo.videoPacketCount : 0;
+        result.finalFrameCount = finalFrameCount;
+        result.frameDeficit = outputValidation.frameDeficit;
+        const bool packetCountOk = outputValidation.accepted();
+        const bool videoStartOk = outputValidation.startsAtOrigin;
+        const bool durationOk = outputValidation.contiguousCfrTiming;
         const auto finalValidationLog = [&](const QString &operation, const QString &name,
                                             const QVariant &expected, const QVariant &actual,
                                             const bool passed) {
@@ -1491,6 +1593,12 @@ ExportResult ExportEngine::exportVideo(
         finalValidationLog(QStringLiteral("checkVideoStart"), QStringLiteral("Video start"),
                            QStringLiteral("0"),
                            QString::number(result.mediaInfo.videoStartTime, 'f', 9), videoStartOk);
+        finalValidationLog(QStringLiteral("checkStageBProgress"), QStringLiteral("Stage B progress"),
+                           packetCountAvailable ? QVariant(finalFrameCount) : QVariant(QStringLiteral("unavailable")),
+                           lastFfmpegProgress.encodedFramesAvailable
+                               ? QVariant(static_cast<qint64>(lastFfmpegProgress.encodedFrames))
+                               : QVariant(QStringLiteral("unavailable")),
+                           outputValidation.stageBProgressMatches);
         finalValidationLog(QStringLiteral("checkAudio"), QStringLiteral("Audio"),
                            audioExpected ? QStringLiteral("yes") : QStringLiteral("not required"),
                            result.mediaInfo.audioCodecs.isEmpty()
@@ -1505,35 +1613,28 @@ ExportResult ExportEngine::exportVideo(
                                QString::number(expectedAudioDuration, 'f', 6),
                                QString::number(result.mediaInfo.audioDuration, 'f', 6), audioDurationOk);
         }
-        if (!packetCountOk) {
-            const bool fewer = result.mediaInfo.videoPacketCount < expectedFrames;
-            result.error = fewer
-                ? QStringLiteral("Final output contains fewer video packets than the telemetry frame schedule.")
-                : QStringLiteral("Final output contains more video packets than the telemetry frame schedule.");
+        if (!outputValidation.accepted()) {
+            result.error = QStringLiteral("Export failed final media, frame-count, or contiguous-CFR validation.");
             result.diagnostics = QStringLiteral(
-                "Prepared %1 telemetry frames; final ffprobe packet count is %2. "
-                "FFmpeg's final progress report was %3 frames.")
+                "Prepared %1 telemetry frames; final ffprobe packet count is %2; "
+                "Stage B progress is %3; frame-origin=%4; contiguous-CFR=%5; stage counts match=%6.")
                                      .arg(expectedFrames)
                                      .arg(result.mediaInfo.videoPacketCount)
-                                     .arg(lastFfmpegProgress.encodedFrames);
+                                     .arg(lastFfmpegProgress.encodedFrames)
+                                     .arg(outputValidation.startsAtOrigin ? QStringLiteral("yes") : QStringLiteral("no"))
+                                     .arg(outputValidation.contiguousCfrTiming ? QStringLiteral("yes") : QStringLiteral("no"))
+                                     .arg(outputValidation.stageCountsMatch ? QStringLiteral("yes") : QStringLiteral("no"));
             return result;
         }
-        if (!codecOk || !dimensionsOk || !averageRateOk || !nominalRateOk
-            || !pixelFormatOk || !bitDepthOk || !encoderProfileOk
-            || !colorRangeOk || !colorSpaceOk || !colorTransferOk || !colorPrimariesOk
-            || !videoStartOk || !durationOk || !audioOk) {
-            result.error = QStringLiteral("Export failed final media or timing validation.");
-            return result;
-        }
-        if (terminalDeficitAllowed) {
+        if (outputValidation.classification == FinalOutputClassification::SuccessWithWarning) {
             result.validationWarning = QStringLiteral(
                 "Export completed with warning\n\nThe final video ended %1 frames earlier than scheduled.\n\nExpected: %2 frames\nEncoded: %3 frames\nDifference: %1 frames\n\nThe exported file was preserved.")
-                .arg(frameDeficit).arg(expectedFrameCount).arg(finalFrameCount);
+                .arg(outputValidation.frameDeficit).arg(expectedFrameCount).arg(finalFrameCount);
             observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
                     QStringLiteral("terminalFrameDeficitAccepted"), result.validationWarning,
                     QStringLiteral("validation"),
                     {{"expectedFrames", expectedFrameCount}, {"finalFrameCount", finalFrameCount},
-                     {"frameDeficit", frameDeficit}, {"resultClassification", QStringLiteral("SuccessWithWarning")}});
+                     {"frameDeficit", outputValidation.frameDeficit}, {"resultClassification", QStringLiteral("SuccessWithWarning")}});
         }
         observe(settings, QStringLiteral("log"), QStringLiteral("validatingOutput"),
                 QStringLiteral("validationComplete"), QStringLiteral("Final validation passed"),
