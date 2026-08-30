@@ -78,6 +78,9 @@
   overlay staging, source conversion, progress, and validation; do not reconstruct it from doubles.
 - Authoritative export ranges are inclusive integer frame addresses. Decimal/container duration must
   never determine scheduled frame count; C++ owns SMPTE IN/OUT parsing and formatting.
+- Preview widget geometry is derived from loaded media display geometry, never from transient
+  `VideoOutput` decoded-frame state. User-accessible playback end is the last actual video frame,
+  not the media-duration boundary after it.
 - Cloud CI is intentionally disabled. Local build/tests are the current required gate, and real-media
   validation must be reported separately from synthetic tests.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke

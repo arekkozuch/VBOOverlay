@@ -1,7 +1,7 @@
 # VBOOverlay / FlappedEar Telemetry — Current Development State
 
-**State captured:** 2026-08-27  
-**Product-code baseline:** `0749eff31c87698a737cc62a1b54bd2fc9d1fb2c` (`fix: preserve Canvas widgets in offscreen export`)  
+**State captured:** 2026-08-30
+**Product-code baseline:** `2af522cb64b735c7d4d1725f1b772904a79ef724` plus the direct-main integer-export and preview-boundary continuation in this working tree
 **Repository:** `arekkozuch/VBOOverlay`  
 **Baseline branch:** `main`  
 **Application version in CMake:** `0.2.0`  
@@ -15,7 +15,7 @@
 
 ## 1. One-paragraph project state
 
-FlappedEar Telemetry is now a native Qt 6 / C++20 / QML desktop application for synchronizing motorsport telemetry with video, editing telemetry overlays, analyzing synchronized channels, and exporting frame-correct HEVC/AAC video. The original Electron/React prototype has been removed. The current architecture has a robust VBO telemetry model, GoPro GPMF GPS extraction, GPS-speed synchronization, project persistence and recovery, portable media relinking, a reusable QML telemetry scene shared by preview/export, an offscreen QRhi export renderer, a two-stage FFmpeg export pipeline, strong output-file safety, bounded untrusted inputs, extensive Qt Test coverage, and a current accepted nine-widget motorsport-broadcast HUD. The last two critical fixes before this checkpoint resolved 10-bit Main10 color corruption and missing QML Canvas widgets in offscreen export. The next intended product milestone is **lap timing and session analysis using real track-session data after the next track day**, not a widget-system rewrite.
+FlappedEar Telemetry is now a native Qt 6 / C++20 / QML desktop application for synchronizing motorsport telemetry with video, editing telemetry overlays, analyzing synchronized channels, and exporting frame-correct HEVC/AAC video. The original Electron/React prototype has been removed. The current architecture has a robust VBO telemetry model, GoPro GPMF GPS extraction, GPS-speed synchronization, project persistence and recovery, portable media relinking, a reusable QML telemetry scene shared by preview/export, an offscreen QRhi export renderer, a two-stage FFmpeg export pipeline, strong output-file safety, bounded untrusted inputs, extensive Qt Test coverage, and a current accepted nine-widget motorsport-broadcast HUD. Export scheduling now uses inclusive integer frame ranges and exact rational transport timestamps; a 1..10 terminal-frame warning requires complete staging evidence, agreeing Stage-B progress when present, and exact contiguous-CFR final timing. The editor preview derives its widget viewport from loaded media geometry and clamps its visible endpoint to the last actual video frame. The next intended product milestone is **lap timing and session analysis using real track-session data after the next track day**, not a widget-system rewrite.
 
 ---
 

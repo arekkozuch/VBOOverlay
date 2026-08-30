@@ -6,6 +6,12 @@ The selected user target is never passed to FFmpeg. Each export creates an empty
 validation failure, forced worker termination, and controller destruction remove only paths in that
 ownership record. Filename shape alone is never treated as proof of ownership.
 
+An export reaches transaction commit only after final media validation. Exact success and the narrow
+`SuccessWithWarning` terminal-deficit case use this same staging/commit path; a warning is eligible
+only for one through ten missing terminal frames with all other media, staging, progress, and exact
+contiguous-CFR timing checks passing. A surplus or any other validation failure leaves staging owned
+for normal cleanup and never replaces the selected target.
+
 For a new target, the staging file is renamed to the target on the same filesystem after final media
 validation. The transaction refuses to commit if another file appeared at the target while encoding.
 
