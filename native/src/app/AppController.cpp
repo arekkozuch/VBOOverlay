@@ -463,12 +463,18 @@ QString AppController::previewTimecodeForPositionMilliseconds(const qint64 posit
     const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
     if (!range || !rate.isValid() || positionMilliseconds < 0) return {};
     const qint64 bounded = clampPreviewPositionMilliseconds(positionMilliseconds);
+    if (bounded >= previewEndPositionMilliseconds()) {
+        return ExportEngine::formatSmpteTimecode(range->lastFrame, rate);
+    }
     const qint64 frame = static_cast<qint64>(bounded) * rate.numerator / (rate.denominator * 1'000);
     return ExportEngine::formatSmpteTimecode(qBound(range->firstFrame, frame, range->lastFrame), rate);
 }
 QString AppController::previewEndTimecode() const
 {
-    return previewTimecodeForPositionMilliseconds(previewEndPositionMilliseconds());
+    const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
+    const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    return range ? ExportEngine::formatSmpteTimecode(range->lastFrame, rate) : QString();
 }
 qint64 AppController::recommendedExportBitrate(const int width, const int height, const qint64 numerator,
                                                const qint64 denominator, const QString &quality) const
