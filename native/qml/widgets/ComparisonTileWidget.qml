@@ -15,6 +15,7 @@ Item {
     readonly property bool isBest: tileType.endsWith("Best")
     readonly property bool isCurrent: tileType.endsWith("Current")
     readonly property bool isDelta: tileType.endsWith("Delta")
+    readonly property real tileScale: frame.sceneScale * frame.widgetScale
     readonly property int decimals: isSpeed
         ? Number(isDelta ? frame.widgetSettings.speedDeltaDecimals ?? 1
                          : frame.widgetSettings.speedDecimals ?? 0)
@@ -58,18 +59,20 @@ Item {
     TelemetryPanel {
         anchors.fill: parent
         frame: root.frame
+        borderWidth: Number(root.frame.widgetSettings.borderWidth ?? 1) * root.tileScale
+        cornerRadius: Number(root.frame.widgetSettings.cornerRadius ?? 12) * root.tileScale
     }
 
     Label {
         visible: !root.isDelta
         anchors.left: parent.left
         anchors.top: parent.top
-        anchors.leftMargin: 12 * root.frame.sceneScale
-        anchors.topMargin: 7 * root.frame.sceneScale
+        anchors.leftMargin: 12 * root.tileScale
+        anchors.topMargin: 7 * root.tileScale
         text: root.frame.widgetSettings.label || (root.isBest ? qsTr("Best") : qsTr("Current"))
         color: root.frame.primary
         font.family: root.frame.family
-        font.pixelSize: Math.min(24 * root.frame.labelScale * root.frame.sceneScale,
+        font.pixelSize: Math.min(24 * root.frame.labelScale * root.tileScale,
                                  root.height * 0.22)
         font.weight: Font.Medium
     }
@@ -78,12 +81,12 @@ Item {
         visible: !root.isDelta && root.isSpeed && (root.frame.widgetSettings.showUnit ?? true)
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.rightMargin: 12 * root.frame.sceneScale
-        anchors.topMargin: 11 * root.frame.sceneScale
+        anchors.rightMargin: 12 * root.tileScale
+        anchors.topMargin: 11 * root.tileScale
         text: root.frame.widgetSettings.unit || "km/h"
         color: root.frame.secondary
         font.family: root.frame.family
-        font.pixelSize: Math.min(15 * root.frame.labelScale * root.frame.sceneScale,
+        font.pixelSize: Math.min(15 * root.frame.labelScale * root.tileScale,
                                  root.height * 0.14)
         font.weight: Font.DemiBold
     }
@@ -92,12 +95,12 @@ Item {
         visible: !root.isDelta
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 12 * root.frame.sceneScale
-        anchors.bottomMargin: 13 * root.frame.sceneScale
+        anchors.leftMargin: 12 * root.tileScale
+        anchors.bottomMargin: 13 * root.tileScale
         text: Number.isFinite(root.lapNumber) ? root.lapNumber : "—"
         color: root.frame.primary
         font.family: root.frame.family
-        font.pixelSize: Math.min(24 * root.frame.labelScale * root.frame.sceneScale,
+        font.pixelSize: Math.min(24 * root.frame.labelScale * root.tileScale,
                                  root.height * 0.22)
         font.weight: Font.DemiBold
     }
@@ -108,9 +111,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.leftMargin: 10 * root.frame.sceneScale
-        anchors.rightMargin: 10 * root.frame.sceneScale
-        anchors.topMargin: 8 * root.frame.sceneScale
+        anchors.leftMargin: 10 * root.tileScale
+        anchors.rightMargin: 10 * root.tileScale
+        anchors.topMargin: 8 * root.tileScale
         height: parent.height * 0.34
         readonly property real centerX: width / 2
         readonly property real magnitude: root.hasValue
@@ -121,7 +124,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            height: Math.max(1, 2 * root.frame.sceneScale)
+            height: Math.max(1, 2 * root.tileScale)
             color: root.frame.primary
             opacity: 0.9
         }
@@ -132,7 +135,7 @@ Item {
                 required property int index
                 x: index * (deltaGauge.width - width) / 4
                 anchors.verticalCenter: deltaGauge.verticalCenter
-                width: Math.max(1, 2 * root.frame.sceneScale)
+                width: Math.max(1, 2 * root.tileScale)
                 height: index === 2 ? deltaGauge.height * 0.72 : deltaGauge.height * 0.42
                 color: root.frame.primary
                 opacity: 0.9
@@ -154,12 +157,12 @@ Item {
         visible: root.isDelta && root.isSpeed && (root.frame.widgetSettings.showUnit ?? true)
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 12 * root.frame.sceneScale
-        anchors.bottomMargin: 13 * root.frame.sceneScale
+        anchors.leftMargin: 12 * root.tileScale
+        anchors.bottomMargin: 13 * root.tileScale
         text: root.frame.widgetSettings.unit || "km/h"
         color: root.frame.secondary
         font.family: root.frame.family
-        font.pixelSize: Math.min(15 * root.frame.labelScale * root.frame.sceneScale,
+        font.pixelSize: Math.min(15 * root.frame.labelScale * root.tileScale,
                                  root.height * 0.14)
         font.weight: Font.DemiBold
     }
@@ -167,8 +170,8 @@ Item {
     Label {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.rightMargin: 12 * root.frame.sceneScale
-        anchors.bottomMargin: 7 * root.frame.sceneScale
+        anchors.rightMargin: 12 * root.tileScale
+        anchors.bottomMargin: 7 * root.tileScale
         text: root.isCurrent && !root.isSpeed && root.timing.state === "waiting"
             ? qsTr("READY")
             : root.isSpeed || root.isDelta
@@ -177,8 +180,8 @@ Item {
             ? root.frame.primary : root.frame.secondary
         font.family: root.frame.family
         font.pixelSize: root.isCurrent && !root.isSpeed && root.timing.state === "waiting"
-            ? Math.min(31 * root.frame.valueScale * root.frame.sceneScale, root.height * 0.32)
-            : Math.min(50 * root.frame.valueScale * root.frame.sceneScale, root.height * 0.46)
+            ? Math.min(31 * root.frame.valueScale * root.tileScale, root.height * 0.32)
+            : Math.min(50 * root.frame.valueScale * root.tileScale, root.height * 0.46)
         font.weight: Font.Medium
     }
 }
