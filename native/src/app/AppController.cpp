@@ -447,6 +447,14 @@ qint64 AppController::previewEndPositionMilliseconds() const
     const auto position = range ? PreviewPlayback::framePositionMilliseconds(range->lastFrame, rate) : std::nullopt;
     return position.value_or(0);
 }
+qint64 AppController::previewInitialPositionMilliseconds() const
+{
+    const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()
+        ? m_exportSourceInfo.averageFrameRate : m_exportSourceInfo.frameRate;
+    const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    if (!range || range->lastFrame < 1) return 0;
+    return PreviewPlayback::firstTimelineFramePositionMilliseconds(rate).value_or(0);
+}
 qint64 AppController::clampPreviewPositionMilliseconds(const qint64 requestedMilliseconds) const
 {
     const MediaRational rate = m_exportSourceInfo.averageFrameRate.isValid()

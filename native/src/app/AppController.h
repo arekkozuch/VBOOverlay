@@ -200,6 +200,7 @@ public:
     Q_INVOKABLE QString formatEstimatedExportSize(qint64 bytes) const;
     Q_INVOKABLE QVariantMap previewViewport(int availableWidth, int availableHeight) const;
     Q_INVOKABLE qint64 previewEndPositionMilliseconds() const;
+    Q_INVOKABLE qint64 previewInitialPositionMilliseconds() const;
     Q_INVOKABLE qint64 clampPreviewPositionMilliseconds(qint64 requestedMilliseconds) const;
     Q_INVOKABLE QString previewTimecodeForPositionMilliseconds(qint64 positionMilliseconds) const;
     Q_INVOKABLE QString previewEndTimecode() const;

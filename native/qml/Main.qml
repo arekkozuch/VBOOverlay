@@ -1380,10 +1380,9 @@ ApplicationWindow {
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.LoadedMedia) {
                 // AVFoundation does not reliably submit the initial paused frame until it
-                // receives a position request. Keep the current position (normally zero),
-                // bounded by the probe-derived final frame, so the editor and fullscreen
-                // preview have the same first-frame initialization.
-                position = appController.clampPreviewPositionMilliseconds(position);
+                // receives a position request. Start on user-visible timeline frame 1,
+                // so a successful load is immediately distinguishable from frame 0.
+                position = appController.previewInitialPositionMilliseconds();
             }
             if (mediaStatus === MediaPlayer.EndOfMedia) {
                 pause();

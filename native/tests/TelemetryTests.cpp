@@ -4650,6 +4650,10 @@ void TelemetryTests::derivesStablePreviewViewportAndLastFrameAdapter()
              std::optional<qint64>(983));
     QCOMPARE(PreviewPlayback::framePositionMilliseconds(59'940, {60'000, 1'001}),
              std::optional<qint64>(999'999));
+    QCOMPARE(PreviewPlayback::firstTimelineFramePositionMilliseconds({60, 1}),
+             std::optional<qint64>(17));
+    QCOMPARE(PreviewPlayback::firstTimelineFramePositionMilliseconds({60'000, 1'001}),
+             std::optional<qint64>(17));
     QCOMPARE(PreviewPlayback::clampPositionMilliseconds(2'000, 59, {60, 1}),
              std::optional<qint64>(983));
 }

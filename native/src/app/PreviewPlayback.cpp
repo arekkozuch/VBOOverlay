@@ -59,6 +59,22 @@ std::optional<qint64> PreviewPlayback::framePositionMilliseconds(
     return multiplyDivideFloor(frame, frameRate.denominator, 1'000, frameRate.numerator);
 }
 
+std::optional<qint64> PreviewPlayback::firstTimelineFramePositionMilliseconds(
+    const MediaRational &frameRate)
+{
+    if (!frameRate.isValid()
+        || frameRate.denominator > std::numeric_limits<qint64>::max() / 1'000) {
+        return std::nullopt;
+    }
+    const qint64 scaledDenominator = frameRate.denominator * 1'000;
+    if (scaledDenominator > std::numeric_limits<qint64>::max() - frameRate.numerator + 1) {
+        return std::nullopt;
+    }
+    // Presentation-only inverse mapping from the millisecond player position to
+    // frame index one. Export frame boundaries remain exact integer/rational values.
+    return (scaledDenominator + frameRate.numerator - 1) / frameRate.numerator;
+}
+
 std::optional<qint64> PreviewPlayback::clampPositionMilliseconds(
     const qint64 requestedMilliseconds, const qint64 lastVideoFrame, const MediaRational &frameRate)
 {
