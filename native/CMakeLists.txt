@@ -75,6 +75,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TelemetrySession.h
     src/telemetry/TelemetryGeometry.cpp
     src/telemetry/TelemetryGeometry.h
+    src/telemetry/LapTiming.cpp
+    src/telemetry/LapTiming.h
     src/telemetry/TimingGate.h
     src/telemetry/SourceOperation.h
     src/telemetry/TelemetryRenderContext.cpp
