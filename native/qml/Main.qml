@@ -736,9 +736,25 @@ ApplicationWindow {
         property url outputFile
         property var formatOptions: ({})
         property int selectedBitrate: 0
-        property double selectedDuration: exportRangeMode.currentIndex === 1
-            ? Math.max(0, Number(exportRangeEnd.text) - Number(exportRangeStart.text))
-            : Number(appController.exportSourceInfo.duration || 0)
+        property var singleLapRange: {
+            appController.lapSummaries;
+            const rate = selectedRate();
+            const lap = selectedLap();
+            return lap && rate.numerator > 0 && rate.denominator > 0
+                ? appController.lapExportRange(Number(lap.number), rate.numerator, rate.denominator,
+                                                Number(lapHandle.currentText || 6)) : ({ valid: false });
+        }
+        property double selectedDuration: {
+            const rate = selectedRate();
+            if (rate.numerator <= 0 || rate.denominator <= 0)
+                return 0;
+            if (exportRangeMode.currentIndex === 0)
+                return Number(appController.exportSourceInfo.duration || 0);
+            const range = activeRange();
+            return appController.exportRangeDurationSeconds(rate.numerator, rate.denominator,
+                                                             String(range.inTimecode || ""),
+                                                             String(range.outTimecode || ""));
+        }
         function sourceHasAudio() {
             const codecs = appController.exportSourceInfo.audioCodecs;
             return codecs !== undefined && codecs !== null && codecs.length > 0;
@@ -750,6 +766,16 @@ ApplicationWindow {
         }
         function selectedSize() { return formatOptions.sizes && exportResolution.currentIndex >= 0 && exportResolution.currentIndex < formatOptions.sizes.length ? formatOptions.sizes[exportResolution.currentIndex] : ({ width: 0, height: 0 }); }
         function selectedRate() { return formatOptions.rates && exportFrameRate.currentIndex >= 0 && exportFrameRate.currentIndex < formatOptions.rates.length ? formatOptions.rates[exportFrameRate.currentIndex] : ({ numerator: 0, denominator: 1 }); }
+        function selectedLap() {
+            const laps = appController.lapSummaries;
+            return lapPicker.currentIndex >= 0 && lapPicker.currentIndex < laps.length
+                ? laps[lapPicker.currentIndex] : null;
+        }
+        function activeRange() {
+            if (exportRangeMode.currentIndex === 2)
+                return singleLapRange;
+            return ({ inTimecode: exportRangeStart.text, outTimecode: exportRangeEnd.text });
+        }
         function updateBitrate() {
             const size = selectedSize(); const rate = selectedRate();
             if (size.width <= 0 || size.height <= 0 || rate.numerator <= 0 || rate.denominator <= 0) return;
@@ -764,13 +790,14 @@ ApplicationWindow {
         function startExport(overwriteAllowed) {
             const size = selectedSize(); const rate = selectedRate();
             const bitrate = selectedBitrate;
+            const range = activeRange();
             if (appController.startExport(
                 outputFile,
                 size.width, size.height, rate.numerator, rate.denominator, bitrate,
                 exportAudio.checked,
-                exportRangeMode.currentIndex === 1,
-                exportRangeStart.text,
-                exportRangeEnd.text,
+                exportRangeMode.currentIndex !== 0,
+                String(range.inTimecode || ""),
+                String(range.outTimecode || ""),
                 overwriteAllowed)) {
                 close();
             } else if (appController.exportState === "overwriteConfirmationRequired") {
@@ -779,7 +806,8 @@ ApplicationWindow {
         }
         function canStartExport() {
             return outputFile.toString().length > 0 && selectedSize().width > 0
-                && selectedRate().numerator > 0 && selectedBitrate > 0;
+                && selectedRate().numerator > 0 && selectedBitrate > 0
+                && (exportRangeMode.currentIndex !== 2 || singleLapRange.valid === true);
         }
         onAboutToShow: {
             formatOptions = appController.exportFormatOptions();
@@ -789,6 +817,7 @@ ApplicationWindow {
             const rate = selectedRate();
             exportRangeStart.text = appController.exportFullRangeTimecode(rate.numerator, rate.denominator, false);
             exportRangeEnd.text = appController.exportFullRangeTimecode(rate.numerator, rate.denominator, true);
+            exportRangeMode.currentIndex = 0;
         }
         onOpened: selectSourceFormat()
         background: Rectangle {
@@ -942,7 +971,7 @@ ApplicationWindow {
             FeComboBox {
                 id: exportRangeMode
                 Layout.fillWidth: true
-                model: [qsTr("Entire video"), qsTr("Custom")]
+                model: [qsTr("Entire video"), qsTr("Custom timecode"), qsTr("Single lap · hotlap")]
             }
             GridLayout {
                 Layout.fillWidth: true
@@ -969,6 +998,66 @@ ApplicationWindow {
                     id: exportRangeEnd
                     Layout.fillWidth: true
                     inputMethodHints: Qt.ImhNoPredictiveText
+                }
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 6
+                visible: exportRangeMode.currentIndex === 2
+                Label {
+                    text: qsTr("Lap")
+                    color: "#8b98a8"
+                    font.pixelSize: 11
+                }
+                FeComboBox {
+                    id: lapPicker
+                    Layout.fillWidth: true
+                    model: appController.lapSummaries
+                    textRole: "number"
+                    delegate: ItemDelegate {
+                        required property var modelData
+                        width: lapPicker.width
+                        text: qsTr("Lap %1 · %2").arg(modelData.number).arg(Number(modelData.durationSeconds).toFixed(3) + " s")
+                    }
+                }
+                Label {
+                    text: qsTr("Handle")
+                    color: "#8b98a8"
+                    font.pixelSize: 11
+                }
+                FeComboBox {
+                    id: lapHandle
+                    Layout.fillWidth: true
+                    model: ["5", "6", "7", "8"]
+                    currentIndex: 1
+                    delegate: ItemDelegate {
+                        required property var modelData
+                        width: lapHandle.width
+                        text: qsTr("%1 seconds before and after").arg(modelData)
+                    }
+                }
+                Label {
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    visible: exportDialog.singleLapRange.valid === true
+                    text: qsTr("%1 → %2 · %3 s")
+                        .arg(exportDialog.singleLapRange.inTimecode)
+                        .arg(exportDialog.singleLapRange.outTimecode)
+                        .arg(Number(exportDialog.singleLapRange.durationSeconds).toFixed(3))
+                    color: "#55e6a5"
+                    font.family: "Menlo"
+                    font.pixelSize: 10
+                }
+                Label {
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    visible: exportDialog.singleLapRange.valid !== true
+                    text: qsTr("Choose a completed lap whose synchronized range overlaps the video.")
+                    color: "#ffb84d"
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 10
                 }
             }
             Label {

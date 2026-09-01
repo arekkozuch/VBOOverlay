@@ -65,6 +65,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY liveValuesChanged)
     Q_PROPERTY(QString lapTimingStatus READ lapTimingStatus NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantList lapSummaries READ lapSummaries NOTIFY telemetryChanged)
+    Q_PROPERTY(QVariantList lapNavigationSegments READ lapNavigationSegments NOTIFY lapNavigationChanged)
     Q_PROPERTY(QStringList analysisChannels READ analysisChannels WRITE setAnalysisChannels NOTIFY analysisChanged)
     Q_PROPERTY(bool analysisVisible READ analysisVisible WRITE setAnalysisVisible NOTIFY analysisChanged)
     Q_PROPERTY(int analysisWindowX READ analysisWindowX CONSTANT)
@@ -132,6 +133,7 @@ public:
     [[nodiscard]] QVariantMap currentTrackPoint() const;
     [[nodiscard]] QString lapTimingStatus() const;
     [[nodiscard]] QVariantList lapSummaries() const;
+    [[nodiscard]] QVariantList lapNavigationSegments() const;
     [[nodiscard]] QStringList analysisChannels() const;
     [[nodiscard]] bool analysisVisible() const;
     [[nodiscard]] int analysisWindowX() const;
@@ -195,6 +197,12 @@ public:
     Q_INVOKABLE QVariantMap exportFormatOptions() const;
     Q_INVOKABLE QString exportFullRangeTimecode(
         qint64 frameRateNumerator, qint64 frameRateDenominator, bool outPoint) const;
+    Q_INVOKABLE QVariantMap lapExportRange(
+        int lapNumber, qint64 frameRateNumerator, qint64 frameRateDenominator,
+        int handleSeconds) const;
+    Q_INVOKABLE double exportRangeDurationSeconds(
+        qint64 frameRateNumerator, qint64 frameRateDenominator,
+        const QString &rangeIn, const QString &rangeOut) const;
     Q_INVOKABLE qint64 recommendedExportBitrate(int width, int height, qint64 numerator, qint64 denominator, const QString &quality) const;
     Q_INVOKABLE qint64 estimateExportSize(qint64 videoBitrate, bool audioEnabled, double seconds) const;
     Q_INVOKABLE QString formatEstimatedExportSize(qint64 bytes) const;
@@ -229,6 +237,7 @@ public slots:
 signals:
     void videoSourceChanged();
     void telemetryChanged();
+    void lapNavigationChanged();
     void statusTextChanged();
     void playbackTimeChanged();
     void syncChanged();

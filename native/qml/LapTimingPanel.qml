@@ -49,8 +49,8 @@ Rectangle {
             }
             Item { Layout.fillWidth: true }
             Label {
-                visible: appController.lapSummaries.length > 0
-                text: qsTr("Select a lap to seek")
+                visible: appController.lapNavigationSegments.length > 0
+                text: qsTr("Select a session section to seek")
                 color: "#536172"
                 font.pixelSize: 9
             }
@@ -63,7 +63,7 @@ Rectangle {
             visible: count > 0
             clip: true
             spacing: 2
-            model: appController.lapSummaries
+            model: appController.lapNavigationSegments
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: Rectangle {
@@ -74,12 +74,8 @@ Rectangle {
                 height: 29
                 radius: 4
                 color: rowMouse.containsMouse ? "#17232d" : index % 2 ? "#0a1017" : "#0c131b"
-                property real seekMilliseconds: {
-                    appController.syncOffset;
-                    appController.timeScale;
-                    appController.telemetryDuration;
-                    return appController.videoMillisecondsForTelemetryTime(Number(modelData.startTelemetryTime));
-                }
+                property bool isTimedLap: modelData.kind === "lap"
+                property real seekMilliseconds: Number(modelData.seekMilliseconds)
 
                 RowLayout {
                     anchors.fill: parent
@@ -87,20 +83,25 @@ Rectangle {
                     anchors.rightMargin: 9
                     spacing: 10
                     Label {
-                        Layout.preferredWidth: 48
-                        text: qsTr("Lap %1").arg(lapRow.modelData.number)
-                        color: "#aab6c4"
+                        Layout.preferredWidth: 58
+                        text: lapRow.modelData.label
+                        color: lapRow.isTimedLap ? "#aab6c4" : "#74a9d8"
                         font.pixelSize: 10
                     }
                     Label {
-                        Layout.preferredWidth: 76
-                        text: root.lapTime(lapRow.modelData.durationSeconds)
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 128
+                        text: lapRow.isTimedLap
+                              ? root.lapTime(lapRow.modelData.durationSeconds)
+                              : String(lapRow.modelData.startTimecode) + " → " + String(lapRow.modelData.endTimecode)
                         color: "#eef3f8"
                         font.family: "Menlo"
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
+                        elide: Text.ElideRight
                     }
                     Label {
+                        visible: lapRow.isTimedLap
                         text: root.delta(lapRow.modelData.deltaToBestSeconds)
                         color: lapRow.modelData.isBest ? "#55e6a5" : "#ffb84d"
                         font.family: "Menlo"
@@ -128,7 +129,7 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: appController.lapSummaries.length === 0
+            visible: appController.lapNavigationSegments.length === 0
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             text: appController.lapTimingStatus

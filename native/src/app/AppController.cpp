@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -44,6 +45,20 @@ namespace {
 
 constexpr int RecoveryWriteDelayMs = 250;
 constexpr int RecoveryRetryDelayMs = 5'000;
+
+std::optional<qint64> frameAtOrBeforePresentationTime(
+    const double seconds, const MediaRational &frameRate)
+{
+    if (!std::isfinite(seconds) || seconds < 0.0 || !frameRate.isValid()) return std::nullopt;
+    const long double frame = static_cast<long double>(seconds)
+        * static_cast<long double>(frameRate.numerator) / static_cast<long double>(frameRate.denominator);
+    if (frame < 0.0L || frame > static_cast<long double>(std::numeric_limits<qint64>::max())) {
+        return std::nullopt;
+    }
+    // This selects the frame that contains the requested presentation time. The
+    // resulting inclusive frame range is still the sole export authority.
+    return static_cast<qint64>(frame);
+}
 
 struct SavedDocumentMetadata final {
     QString id;
@@ -561,6 +576,68 @@ QVariantList AppController::lapSummaries() const
     }
     return summaries;
 }
+QVariantList AppController::lapNavigationSegments() const
+{
+    if (m_lapSession.status != LapSessionStatus::Available
+        || m_lapSession.timedLaps.isEmpty() || previewEndPositionMilliseconds() <= 0) {
+        return {};
+    }
+
+    struct VideoLap final {
+        const TimedLap *lap = nullptr;
+        qsizetype lapIndex = 0;
+        qint64 startMilliseconds = -1;
+        qint64 endMilliseconds = -1;
+    };
+    QVector<VideoLap> videoLaps;
+    videoLaps.reserve(m_lapSession.timedLaps.size());
+    for (qsizetype index = 0; index < m_lapSession.timedLaps.size(); ++index) {
+        const TimedLap &lap = m_lapSession.timedLaps[index];
+        const qint64 start = videoMillisecondsForTelemetryTime(lap.startTelemetryTime);
+        const qint64 end = videoMillisecondsForTelemetryTime(lap.startTelemetryTime + lap.durationSeconds);
+        if (start < 0 || end < start) continue;
+        videoLaps.append({&lap, index, start, end});
+    }
+    if (videoLaps.isEmpty()) return {};
+
+    const qint64 videoEnd = previewEndPositionMilliseconds();
+    QVariantList segments;
+    const auto appendFragment = [this, &segments](const QString &kind, const QString &label,
+                                                   const qint64 start, const qint64 end,
+                                                   const TimedLap *lap = nullptr,
+                                                   const bool isBest = false) {
+        if (start < 0 || end < start) return;
+        QVariantMap segment{{QStringLiteral("kind"), kind}, {QStringLiteral("label"), label},
+                            {QStringLiteral("startMilliseconds"), start},
+                            {QStringLiteral("endMilliseconds"), end},
+                            {QStringLiteral("durationMilliseconds"), end - start},
+                            {QStringLiteral("startTimecode"), previewTimecodeForPositionMilliseconds(start)},
+                            {QStringLiteral("endTimecode"), previewTimecodeForPositionMilliseconds(end)},
+                            {QStringLiteral("seekMilliseconds"), start}};
+        if (lap) {
+            segment.insert(QStringLiteral("number"), lap->number);
+            segment.insert(QStringLiteral("durationSeconds"), lap->durationSeconds);
+            segment.insert(QStringLiteral("deltaToBestSeconds"), lap->deltaToBestSeconds);
+            segment.insert(QStringLiteral("isBest"), isBest);
+        }
+        segments.append(segment);
+    };
+
+    const VideoLap &first = videoLaps.constFirst();
+    if (first.startMilliseconds > 0) {
+        appendFragment(QStringLiteral("outlap"), QStringLiteral("Out lap"), 0, first.startMilliseconds);
+    }
+    for (const VideoLap &videoLap : videoLaps) {
+        appendFragment(QStringLiteral("lap"), QStringLiteral("Lap %1").arg(videoLap.lap->number),
+                       videoLap.startMilliseconds, videoLap.endMilliseconds, videoLap.lap,
+                       m_lapSession.fastestLapIndex && *m_lapSession.fastestLapIndex == videoLap.lapIndex);
+    }
+    const VideoLap &last = videoLaps.constLast();
+    if (last.endMilliseconds < videoEnd) {
+        appendFragment(QStringLiteral("inlap"), QStringLiteral("In lap"), last.endMilliseconds, videoEnd);
+    }
+    return segments;
+}
 QStringList AppController::analysisChannels() const { return m_analysisChannels; }
 bool AppController::analysisVisible() const { return m_analysisVisible; }
 int AppController::analysisWindowX() const { return m_settings.value("analysis/windowX", -1).toInt(); }
@@ -827,6 +904,7 @@ void AppController::commitVideoProbe(const VideoProbeResult &result, const bool 
     m_syncCandidate.clear();
     emit videoSourceChanged();
     emit previewMetadataChanged();
+    emit lapNavigationChanged();
     emit exportChanged();
     emit syncCandidateChanged();
     emit sourceLoadStateChanged();
@@ -856,6 +934,7 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     m_previewRenderContext.setLapSession(m_lapSession);
     reconcileAnalysisChannels();
     emit telemetryChanged();
+    emit lapNavigationChanged();
     emit liveValuesChanged();
     emit syncCandidateChanged();
     emit sourceLoadStateChanged();
@@ -1002,6 +1081,7 @@ void AppController::performClearProject()
     emit videoSourceChanged();
     emit previewMetadataChanged();
     emit telemetryChanged();
+    emit lapNavigationChanged();
     emit playbackTimeChanged();
     emit syncChanged();
     emit syncCandidateChanged();
@@ -1419,6 +1499,7 @@ bool AppController::commitProjectLoad(const ProjectLoadResult &result)
     emit videoSourceChanged();
     emit previewMetadataChanged();
     emit telemetryChanged();
+    emit lapNavigationChanged();
     emit exportChanged();
     emit playbackTimeChanged();
     emit syncChanged();
@@ -1947,6 +2028,57 @@ QString AppController::exportFullRangeTimecode(
         outPoint ? range->lastFrame : range->firstFrame, rate) : QString();
 }
 
+QVariantMap AppController::lapExportRange(
+    const int lapNumber, const qint64 frameRateNumerator, const qint64 frameRateDenominator,
+    const int handleSeconds) const
+{
+    const MediaRational rate{frameRateNumerator, frameRateDenominator};
+    const auto fullRange = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
+    if (!fullRange || handleSeconds < 0 || handleSeconds > 30) {
+        return {{QStringLiteral("valid"), false}};
+    }
+    const auto lap = std::find_if(m_lapSession.timedLaps.cbegin(), m_lapSession.timedLaps.cend(),
+                                  [lapNumber](const TimedLap &candidate) {
+        return candidate.number == lapNumber;
+    });
+    if (lap == m_lapSession.timedLaps.cend()) return {{QStringLiteral("valid"), false}};
+
+    const auto videoStart = telemetryToVideoTime(lap->startTelemetryTime, m_sync);
+    const auto videoEnd = telemetryToVideoTime(lap->startTelemetryTime + lap->durationSeconds, m_sync);
+    if (!videoStart || !videoEnd || *videoEnd < *videoStart) {
+        return {{QStringLiteral("valid"), false}};
+    }
+    const auto requestedFirst = frameAtOrBeforePresentationTime(
+        std::max(0.0, *videoStart - static_cast<double>(handleSeconds)), rate);
+    const auto requestedLast = frameAtOrBeforePresentationTime(
+        std::max(0.0, *videoEnd + static_cast<double>(handleSeconds)), rate);
+    if (!requestedFirst || !requestedLast) return {{QStringLiteral("valid"), false}};
+
+    const auto range = ExportEngine::frameRangeFromInclusiveFrames(
+        qBound(fullRange->firstFrame, *requestedFirst, fullRange->lastFrame),
+        qBound(fullRange->firstFrame, *requestedLast, fullRange->lastFrame));
+    if (!range) return {{QStringLiteral("valid"), false}};
+    return {{QStringLiteral("valid"), true}, {QStringLiteral("lapNumber"), lapNumber},
+            {QStringLiteral("handleSeconds"), handleSeconds},
+            {QStringLiteral("firstFrame"), range->firstFrame},
+            {QStringLiteral("lastFrame"), range->lastFrame},
+            {QStringLiteral("inTimecode"), ExportEngine::formatSmpteTimecode(range->firstFrame, rate)},
+            {QStringLiteral("outTimecode"), ExportEngine::formatSmpteTimecode(range->lastFrame, rate)},
+            {QStringLiteral("durationSeconds"), static_cast<double>(range->frameCount())
+                * static_cast<double>(rate.denominator) / static_cast<double>(rate.numerator)}};
+}
+
+double AppController::exportRangeDurationSeconds(
+    const qint64 frameRateNumerator, const qint64 frameRateDenominator,
+    const QString &rangeIn, const QString &rangeOut) const
+{
+    const MediaRational rate{frameRateNumerator, frameRateDenominator};
+    const auto range = ExportEngine::frameRangeForSourceTimecode(
+        m_exportSourceInfo, rate, rangeIn, rangeOut);
+    return range ? static_cast<double>(range->frameCount())
+            * static_cast<double>(rate.denominator) / static_cast<double>(rate.numerator) : 0.0;
+}
+
 void AppController::cancelExport()
 {
     if (!exporting()) {
@@ -2365,6 +2497,7 @@ void AppController::setSyncOffset(const double seconds)
     m_sync.offset = seconds;
     m_previewRenderContext.setSyncTransform(m_sync);
     emit syncChanged();
+    emit lapNavigationChanged();
     emit liveValuesChanged();
     markPersistentChange();
 }
@@ -2377,6 +2510,7 @@ void AppController::setTimeScale(const double scale)
     m_sync.timeScale = scale;
     m_previewRenderContext.setSyncTransform(m_sync);
     emit syncChanged();
+    emit lapNavigationChanged();
     emit liveValuesChanged();
     markPersistentChange();
 }

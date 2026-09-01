@@ -4,7 +4,7 @@ FlappedEar Telemetry is a native desktop editor for synchronizing motorsport tel
 
 ## Status
 
-The application is a Qt 6, C++20, and QML native application in alpha and active development. The established editor/export baseline has been validated on macOS. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; broader hardware and packaging validation remain pending. The September 2026 lap-timing and comparison-widget additions are implemented but have not yet completed the deferred macOS build, runtime, or real-fixture validation pass.
+The application is a Qt 6, C++20, and QML native application in alpha and active development. The established editor/export baseline and the September 2026 lap-timing additions have been locally validated on macOS, including deterministic controller/QML coverage and one private Jastrząb VBO/GoPro fixture. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; broader hardware and packaging validation remain pending.
 
 ## Current capabilities
 
@@ -13,9 +13,9 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates. Both editor sidebars remain fully scrollable at the supported 1180×720 minimum size.
 - Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.
-- Source-defined RaceChrono Start-gate parsing, raw-GPS lap derivation, fastest-lap state, and a lap list that seeks the main playback timeline.
+- Source-defined RaceChrono Start-gate parsing, raw-GPS lap derivation, fastest-lap state, and Analysis navigation for Out lap, each measured lap, and In lap.
 - Independent Best, Current, and Delta tiles for lap time and speed comparison against the best completed lap.
-- Source-driven CFR HEVC/AAC MP4 export at the effective rational export rate, including runtime raster/profile checks, validated 8-bit and 10-bit SDR preservation, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
+- Source-driven CFR HEVC/AAC MP4 export at the effective rational export rate, including runtime raster/profile checks, validated 8-bit and 10-bit SDR preservation, custom SMPTE ranges, and single-lap hotlap ranges with configurable 5–8 second handles, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
 - Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
 - Resource-bounded external JSON documents and subprocess output, with visible recovery-protection warnings when automatic snapshots cannot be persisted.
@@ -95,6 +95,6 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 - Rotation and sample-aspect-ratio display-transform preservation, HDR/Log color-managed preservation, and production 8K validation remain pending. One real HERO11 5312×2988 10-bit SDR fixture has passed native and 3840×2160 macOS exports; this is not a broader hardware guarantee.
 - Real-media coverage remains limited.
 - Interactive map tiles are pending; the local GPS track view works without map tiles.
-- Lap detection, lap-start seeking, live deltas, and the six comparison tiles still require the deferred deterministic/macOS/private-Jastrząb validation pass. The current static audit also identified two open lap-state edge cases: a recording ending inside the Start-gate corridor may omit its final passage, and Current remains unavailable until at least one complete lap exists.
+- Lap timing remains source-gate based: it requires exactly one valid RaceChrono Start gate and usable synchronized GPS. Manual Start/Finish overrides, sectors, and theoretical-best analysis are not implemented yet.
 
 For remaining work, see [ROADMAP.md](ROADMAP.md). Developer contribution rules are in [AGENTS.md](AGENTS.md), and local test guidance is in [docs/testing.md](docs/testing.md).

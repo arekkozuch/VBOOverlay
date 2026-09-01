@@ -7,7 +7,7 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Native Qt 6/C++/QML application and local Qt Test target.
 - [x] VBO parsing, time-based telemetry lookup, synchronization, GoPro GPMF GPS extraction, and GPS-speed auto-sync.
 - [x] Widget editor, templates, projects, analysis workspace, and shared preview/export telemetry scene, including minimum-size-reachable sidebars and synchronized keyboard/full-screen transport.
-- [x] HEVC/AAC export with custom source ranges, staged overlay validation, diagnostics, progress, and cancellation.
+- [x] HEVC/AAC export with custom SMPTE source ranges and single-lap hotlap ranges (5–8 second handles), staged overlay validation, diagnostics, progress, and cancellation.
 - [x] Export output transactions, including explicit state-bound overwrite consent, changed-target refusal, and protected user targets.
 - [x] Atomic project saving and dirty-state safeguards for destructive project actions.
 - [x] Separate atomic unsaved-document recovery from authoritative saved projects, including explicit startup recovery/discard and unknown-field preservation.
@@ -51,11 +51,11 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 
 - [x] Parse bounded source-defined RaceChrono timing gates without making malformed timing metadata fatal to otherwise valid telemetry.
 - [x] Derive same-direction Start passages, complete timed laps, lap traces, and fastest-lap state from raw GPS and raw telemetry time.
-- [x] Add a minimal lap list and lap-start seek to the existing Analysis workspace.
+- [x] Add Analysis navigation for Out lap, every measured lap, and In lap through the central synchronized playback timeline.
 - [x] Add live best-lap comparison plus independent Best, Current, and Delta tiles for lap time and speed.
-- [ ] Finalize an active Start-gate cluster when telemetry ends inside the corridor, so the last completed lap is not omitted.
-- [ ] Publish Current state after the first accepted Start passage instead of requiring an already completed lap.
-- [ ] Add the deferred deterministic parser/detector/controller/QML coverage and validate the private Jastrząb fixture on the macOS Qt toolchain.
+- [x] Finalize an active Start-gate cluster when telemetry ends inside the corridor, so the last completed lap is not omitted.
+- [x] Publish Current state after the first accepted Start passage instead of requiring an already completed lap.
+- [x] Add deterministic parser/detector/controller/QML coverage and validate the private Jastrząb fixture on the macOS Qt toolchain.
 - [ ] Later: manual Start/Finish override, sectors/theoretical best, distance-normalized comparison charts, and automatic sectors.
 
 ### Multi-chapter GoPro timelines

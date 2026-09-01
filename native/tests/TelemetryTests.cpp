@@ -80,6 +80,7 @@ private slots:
     void finalizesGatePassWhenTelemetryEndsInsideCorridor();
     void publishesCurrentLapAfterFirstAcceptedPass();
     void publishesAndClearsLapStateWithController();
+    void derivesNavigableLapFragmentsAndHotlapExportRange();
     void mapsLapStartTelemetryTimesBackToVideoBounds();
     void rendersAllComparisonTilesInProductionScene();
     void parsesOptionalRealVbo();
@@ -1297,6 +1298,66 @@ void TelemetryTests::publishesAndClearsLapStateWithController()
     QVERIFY(controller.lapSummaries().isEmpty());
     QCOMPARE(controller.renderContext()->lapTiming().value(QStringLiteral("state")).toString(),
              QStringLiteral("unavailable"));
+}
+
+void TelemetryTests::derivesNavigableLapFragmentsAndHotlapExportRange()
+{
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the lap-navigation controller test.");
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString videoPath = directory.filePath(QStringLiteral("laps.mp4"));
+    QProcess encoder;
+    encoder.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                           "color=c=black:s=32x32:r=30:d=25", "-c:v", "mpeg4", "-q:v", "3", videoPath});
+    QVERIFY2(encoder.waitForStarted(), qPrintable(encoder.errorString()));
+    QVERIFY2(encoder.waitForFinished(30'000), qPrintable(encoder.errorString()));
+    QVERIFY2(encoder.exitCode() == 0, encoder.readAllStandardError().constData());
+
+    const QString vboPath = directory.filePath(QStringLiteral("laps.vbo"));
+    const QByteArray vbo =
+        "[laptiming]\n"
+        "Start 21.0000 52.0000 21.0000 52.0002 start\n"
+        "[column names]\n"
+        "time latitude longitude\n"
+        "[data]\n"
+        "0 52.0001 21.0002\n1 52.0001 21.0002\n2 52.0001 20.9998\n"
+        "3 52.0008 20.9998\n4 52.0008 21.0002\n5 52.0001 21.0002\n"
+        "6 52.0001 20.9998\n7 52.0008 20.9998\n8 52.0008 21.0002\n"
+        "10 52.0001 21.0002\n11 52.0001 20.9998\n12 52.0008 20.9998\n"
+        "13 52.0008 21.0002\n14 52.0001 21.0002\n15 52.0001 20.9998\n";
+    QVERIFY(writeBytes(vboPath, vbo));
+
+    AppController controller;
+    controller.loadVideo(QUrl::fromLocalFile(videoPath));
+    QTRY_COMPARE(controller.videoLoadState(), QStringLiteral("ready"));
+    controller.loadVbo(QUrl::fromLocalFile(vboPath));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+
+    const QVariantList segments = controller.lapNavigationSegments();
+    QCOMPARE(segments.size(), 5);
+    QCOMPARE(segments[0].toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("outlap"));
+    QCOMPARE(segments[1].toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("lap"));
+    QCOMPARE(segments[4].toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("inlap"));
+    QCOMPARE(segments[0].toMap().value(QStringLiteral("startMilliseconds")).toLongLong(), qint64(0));
+    QVERIFY(segments[4].toMap().value(QStringLiteral("endMilliseconds")).toLongLong()
+            == controller.previewEndPositionMilliseconds());
+
+    const QVariantMap hotlap = controller.lapExportRange(2, 30, 1, 5);
+    QVERIFY(hotlap.value(QStringLiteral("valid")).toBool());
+    const auto range = ExportEngine::frameRangeForSourceTimecode(
+        MediaProbe::probe(videoPath), {30, 1}, hotlap.value(QStringLiteral("inTimecode")).toString(),
+        hotlap.value(QStringLiteral("outTimecode")).toString());
+    QVERIFY(range.has_value());
+    QCOMPARE(range->firstFrame, hotlap.value(QStringLiteral("firstFrame")).toLongLong());
+    QCOMPARE(range->lastFrame, hotlap.value(QStringLiteral("lastFrame")).toLongLong());
+    QCOMPARE(controller.exportRangeDurationSeconds(30, 1,
+                                                   hotlap.value(QStringLiteral("inTimecode")).toString(),
+                                                   hotlap.value(QStringLiteral("outTimecode")).toString()),
+             hotlap.value(QStringLiteral("durationSeconds")).toDouble());
 }
 
 void TelemetryTests::mapsLapStartTelemetryTimesBackToVideoBounds()
