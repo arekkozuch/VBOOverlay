@@ -93,7 +93,7 @@ QPair<double, double> defaultSize(const QString &type)
         return {0.42, 0.12};
     }
     if (type == "lapTiming") {
-        return {0.27, 0.14};
+        return {0.48, 0.14};
     }
     if (type == "retroGrandPrix") {
         return {0.42, 0.61};
@@ -199,6 +199,9 @@ QVariant normalizeSettingValue(
     }
     if (name == QStringLiteral("maxG")) {
         return finiteNumber(value, &number) ? bounded(number, 0.01, 20.0) : fallback();
+    }
+    if (name == QStringLiteral("deltaRangeSeconds")) {
+        return finiteNumber(value, &number) ? bounded(number, 1.0, 60.0) : fallback();
     }
     if (name == QStringLiteral("ringStepG")) {
         return finiteNumber(value, &number) ? bounded(number, 0.01, 10.0) : fallback();

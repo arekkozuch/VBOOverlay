@@ -60,11 +60,25 @@ struct TimedLap {
     double deltaToBestSeconds = 0.0;
 };
 
+struct LapTracePoint {
+    double telemetryTime = 0.0;
+    double eastMeters = 0.0;
+    double northMeters = 0.0;
+};
+
+struct LapTrace {
+    int lapNumber = 0;
+    double startTelemetryTime = 0.0;
+    double durationSeconds = 0.0;
+    QVector<LapTracePoint> points;
+};
+
 struct LapSession {
     LapSessionStatus status = LapSessionStatus::NoSourceStartGate;
     std::optional<TimingGate> selectedStartGate;
     QVector<GatePass> acceptedPasses;
     QVector<TimedLap> timedLaps;
+    QVector<LapTrace> lapTraces;
     std::optional<qsizetype> fastestLapIndex;
     LapDetectionDiagnostics diagnostics;
 };

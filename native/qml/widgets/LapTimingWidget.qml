@@ -9,144 +9,207 @@ Item {
         frame.renderContext.time;
         return frame.renderContext.lapTiming;
     }
-    readonly property bool showDetails: (frame.widgetSettings.showLast ?? true)
-        || (frame.widgetSettings.showBest ?? true)
-        || (frame.widgetSettings.showDelta ?? true)
+    readonly property int timingDecimals: Number(frame.widgetSettings.timingDecimals ?? 1)
+    readonly property int deltaDecimals: Number(frame.widgetSettings.deltaDecimals ?? 2)
+    readonly property real deltaRange: Math.max(1, Number(frame.widgetSettings.deltaRangeSeconds ?? 10))
+    readonly property real liveDelta: Number(timing.liveDeltaSeconds)
+    readonly property bool hasLiveDelta: Number.isFinite(liveDelta)
+    readonly property color aheadColor: frame.widgetSettings.accentColor || "#20d05a"
+    readonly property color behindColor: frame.widgetSettings.accentColor2 || "#ef4f5f"
+    readonly property color tileColor: frame.widgetSettings.backgroundColor || "#343941"
+    readonly property real tileOpacity: (frame.widgetSettings.showBackground ?? true)
+        ? Number(frame.widgetSettings.backgroundOpacity ?? 0.76) : 0
+    readonly property color tileBorder: Qt.rgba(
+        frame.panelBorder.r, frame.panelBorder.g, frame.panelBorder.b,
+        Number(frame.widgetSettings.borderOpacity ?? 0.45))
+    readonly property real tileBorderWidth: (frame.widgetSettings.showBorder ?? false)
+        ? Number(frame.widgetSettings.borderWidth ?? 1) * frame.sceneScale : 0
+    readonly property color deltaColor: !hasLiveDelta ? frame.secondary
+        : liveDelta <= 0 ? aheadColor : behindColor
 
     function formatTime(seconds) {
         const value = Number(seconds);
         if (!Number.isFinite(value) || value < 0)
-            return "—:—.---";
+            return "—:—." + "—".repeat(Math.max(1, timingDecimals));
         const minutes = Math.floor(value / 60);
         const remainder = value - minutes * 60;
-        return minutes + ":" + remainder.toFixed(3).padStart(6, "0");
+        const width = timingDecimals > 0 ? 3 + timingDecimals : 2;
+        return minutes + ":" + remainder.toFixed(timingDecimals).padStart(width, "0");
     }
 
-    function formatDelta(seconds, isBest) {
+    function formatDelta(seconds) {
         const value = Number(seconds);
-        if (isBest || (Number.isFinite(value) && value <= 0.0005))
-            return qsTr("BEST");
-        return Number.isFinite(value) ? "+" + value.toFixed(3) : "—";
+        if (!Number.isFinite(value))
+            return "—";
+        const rounded = Math.abs(value) < 0.5 * Math.pow(10, -deltaDecimals) ? 0 : value;
+        return (rounded > 0 ? "+" : "") + rounded.toFixed(deltaDecimals);
     }
 
-    TelemetryPanel {
-        id: panel
+    RowLayout {
         anchors.fill: parent
-        frame: root.frame
-        showAccent: true
-        accentColor: root.frame.widgetSettings.accentColor2 || "#42a5ff"
-    }
+        spacing: Math.max(5, 12 * root.frame.sceneScale)
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: panel.innerPadding
-        spacing: Math.max(3, 4 * root.frame.sceneScale)
-
-        RowLayout {
+        Rectangle {
+            visible: root.frame.widgetSettings.showBest ?? true
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 8 * root.frame.sceneScale
+            Layout.preferredWidth: 1
+            radius: Number(root.frame.widgetSettings.cornerRadius ?? 12) * root.frame.sceneScale
+            color: Qt.rgba(root.tileColor.r, root.tileColor.g, root.tileColor.b, root.tileOpacity)
+            border.width: root.tileBorderWidth
+            border.color: root.tileBorder
 
             Label {
-                Layout.preferredWidth: parent.width * 0.27
-                text: root.timing.state === "running"
-                    ? qsTr("LAP %1").arg(root.timing.currentLapNumber)
-                    : root.timing.state === "finished" ? qsTr("SESSION") : qsTr("LAP —")
-                color: root.frame.secondary
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.leftMargin: 12 * root.frame.sceneScale
+                anchors.topMargin: 7 * root.frame.sceneScale
+                text: qsTr("Best")
+                color: root.frame.primary
                 font.family: root.frame.family
-                font.weight: Font.DemiBold
-                font.pixelSize: Math.max(10, 15 * root.frame.labelScale) * root.frame.sceneScale
-                font.letterSpacing: 0.6 * root.frame.sceneScale
+                font.pixelSize: 24 * root.frame.labelScale * root.frame.sceneScale
+                font.weight: Font.Medium
             }
-
             Label {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignRight
-                text: root.timing.state === "running"
-                    ? root.formatTime(root.timing.currentElapsedSeconds)
-                    : root.timing.state === "waiting" ? qsTr("READY")
-                    : root.timing.state === "finished" ? qsTr("FINISHED") : qsTr("NO LAP DATA")
-                color: root.timing.state === "running" ? root.frame.primary : root.frame.secondary
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 12 * root.frame.sceneScale
+                anchors.bottomMargin: 13 * root.frame.sceneScale
+                text: root.timing.bestLapNumber ?? "—"
+                color: root.frame.primary
                 font.family: root.frame.family
-                font.weight: Font.Bold
-                font.pixelSize: root.frame.configuredFontSize() > 0
-                    ? root.frame.configuredFontSize() * root.frame.sceneScale
-                    : Math.max(18, 36 * root.frame.valueScale) * root.frame.sceneScale
-                elide: Text.ElideRight
+                font.pixelSize: 24 * root.frame.labelScale * root.frame.sceneScale
+                font.weight: Font.DemiBold
+            }
+            Label {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 12 * root.frame.sceneScale
+                anchors.bottomMargin: 7 * root.frame.sceneScale
+                text: root.formatTime(root.timing.bestLapSeconds)
+                color: root.frame.primary
+                font.family: root.frame.family
+                font.pixelSize: 50 * root.frame.valueScale * root.frame.sceneScale
+                font.weight: Font.Medium
             }
         }
 
         Rectangle {
+            visible: root.frame.widgetSettings.showCurrent ?? true
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.max(1, root.frame.sceneScale)
-            visible: root.showDetails
-            color: root.frame.widgetSettings.borderColor || root.frame.panelBorder
-            opacity: 0.32
+            Layout.fillHeight: true
+            Layout.preferredWidth: 1
+            radius: Number(root.frame.widgetSettings.cornerRadius ?? 12) * root.frame.sceneScale
+            color: Qt.rgba(root.tileColor.r, root.tileColor.g, root.tileColor.b, root.tileOpacity)
+            border.width: root.tileBorderWidth
+            border.color: root.tileBorder
+
+            Label {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.leftMargin: 12 * root.frame.sceneScale
+                anchors.topMargin: 7 * root.frame.sceneScale
+                text: qsTr("Current")
+                color: root.frame.primary
+                font.family: root.frame.family
+                font.pixelSize: 24 * root.frame.labelScale * root.frame.sceneScale
+                font.weight: Font.Medium
+            }
+            Label {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 12 * root.frame.sceneScale
+                anchors.bottomMargin: 13 * root.frame.sceneScale
+                text: root.timing.currentLapNumber ?? "—"
+                color: root.frame.primary
+                font.family: root.frame.family
+                font.pixelSize: 24 * root.frame.labelScale * root.frame.sceneScale
+                font.weight: Font.DemiBold
+            }
+            Label {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 12 * root.frame.sceneScale
+                anchors.bottomMargin: 7 * root.frame.sceneScale
+                text: root.timing.state === "waiting" ? qsTr("READY")
+                    : root.formatTime(root.timing.currentElapsedSeconds)
+                color: root.frame.primary
+                font.family: root.frame.family
+                font.pixelSize: root.timing.state === "waiting"
+                    ? 31 * root.frame.valueScale * root.frame.sceneScale
+                    : 50 * root.frame.valueScale * root.frame.sceneScale
+                font.weight: Font.Medium
+            }
         }
 
-        RowLayout {
-            visible: root.showDetails
+        Rectangle {
+            visible: root.frame.widgetSettings.showDelta ?? true
             Layout.fillWidth: true
-            Layout.preferredHeight: parent.height * 0.34
-            spacing: 8 * root.frame.sceneScale
+            Layout.fillHeight: true
+            Layout.preferredWidth: 1
+            radius: Number(root.frame.widgetSettings.cornerRadius ?? 12) * root.frame.sceneScale
+            color: Qt.rgba(root.tileColor.r, root.tileColor.g, root.tileColor.b, root.tileOpacity)
+            border.width: root.tileBorderWidth
+            border.color: root.tileBorder
 
-            Column {
-                visible: root.frame.widgetSettings.showLast ?? true
-                Layout.fillWidth: true
-                Label {
-                    text: qsTr("LAST")
-                    color: root.frame.secondary
-                    font.family: root.frame.family
-                    font.pixelSize: 10 * root.frame.labelScale * root.frame.sceneScale
-                    font.weight: Font.DemiBold
-                }
-                Label {
-                    text: root.formatTime(root.timing.lastLapSeconds)
+            Item {
+                id: deltaGauge
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.leftMargin: 10 * root.frame.sceneScale
+                anchors.rightMargin: 10 * root.frame.sceneScale
+                anchors.topMargin: 8 * root.frame.sceneScale
+                height: parent.height * 0.34
+                readonly property real centerX: width / 2
+                readonly property real magnitude: root.hasLiveDelta
+                    ? Math.min(1, Math.abs(root.liveDelta) / root.deltaRange) : 0
+
+                Rectangle {
+                    z: 2
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: Math.max(1, 2 * root.frame.sceneScale)
                     color: root.frame.primary
-                    font.family: root.frame.family
-                    font.pixelSize: 15 * root.frame.valueScale * root.frame.sceneScale
-                    font.weight: Font.DemiBold
+                    opacity: 0.9
+                }
+                Repeater {
+                    model: 5
+                    Rectangle {
+                        z: 2
+                        required property int index
+                        x: index * (deltaGauge.width - width) / 4
+                        anchors.verticalCenter: deltaGauge.verticalCenter
+                        width: Math.max(1, 2 * root.frame.sceneScale)
+                        height: index === 2 ? deltaGauge.height * 0.72 : deltaGauge.height * 0.42
+                        color: root.frame.primary
+                        opacity: 0.9
+                    }
+                }
+                Rectangle {
+                    z: 1
+                    visible: root.hasLiveDelta
+                    x: root.liveDelta <= 0 ? deltaGauge.centerX
+                                           : deltaGauge.centerX - width
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: deltaGauge.width * 0.5 * deltaGauge.magnitude
+                    height: parent.height * 0.74
+                    color: root.deltaColor
+                    opacity: 0.92
                 }
             }
 
-            Column {
-                visible: root.frame.widgetSettings.showBest ?? true
-                Layout.fillWidth: true
-                Label {
-                    text: qsTr("BEST")
-                    color: root.frame.secondary
-                    font.family: root.frame.family
-                    font.pixelSize: 10 * root.frame.labelScale * root.frame.sceneScale
-                    font.weight: Font.DemiBold
-                }
-                Label {
-                    text: root.formatTime(root.timing.bestLapSeconds)
-                    color: root.frame.accent
-                    font.family: root.frame.family
-                    font.pixelSize: 15 * root.frame.valueScale * root.frame.sceneScale
-                    font.weight: Font.DemiBold
-                }
-            }
-
-            Column {
-                visible: root.frame.widgetSettings.showDelta ?? true
-                Layout.fillWidth: true
-                Label {
-                    text: qsTr("LAST Δ")
-                    color: root.frame.secondary
-                    font.family: root.frame.family
-                    font.pixelSize: 10 * root.frame.labelScale * root.frame.sceneScale
-                    font.weight: Font.DemiBold
-                }
-                Label {
-                    text: root.formatDelta(root.timing.lastDeltaToBestSeconds,
-                                           root.timing.lastLapIsBest ?? false)
-                    color: root.timing.lastLapIsBest ? root.frame.accent
-                                                     : (root.frame.widgetSettings.accentColor2 || "#42a5ff")
-                    font.family: root.frame.family
-                    font.pixelSize: 15 * root.frame.valueScale * root.frame.sceneScale
-                    font.weight: Font.DemiBold
-                }
+            Label {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 12 * root.frame.sceneScale
+                anchors.bottomMargin: 7 * root.frame.sceneScale
+                text: root.formatDelta(root.timing.liveDeltaSeconds)
+                color: root.hasLiveDelta ? root.frame.primary : root.frame.secondary
+                font.family: root.frame.family
+                font.pixelSize: 50 * root.frame.valueScale * root.frame.sceneScale
+                font.weight: Font.Medium
             }
         }
     }

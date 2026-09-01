@@ -84,10 +84,11 @@
       "source4": "", "label4": "BRAKE", "unit4": "%", "decimals4": 0
     },
     "lapTiming": {
-      "title": "LAP TIMING", "showTitle": false,
-      "showLast": true, "showBest": true, "showDelta": true,
-      "backgroundColor": "#07111e", "backgroundOpacity": 0.86,
-      "borderColor": "#42a5ff", "accentColor": "#55e6a5", "accentColor2": "#42a5ff"
+      "title": "LAP TIMING", "showTitle": false, "showBorder": false,
+      "showBest": true, "showCurrent": true, "showDelta": true,
+      "backgroundColor": "#343941", "backgroundOpacity": 0.76,
+      "accentColor": "#20d05a", "accentColor2": "#ef4f5f",
+      "timingDecimals": 1, "deltaDecimals": 2, "deltaRangeSeconds": 10
     },
     "retroGrandPrix": {
       "showBackground": false, "showBorder": false, "padding": 0,

@@ -1,9 +1,11 @@
 #include "telemetry/TelemetryRenderContext.h"
+#include "telemetry/TelemetryGeometry.h"
 
 #include <QtGlobal>
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 
 namespace FlappedEar {
 
@@ -14,6 +16,55 @@ struct PresentationPolicy {
     double staleSeconds;
     InterpolationMode interpolation;
 };
+
+struct ReferenceMatch {
+    double distanceSquared = std::numeric_limits<double>::infinity();
+    double elapsedSeconds = 0.0;
+};
+
+std::optional<ReferenceMatch> closestReferenceMatch(
+    const LapTrace &trace,
+    const MetricPoint &current,
+    const double expectedElapsedSeconds)
+{
+    if (trace.points.size() < 2 || !std::isfinite(expectedElapsedSeconds)) return std::nullopt;
+    const double searchWindow = std::clamp(trace.durationSeconds * 0.18, 12.0, 30.0);
+    // A closed lap revisits the Start coordinates at the Finish. Restricting
+    // the spatial search around the expected elapsed time prevents matching
+    // the beginning of a lap to its end (and limits work for every frame).
+    const double minimumElapsed = std::max(0.0, expectedElapsedSeconds - searchWindow);
+    const double maximumElapsed = std::min(
+        trace.durationSeconds, expectedElapsedSeconds + searchWindow);
+    ReferenceMatch best;
+    for (qsizetype index = 1; index < trace.points.size(); ++index) {
+        const LapTracePoint &start = trace.points[index - 1];
+        const LapTracePoint &end = trace.points[index];
+        const double startElapsed = start.telemetryTime - trace.startTelemetryTime;
+        const double endElapsed = end.telemetryTime - trace.startTelemetryTime;
+        if (endElapsed < minimumElapsed || startElapsed > maximumElapsed) continue;
+        const double dx = end.eastMeters - start.eastMeters;
+        const double dy = end.northMeters - start.northMeters;
+        const double lengthSquared = dx * dx + dy * dy;
+        if (!std::isfinite(lengthSquared) || lengthSquared <= 1e-12) continue;
+        const double fraction = std::clamp(
+            ((current.eastMeters - start.eastMeters) * dx
+             + (current.northMeters - start.northMeters) * dy) / lengthSquared,
+            0.0, 1.0);
+        const double nearestEast = start.eastMeters + dx * fraction;
+        const double nearestNorth = start.northMeters + dy * fraction;
+        const double eastError = current.eastMeters - nearestEast;
+        const double northError = current.northMeters - nearestNorth;
+        const double distanceSquared = eastError * eastError + northError * northError;
+        if (std::isfinite(distanceSquared) && distanceSquared < best.distanceSquared) {
+            best.distanceSquared = distanceSquared;
+            best.elapsedSeconds = startElapsed + (endElapsed - startElapsed) * fraction;
+        }
+    }
+    constexpr double MaximumReferenceDistanceMeters = 50.0;
+    return std::isfinite(best.distanceSquared)
+            && best.distanceSquared <= MaximumReferenceDistanceMeters * MaximumReferenceDistanceMeters
+        ? std::optional<ReferenceMatch>(best) : std::nullopt;
+}
 
 PresentationPolicy presentationPolicy(const QString &channelName)
 {
@@ -123,6 +174,7 @@ QVariantMap TelemetryRenderContext::lapTiming() const
         return result;
     }
 
+    const TimedLap *bestCompletedLap = nullptr;
     const auto completedEnd = std::upper_bound(
         m_lapSession.timedLaps.cbegin(), m_lapSession.timedLaps.cend(), currentTime,
         [](const double time, const TimedLap &lap) { return time < lap.endTelemetryTime; });
@@ -133,6 +185,8 @@ QVariantMap TelemetryRenderContext::lapTiming() const
                 return left.durationSeconds < right.durationSeconds;
             });
         const TimedLap &lastLap = *(completedEnd - 1);
+        bestCompletedLap = &*bestLap;
+        result.insert(QStringLiteral("bestLapNumber"), bestLap->number);
         result.insert(QStringLiteral("bestLapSeconds"), bestLap->durationSeconds);
         result.insert(QStringLiteral("lastLapNumber"), lastLap.number);
         result.insert(QStringLiteral("lastLapSeconds"), lastLap.durationSeconds);
@@ -152,10 +206,41 @@ QVariantMap TelemetryRenderContext::lapTiming() const
     const qsizetype passIndex = std::distance(
         m_lapSession.acceptedPasses.cbegin(), nextPass) - 1;
     const GatePass &currentStart = m_lapSession.acceptedPasses[passIndex];
+    const double currentElapsed = std::max(0.0, currentTime - currentStart.telemetryTime);
     result.insert(QStringLiteral("state"), QStringLiteral("running"));
     result.insert(QStringLiteral("currentLapNumber"), static_cast<int>(passIndex + 1));
-    result.insert(QStringLiteral("currentElapsedSeconds"),
-                  std::max(0.0, currentTime - currentStart.telemetryTime));
+    result.insert(QStringLiteral("currentElapsedSeconds"), currentElapsed);
+
+    if (bestCompletedLap && m_lapSession.selectedStartGate) {
+        const auto referenceTrace = std::find_if(
+            m_lapSession.lapTraces.cbegin(), m_lapSession.lapTraces.cend(),
+            [bestCompletedLap](const LapTrace &trace) {
+                return trace.lapNumber == bestCompletedLap->number;
+            });
+        const auto latitude = m_session
+            ? m_session->valueAt("latitude", currentTime, InterpolationMode::Linear)
+            : std::nullopt;
+        const auto longitude = m_session
+            ? m_session->valueAt("longitude", currentTime, InterpolationMode::Linear)
+            : std::nullopt;
+        if (referenceTrace != m_lapSession.lapTraces.cend() && latitude && longitude) {
+            const GeoCoordinate currentCoordinate{*latitude, *longitude};
+            const TimingGate &gate = *m_lapSession.selectedStartGate;
+            const GeoCoordinate origin{
+                (gate.endpointA.latitudeDegrees + gate.endpointB.latitudeDegrees) / 2.0,
+                (gate.endpointA.longitudeDegrees + gate.endpointB.longitudeDegrees) / 2.0};
+            if (isValidCoordinate(currentCoordinate) && isValidCoordinate(origin)) {
+                const MetricPoint currentPoint = projectCoordinate(currentCoordinate, origin);
+                const auto reference = closestReferenceMatch(
+                    *referenceTrace, currentPoint,
+                    std::clamp(currentElapsed, 0.0, referenceTrace->durationSeconds));
+                if (reference) {
+                    result.insert(QStringLiteral("liveDeltaSeconds"),
+                                  currentElapsed - reference->elapsedSeconds);
+                }
+            }
+        }
+    }
     return result;
 }
 

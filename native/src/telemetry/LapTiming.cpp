@@ -208,6 +208,80 @@ void deriveTimedLaps(LapSession &result)
     }
 }
 
+void buildLapTraces(
+    const TelemetrySession &session,
+    LapSession &result,
+    const GeoCoordinate &origin,
+    const CancellationCheck &cancelled)
+{
+    const auto latitude = session.channels.constFind(session.aliases.value("latitude"));
+    const auto longitude = session.channels.constFind(session.aliases.value("longitude"));
+    if (latitude == session.channels.cend() || longitude == session.channels.cend()
+        || latitude->timestamps.size() != latitude->values.size()
+        || longitude->timestamps.size() != longitude->values.size()) {
+        return;
+    }
+
+    constexpr qsizetype MaximumTracePoints = 700'000;
+    constexpr qsizetype MaximumPointsPerLapTrace = 4'096;
+    qsizetype totalPoints = 0;
+    const auto appendCoordinate = [&](LapTrace &trace, const double time) {
+        const auto latitudeValue = session.valueAt("latitude", time, InterpolationMode::Linear);
+        const auto longitudeValue = session.valueAt("longitude", time, InterpolationMode::Linear);
+        if (!latitudeValue || !longitudeValue) return;
+        const GeoCoordinate coordinate{*latitudeValue, *longitudeValue};
+        if (!isValidCoordinate(coordinate)) return;
+        const MetricPoint point = projectCoordinate(coordinate, origin);
+        if (!std::isfinite(point.eastMeters) || !std::isfinite(point.northMeters)) return;
+        if (!trace.points.isEmpty()
+            && std::abs(trace.points.constLast().telemetryTime - time) <= 1e-9) {
+            return;
+        }
+        if (totalPoints >= MaximumTracePoints) {
+            throw ResourceLimitError("Lap traces contain too many GPS points.");
+        }
+        trace.points.append({time, point.eastMeters, point.northMeters});
+        ++totalPoints;
+    };
+
+    result.lapTraces.reserve(result.timedLaps.size());
+    for (const TimedLap &lap : result.timedLaps) {
+        throwIfCancelled(cancelled);
+        LapTrace trace{lap.number, lap.startTelemetryTime, lap.durationSeconds, {}};
+        appendCoordinate(trace, lap.startTelemetryTime);
+        auto latitudeTime = std::upper_bound(
+            latitude->timestamps.cbegin(), latitude->timestamps.cend(), lap.startTelemetryTime);
+        const auto latitudeEnd = std::lower_bound(
+            latitudeTime, latitude->timestamps.cend(), lap.endTelemetryTime);
+        const qsizetype rawPointCount = std::distance(latitudeTime, latitudeEnd);
+        const qsizetype stride = std::max<qsizetype>(
+            1, (rawPointCount + MaximumPointsPerLapTrace - 3)
+                   / (MaximumPointsPerLapTrace - 2));
+        qsizetype ordinal = 0;
+        for (; latitudeTime != latitude->timestamps.cend() && *latitudeTime < lap.endTelemetryTime;
+             ++latitudeTime, ++ordinal) {
+            const qsizetype index = std::distance(latitude->timestamps.cbegin(), latitudeTime);
+            if ((index & 0xff) == 0) throwIfCancelled(cancelled);
+            if (ordinal % stride != 0) continue;
+            if (index >= longitude->timestamps.size()
+                || latitude->timestamps[index] != longitude->timestamps[index]) {
+                continue;
+            }
+            const GeoCoordinate coordinate{latitude->values[index], longitude->values[index]};
+            if (!isValidCoordinate(coordinate)) continue;
+            const MetricPoint point = projectCoordinate(coordinate, origin);
+            if (!std::isfinite(point.eastMeters) || !std::isfinite(point.northMeters)) continue;
+            if (totalPoints >= MaximumTracePoints) {
+                throw ResourceLimitError("Lap traces contain too many GPS points.");
+            }
+            trace.points.append({*latitudeTime, point.eastMeters, point.northMeters});
+            ++totalPoints;
+        }
+        appendCoordinate(trace, lap.endTelemetryTime);
+        if (trace.points.size() >= 2) result.lapTraces.append(std::move(trace));
+    }
+}
+
 } // namespace
 
 LapSession detectLaps(
@@ -377,6 +451,7 @@ LapSession detectLaps(
     } else if (result.timedLaps.isEmpty()) {
         result.status = LapSessionStatus::InsufficientPasses;
     } else {
+        buildLapTraces(session, result, origin, cancelled);
         result.status = LapSessionStatus::Available;
     }
     return result;

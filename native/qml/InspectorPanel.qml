@@ -326,9 +326,9 @@ Rectangle {
                                 text: qsTr("Lap timing fields")
                             }
                             FeCheckBox {
-                                text: qsTr("Show last lap")
-                                checked: root.settings.showLast ?? true
-                                onToggled: root.setSetting("showLast", checked)
+                                text: qsTr("Show current lap")
+                                checked: root.settings.showCurrent ?? true
+                                onToggled: root.setSetting("showCurrent", checked)
                             }
                             FeCheckBox {
                                 text: qsTr("Show best lap")
@@ -336,9 +336,21 @@ Rectangle {
                                 onToggled: root.setSetting("showBest", checked)
                             }
                             FeCheckBox {
-                                text: qsTr("Show delta to best")
+                                text: qsTr("Show live delta")
                                 checked: root.settings.showDelta ?? true
                                 onToggled: root.setSetting("showDelta", checked)
+                            }
+                            Label {
+                                text: qsTr("Delta gauge range (seconds)")
+                                color: "#8b98a8"
+                                font.pixelSize: 11
+                            }
+                            FeSpinBox {
+                                Layout.fillWidth: true
+                                from: 1
+                                to: 60
+                                value: Number(root.settings.deltaRangeSeconds ?? 10)
+                                onValueModified: root.setSetting("deltaRangeSeconds", value)
                             }
                         }
 
