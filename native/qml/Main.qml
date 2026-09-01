@@ -23,6 +23,8 @@ ApplicationWindow {
     palette.highlightedText: "#07140f"
 
     property bool fullScreenPreview: false
+    property int previewSurfaceRefresh: 0
+    property bool previewSurfaceRefreshPending: false
     property bool closeApproved: false
     property int editorVisibility: Window.Windowed
     property bool fullScreenControlsVisible: false
@@ -444,6 +446,13 @@ ApplicationWindow {
         // A native macOS FileDialog cannot reliably become modal while the native
         // Save/Discard/Cancel dialog is still unwinding its button callback.
         Qt.callLater(() => projectSaveDialog.open())
+    }
+    function refreshPreviewSurface() {
+        // AVFoundation can retain an unpainted surface for an initially-paused source.
+        // A one-pixel geometry transition recreates the normal editor video node, just
+        // as entering fullscreen does, without reopening the media or changing time.
+        previewSurfaceRefresh += 1
+        Qt.callLater(() => previewSurfaceRefresh += 1)
     }
     function enterFullScreen() {
         if (visibility !== Window.FullScreen)
@@ -1470,6 +1479,10 @@ ApplicationWindow {
         }
         onPositionChanged: function(position) {
             appController.playbackTime = position / 1000.0;
+            if (window.previewSurfaceRefreshPending) {
+                window.previewSurfaceRefreshPending = false;
+                Qt.callLater(window.refreshPreviewSurface);
+            }
         }
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.LoadedMedia) {
@@ -1477,6 +1490,13 @@ ApplicationWindow {
                 // receives a position request. Start on user-visible timeline frame 1,
                 // so a successful load is immediately distinguishable from frame 0.
                 position = appController.previewInitialPositionMilliseconds();
+                window.previewSurfaceRefreshPending = true;
+                Qt.callLater(() => {
+                    if (window.previewSurfaceRefreshPending) {
+                        window.previewSurfaceRefreshPending = false;
+                        window.refreshPreviewSurface();
+                    }
+                });
             }
             if (mediaStatus === MediaPlayer.EndOfMedia) {
                 pause();
@@ -1928,7 +1948,7 @@ ApplicationWindow {
                                 }
                                 x: geometry.x
                                 y: geometry.y
-                                width: geometry.width
+                                width: Math.max(0, geometry.width - (window.previewSurfaceRefresh % 2))
                                 height: geometry.height
                                 VideoOutput {
                                     id: videoOutput
