@@ -149,6 +149,7 @@ private slots:
     void schedulesFrameAddressedExportRangesExactly();
     void enforcesStrictTerminalFrameDeficitEvidence();
     void derivesStablePreviewViewportAndLastFrameAdapter();
+    void exposesReactivePreviewMetadataToQml();
     void plansBoundedStageBSourceAccess();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
@@ -1368,10 +1369,10 @@ void TelemetryTests::derivesOptionalRealVboLaps()
     qInfo().noquote() << QStringLiteral(
         "real laps: status=%1 start=(%2,%3)->(%4,%5) passes=%6 complete=%7 fastest=%8")
                              .arg(static_cast<int>(laps.status))
-                             .arg(gate.endpointA.latitudeDegrees, 0, 'g', 17)
-                             .arg(gate.endpointA.longitudeDegrees, 0, 'g', 17)
-                             .arg(gate.endpointB.latitudeDegrees, 0, 'g', 17)
-                             .arg(gate.endpointB.longitudeDegrees, 0, 'g', 17)
+                             .arg(gate.endpointA.latitudeDegrees, 0, 'f', 8)
+                             .arg(gate.endpointA.longitudeDegrees, 0, 'f', 8)
+                             .arg(gate.endpointB.latitudeDegrees, 0, 'f', 8)
+                             .arg(gate.endpointB.longitudeDegrees, 0, 'f', 8)
                              .arg(laps.acceptedPasses.size())
                              .arg(laps.timedLaps.size())
                              .arg(laps.fastestLapIndex ? QString::number(*laps.fastestLapIndex + 1)
@@ -1379,18 +1380,18 @@ void TelemetryTests::derivesOptionalRealVboLaps()
     for (const GatePass &pass : laps.acceptedPasses) {
         qInfo().noquote() << QStringLiteral(
             "real passage: telemetry=%1 direction=%2 gateFraction=%3 distance=%4 m")
-                                 .arg(pass.telemetryTime, 0, 'g', 17)
+                                 .arg(pass.telemetryTime, 0, 'f', 3)
                                  .arg(pass.direction)
-                                 .arg(pass.gateFraction, 0, 'g', 17)
-                                 .arg(pass.closestDistanceMeters, 0, 'g', 17);
+                                 .arg(pass.gateFraction, 0, 'f', 3)
+                                 .arg(pass.closestDistanceMeters, 0, 'f', 3);
     }
     for (const TimedLap &lap : laps.timedLaps) {
         qInfo().noquote() << QStringLiteral(
             "real lap %1: telemetryStart=%2 duration=%3 delta=%4")
                                  .arg(lap.number)
-                                 .arg(lap.startTelemetryTime, 0, 'g', 17)
-                                 .arg(lap.durationSeconds, 0, 'g', 17)
-                                 .arg(lap.deltaToBestSeconds, 0, 'g', 17);
+                                 .arg(lap.startTelemetryTime, 0, 'f', 3)
+                                 .arg(lap.durationSeconds, 0, 'f', 3)
+                                 .arg(lap.deltaToBestSeconds, 0, 'f', 3);
     }
 }
 
@@ -4653,6 +4654,17 @@ void TelemetryTests::derivesStablePreviewViewportAndLastFrameAdapter()
              std::optional<qint64>(983));
 }
 
+void TelemetryTests::exposesReactivePreviewMetadataToQml()
+{
+    const QMetaObject &metaObject = AppController::staticMetaObject;
+    for (const char *propertyName : {"previewEndPositionMilliseconds", "previewEndTimecode"}) {
+        const QMetaProperty property = metaObject.property(metaObject.indexOfProperty(propertyName));
+        QVERIFY2(property.isValid(), propertyName);
+        QVERIFY2(property.hasNotifySignal(), propertyName);
+        QCOMPARE(property.notifySignal().name(), QByteArrayLiteral("previewMetadataChanged"));
+    }
+}
+
 void TelemetryTests::preservesCfrCadenceForCommonRates()
 {
     const QString ffmpeg = FfmpegTools::ffmpegPath();
@@ -5488,9 +5500,9 @@ void TelemetryTests::syncsOptionalRealRecording()
                .arg(video.recordCount)
                .arg(video.session.sampleCount)
                .arg(video.gpsStream)
-               .arg(candidate.offset, 0, 'g', 17)
-               .arg(candidate.diagnostics.correlation, 0, 'g', 17)
-               .arg(candidate.confidence, 0, 'g', 17);
+               .arg(candidate.offset, 0, 'f', 3)
+               .arg(candidate.diagnostics.correlation, 0, 'f', 3)
+               .arg(candidate.confidence, 0, 'f', 3);
     QVERIFY(video.packetCount > 0);
     QVERIFY(video.session.sampleCount > 100);
     QVERIFY(candidate.diagnostics.correlation > 0.8);
@@ -5503,8 +5515,8 @@ void TelemetryTests::syncsOptionalRealRecording()
         qInfo().noquote() << QStringLiteral(
             "real lap video mapping: lap=%1 telemetryStart=%2 videoStart=%3")
                                  .arg(lap.number)
-                                 .arg(lap.startTelemetryTime, 0, 'g', 17)
-                                 .arg(*videoTime, 0, 'g', 17);
+                                 .arg(lap.startTelemetryTime, 0, 'f', 3)
+                                 .arg(*videoTime, 0, 'f', 3);
     }
 }
 
