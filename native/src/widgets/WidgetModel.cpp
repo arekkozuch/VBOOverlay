@@ -123,6 +123,18 @@ double bounded(const double value, const double minimum, const double maximum)
     return qBound(minimum, value, maximum);
 }
 
+double maximumWidgetScale(const WidgetData &widget)
+{
+    return qMin(3.0, qMin(1.0 / widget.width, 1.0 / widget.height));
+}
+
+void constrainWidgetToCanvas(WidgetData *widget)
+{
+    widget->scale = bounded(widget->scale, 0.25, maximumWidgetScale(*widget));
+    widget->x = bounded(widget->x, 0.0, qMax(0.0, 1.0 - widget->width * widget->scale));
+    widget->y = bounded(widget->y, 0.0, qMax(0.0, 1.0 - widget->height * widget->scale));
+}
+
 double finiteBounded(
     const QVariant &value, const double fallback, const double minimum, const double maximum)
 {
@@ -290,13 +302,19 @@ void mergeNormalizedSettings(
 
 void normalizeWidgetGeometry(WidgetData *widget, const QVariantMap &values)
 {
-    widget->x = finiteBounded(values.value(QStringLiteral("x")), widget->x, 0.0, 1.0);
-    widget->y = finiteBounded(values.value(QStringLiteral("y")), widget->y, 0.0, 1.0);
     widget->width = finiteBounded(values.value(QStringLiteral("width")), widget->width, 0.04, 1.0);
     widget->height = finiteBounded(values.value(QStringLiteral("height")), widget->height, 0.04, 1.0);
-    widget->scale = finiteBounded(values.value(QStringLiteral("scale")), widget->scale, 0.25, 3.0);
+    widget->scale = finiteBounded(
+        values.value(QStringLiteral("scale")), widget->scale, 0.25, maximumWidgetScale(*widget));
+    widget->x = finiteBounded(
+        values.value(QStringLiteral("x")), widget->x, 0.0,
+        qMax(0.0, 1.0 - widget->width * widget->scale));
+    widget->y = finiteBounded(
+        values.value(QStringLiteral("y")), widget->y, 0.0,
+        qMax(0.0, 1.0 - widget->height * widget->scale));
     widget->rotation = finiteBounded(values.value(QStringLiteral("rotation")), widget->rotation, -180.0, 180.0);
     widget->opacity = finiteBounded(values.value(QStringLiteral("opacity")), widget->opacity, 0.0, 1.0);
+    constrainWidgetToCanvas(widget);
 }
 
 QVariantMap normalizeCue(const QVariantMap &raw)
@@ -511,8 +529,9 @@ int WidgetModel::duplicateWidget(const int index)
     }
     WidgetData copy = m_widgets[index];
     copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    copy.x = bounded(copy.x + 0.03, 0.0, 1.0 - copy.width * copy.scale);
-    copy.y = bounded(copy.y + 0.03, 0.0, 1.0 - copy.height * copy.scale);
+    copy.x += 0.03;
+    copy.y += 0.03;
+    constrainWidgetToCanvas(&copy);
     copy.groupId.clear();
     const int destination = m_widgets.size();
     beginInsertRows({}, destination, destination);
@@ -552,10 +571,10 @@ void WidgetModel::moveWidget(const int index, const double x, const double y)
 void WidgetModel::resizeWidget(const int index, const double width, const double height)
 {
     if (WidgetData *widget = index >= 0 && index < m_widgets.size() ? &m_widgets[index] : nullptr) {
-        widget->width = bounded(width, 0.04, 1.0);
-        widget->height = bounded(height, 0.04, 1.0);
-        widget->x = bounded(widget->x, 0.0, 1.0 - widget->width * widget->scale);
-        widget->y = bounded(widget->y, 0.0, 1.0 - widget->height * widget->scale);
+        const double maximumDimension = qMin(1.0, 1.0 / widget->scale);
+        if (std::isfinite(width)) widget->width = bounded(width, 0.04, maximumDimension);
+        if (std::isfinite(height)) widget->height = bounded(height, 0.04, maximumDimension);
+        constrainWidgetToCanvas(widget);
         update(index);
     }
 }
@@ -568,7 +587,8 @@ void WidgetModel::setWidgetProperty(
     }
     WidgetData &widget = m_widgets[index];
     if (name == "scale") {
-        widget.scale = finiteBounded(value, widget.scale, 0.25, 3.0);
+        widget.scale = finiteBounded(value, widget.scale, 0.25, maximumWidgetScale(widget));
+        constrainWidgetToCanvas(&widget);
     } else if (name == "rotation") {
         widget.rotation = finiteBounded(value, widget.rotation, -180.0, 180.0);
     } else if (name == "opacity") {
@@ -1005,6 +1025,7 @@ WidgetData WidgetModel::createWidget(const QString &type, const int index)
     widget.width = width;
     widget.height = height;
     widget.settings = defaultSettings(type);
+    constrainWidgetToCanvas(&widget);
     return widget;
 }
 
