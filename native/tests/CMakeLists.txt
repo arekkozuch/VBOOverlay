@@ -24,10 +24,12 @@ qt_add_resources(flappedear_native_tests "flappedear_test_qml"
     FILES
         ../qml/TelemetryScene.qml
         ../qml/widgets/ArcGaugeWidget.qml
+        ../qml/widgets/ComparisonTileWidget.qml
         ../qml/widgets/DialGaugeWidget.qml
         ../qml/widgets/RetroGrandPrixWidget.qml
         ../qml/widgets/RetroSpeedArcWidget.qml
         ../qml/widgets/RetroTachometerWidget.qml
+        ../qml/widgets/TelemetryPanel.qml
 )
 target_compile_definitions(flappedear_native_tests PRIVATE
     TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/basic.vbo"

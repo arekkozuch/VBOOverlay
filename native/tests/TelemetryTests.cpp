@@ -75,8 +75,13 @@ private slots:
     void cachesTelemetryChannelCadence();
     void enforcesVboResourceLimits();
     void convertsArcMinuteCoordinates();
+    void parsesBoundedRaceChronoTimingGates();
+    void derivesDirectionalPassesAndCompleteLaps();
     void finalizesGatePassWhenTelemetryEndsInsideCorridor();
     void publishesCurrentLapAfterFirstAcceptedPass();
+    void publishesAndClearsLapStateWithController();
+    void mapsLapStartTelemetryTimesBackToVideoBounds();
+    void rendersAllComparisonTilesInProductionScene();
     void parsesOptionalRealVbo();
     void benchmarksCachedOptionalRealVboPresentationLookups();
     void persistsWidgetScenes();
@@ -1105,6 +1110,97 @@ void TelemetryTests::convertsArcMinuteCoordinates()
     QCOMPARE(session.channels.value("longitude").values[0], -21.0F);
 }
 
+void TelemetryTests::parsesBoundedRaceChronoTimingGates()
+{
+    QString source = QStringLiteral(
+        "[laptiming]\n"
+        "Start 21.0000 52.0000 21.0000 52.0002 main straight\n"
+        "Split 21.1000 52.1000 21.1000 52.1002 sector one\n"
+        "Start malformed gate\n"
+        "[column names]\n"
+        "time latitude longitude\n"
+        "[data]\n"
+        "0 52.0 21.0\n"
+        "1 52.0001 21.0001\n");
+    const TelemetrySession parsed = VboParser::parse(source);
+    QCOMPARE(parsed.timingGates.size(), qsizetype(2));
+    QCOMPARE(parsed.timingGates[0].type, TimingGateType::Start);
+    QCOMPARE(parsed.timingGates[0].sourceDescription, QStringLiteral("main straight"));
+    QCOMPARE(parsed.timingGates[1].type, TimingGateType::Split);
+    QVERIFY(std::any_of(parsed.warnings.cbegin(), parsed.warnings.cend(), [](const QString &warning) {
+        return warning.contains(QStringLiteral("Timing line 3 ignored"));
+    }));
+
+    QString bounded = QStringLiteral("[laptiming]\n");
+    for (int index = 0; index < 129; ++index) {
+        bounded += QStringLiteral("Start 21.0000 52.0000 21.0000 52.0002 gate %1\n").arg(index);
+    }
+    bounded += QStringLiteral("[column names]\ntime latitude longitude\n[data]\n0 52.0 21.0\n");
+    const TelemetrySession limited = VboParser::parse(bounded);
+    QCOMPARE(limited.timingGates.size(), qsizetype(128));
+    QVERIFY(std::any_of(limited.warnings.cbegin(), limited.warnings.cend(), [](const QString &warning) {
+        return warning.contains(QStringLiteral("supported limit of 128"));
+    }));
+}
+
+void TelemetryTests::derivesDirectionalPassesAndCompleteLaps()
+{
+    const TimingGate startGate{TimingGateType::Start, QStringLiteral("Start"),
+                               {52.0, 21.0}, {52.0002, 21.0}, {}};
+    const auto sessionFor = [](const QVector<double> &times,
+                               const QVector<float> &latitudes,
+                               const QVector<float> &longitudes) {
+        TelemetrySession session;
+        TelemetryChannel latitude;
+        latitude.name = QStringLiteral("latitude");
+        latitude.timestamps = times;
+        latitude.values = latitudes;
+        TelemetryChannel longitude;
+        longitude.name = QStringLiteral("longitude");
+        longitude.timestamps = times;
+        longitude.values = longitudes;
+        session.channels.insert(latitude.name, latitude);
+        session.channels.insert(longitude.name, longitude);
+        session.aliases.insert(latitude.name, latitude.name);
+        session.aliases.insert(longitude.name, longitude.name);
+        session.duration = times.constLast();
+        session.sampleCount = times.size();
+        return session;
+    };
+    constexpr float midLatitude = 52.0001F;
+    constexpr float northLatitude = 52.0008F;
+    constexpr float eastLongitude = 21.0002F;
+    constexpr float westLongitude = 20.9998F;
+    const TelemetrySession laps = sessionFor(
+        {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 11.0,
+         12.0, 13.0, 14.0, 15.0},
+        {midLatitude, midLatitude, midLatitude, northLatitude, northLatitude,
+         midLatitude, midLatitude, northLatitude, northLatitude, midLatitude,
+         midLatitude, northLatitude, northLatitude, midLatitude, midLatitude},
+        {eastLongitude, eastLongitude, westLongitude, westLongitude, eastLongitude,
+         eastLongitude, westLongitude, westLongitude, eastLongitude, eastLongitude,
+         westLongitude, westLongitude, eastLongitude, eastLongitude, westLongitude});
+    const LapSession detected = detectLaps(laps, startGate);
+    QCOMPARE(detected.status, LapSessionStatus::Available);
+    QCOMPARE(detected.acceptedPasses.size(), qsizetype(4));
+    QCOMPARE(detected.timedLaps.size(), qsizetype(3));
+    QVERIFY(qAbs(detected.timedLaps[0].durationSeconds - 4.0) < 0.001);
+    QVERIFY(qAbs(detected.timedLaps[1].durationSeconds - 5.0) < 0.001);
+    QVERIFY(qAbs(detected.timedLaps[2].durationSeconds - 4.0) < 0.001);
+    QCOMPARE(detected.fastestLapIndex, std::optional<qsizetype>(0));
+    QVERIFY(qAbs(detected.timedLaps[1].deltaToBestSeconds - 1.0) < 0.001);
+
+    const TelemetrySession reverseCrossing = sessionFor(
+        {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0},
+        {midLatitude, midLatitude, midLatitude, northLatitude, midLatitude,
+         midLatitude, northLatitude},
+        {eastLongitude, eastLongitude, westLongitude, westLongitude, westLongitude,
+         eastLongitude, eastLongitude});
+    const LapSession directional = detectLaps(reverseCrossing, startGate);
+    QCOMPARE(directional.acceptedPasses.size(), qsizetype(1));
+    QCOMPARE(directional.diagnostics.rejectedOppositeDirectionClusters, qsizetype(1));
+}
+
 void TelemetryTests::finalizesGatePassWhenTelemetryEndsInsideCorridor()
 {
     TelemetrySession session;
@@ -1160,6 +1256,56 @@ void TelemetryTests::publishesCurrentLapAfterFirstAcceptedPass()
     QCOMPARE(timing.value(QStringLiteral("currentSpeedKmh")).toDouble(), 90.0);
     QVERIFY(!timing.contains(QStringLiteral("bestLapSeconds")));
     QVERIFY(!timing.contains(QStringLiteral("liveDeltaSeconds")));
+}
+
+void TelemetryTests::publishesAndClearsLapStateWithController()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString source = directory.filePath(QStringLiteral("laps.vbo"));
+    const QByteArray vbo =
+        "[laptiming]\n"
+        "Start 21.0000 52.0000 21.0000 52.0002 start\n"
+        "[column names]\n"
+        "time latitude longitude\n"
+        "[data]\n"
+        "0 52.0001 21.0002\n1 52.0001 21.0002\n2 52.0001 20.9998\n"
+        "3 52.0008 20.9998\n4 52.0008 21.0002\n5 52.0001 21.0002\n"
+        "6 52.0001 20.9998\n7 52.0008 20.9998\n8 52.0008 21.0002\n"
+        "10 52.0001 21.0002\n11 52.0001 20.9998\n12 52.0008 20.9998\n"
+        "13 52.0008 21.0002\n14 52.0001 21.0002\n15 52.0001 20.9998\n";
+    QVERIFY(writeBytes(source, vbo));
+
+    AppController controller;
+    controller.loadVbo(QUrl::fromLocalFile(source));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.lapTimingStatus(), QStringLiteral("3 complete laps"));
+    const QVariantList published = controller.lapSummaries();
+    QCOMPARE(published.size(), 3);
+    QCOMPARE(published[0].toMap().value(QStringLiteral("number")).toInt(), 1);
+    QVERIFY(published[0].toMap().value(QStringLiteral("isBest")).toBool());
+
+    controller.requestNewProject();
+    QCOMPARE(controller.pendingDestructiveAction(), QStringLiteral("new"));
+    controller.resolveDestructiveAction(QStringLiteral("discard"));
+    QCOMPARE(controller.lapTimingStatus(), QStringLiteral("Open a VBO file for lap timing"));
+    QVERIFY(controller.lapSummaries().isEmpty());
+    QCOMPARE(controller.renderContext()->lapTiming().value(QStringLiteral("state")).toString(),
+             QStringLiteral("unavailable"));
+}
+
+void TelemetryTests::mapsLapStartTelemetryTimesBackToVideoBounds()
+{
+    const SyncTransform transform{90.217, 1.001};
+    const auto videoStart = telemetryToVideoTime(120.247, transform);
+    QVERIFY(videoStart.has_value());
+    QVERIFY(qAbs(*videoStart - 30.0) < 0.000001);
+    QVERIFY(!telemetryToVideoTime(std::numeric_limits<double>::quiet_NaN(), transform));
+    QVERIFY(!telemetryToVideoTime(120.0, {90.0, 0.0}));
+    QVERIFY(!telemetryToVideoTime(120.0, {std::numeric_limits<double>::infinity(), 1.0}));
 }
 
 void TelemetryTests::parsesOptionalRealVbo()
@@ -4097,6 +4243,38 @@ void TelemetryTests::rendersCanvasWidgetsInFirstOffscreenFrames()
         frames.append(image);
     }
     QCOMPARE(frames[0], frames[1]);
+}
+
+void TelemetryTests::rendersAllComparisonTilesInProductionScene()
+{
+    TelemetrySession session = speedSession(0.0, 2.0, 0.0);
+    WidgetModel widgets;
+    const QStringList types{
+        QStringLiteral("lapBest"), QStringLiteral("lapCurrent"), QStringLiteral("lapDelta"),
+        QStringLiteral("speedBest"), QStringLiteral("speedCurrent"), QStringLiteral("speedDelta")};
+    for (qsizetype index = 0; index < types.size(); ++index) {
+        const int widget = widgets.addWidget(types[index]);
+        QVERIFY2(widget >= 0, qPrintable(types[index]));
+        const double x = 0.04 + 0.32 * static_cast<double>(index % 3);
+        const double y = 0.14 + 0.42 * static_cast<double>(index / 3);
+        widgets.moveWidget(widget, x, y);
+        widgets.resizeWidget(widget, 0.28, 0.28);
+    }
+
+    TelemetryFrameRenderer renderer;
+    QVERIFY2(renderer.initialize(
+                 &widgets, &session, nullptr, SyncTransform{}, QSize(640, 480)),
+             qPrintable(renderer.errorString()));
+    const QImage image = renderer.renderFrame(1.0);
+    QVERIFY2(!image.isNull(), qPrintable(renderer.errorString()));
+    for (qsizetype index = 0; index < types.size(); ++index) {
+        const int x = static_cast<int>((0.04 + 0.32 * static_cast<double>(index % 3) + 0.14) * image.width());
+        const int y = static_cast<int>((0.14 + 0.42 * static_cast<double>(index / 3) + 0.14) * image.height());
+        const QColor pixel = image.pixelColor(x, y);
+        QVERIFY2(pixel.alpha() > 80,
+                 qPrintable(QStringLiteral("%1 did not create an opaque comparison tile at %2,%3")
+                                .arg(types[index]).arg(x).arg(y)));
+    }
 }
 
 void TelemetryTests::preservesTenBitSdrThroughComposition()
