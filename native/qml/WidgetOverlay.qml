@@ -30,12 +30,14 @@ Item {
             required property real widgetWidth
             required property real widgetHeight
             required property real widgetScale
+            required property real widgetRotation
             required property var widgetSettings
 
             x: widgetX * root.width
             y: widgetY * root.height
             width: widgetWidth * widgetScale * root.width
             height: widgetHeight * widgetScale * root.height
+            rotation: widgetRotation
 
             Rectangle {
                 anchors.fill: parent
