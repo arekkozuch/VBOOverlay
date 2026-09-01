@@ -102,9 +102,18 @@ bool ProjectRecoveryStore::load(ProjectRecoverySnapshot *snapshot, QString *erro
 
 bool ProjectRecoveryStore::write(const ProjectRecoverySnapshot &snapshot, QString *error) const
 {
-    const QFileInfo info(m_path);
-    if (!QDir().mkpath(info.absolutePath())) {
-        if (error) *error = QStringLiteral("could not create recovery directory");
+    QString projectError;
+    if (!ProjectLimits::validateProject(snapshot.project, &projectError)) {
+        if (error) *error = QStringLiteral("invalid recovery project: %1").arg(projectError);
+        return false;
+    }
+    const QJsonObject documentState = snapshot.project.value(QStringLiteral("documentState")).toObject();
+    quint64 projectSavedRevision = 0;
+    if (snapshot.documentId.isEmpty() || snapshot.documentId.size() > 128
+        || documentState.value(QStringLiteral("id")).toString() != snapshot.documentId
+        || !unsignedValue(documentState.value(QStringLiteral("savedRevision")), &projectSavedRevision)
+        || projectSavedRevision != snapshot.lastSavedRevision) {
+        if (error) *error = QStringLiteral("recovery snapshot document metadata does not match payload");
         return false;
     }
     const QJsonObject root{
@@ -117,13 +126,26 @@ bool ProjectRecoveryStore::write(const ProjectRecoverySnapshot &snapshot, QStrin
         {QStringLiteral("lastSavedRevision"), QString::number(snapshot.lastSavedRevision)},
         {QStringLiteral("project"), snapshot.project},
     };
+    const QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    if (payload.size() > ProjectLimits::recoveryBytes) {
+        if (error) {
+            *error = QStringLiteral("recovery snapshot is %1 bytes; the limit is %2 bytes")
+                         .arg(payload.size())
+                         .arg(ProjectLimits::recoveryBytes);
+        }
+        return false;
+    }
+    const QFileInfo info(m_path);
+    if (!QDir().mkpath(info.absolutePath())) {
+        if (error) *error = QStringLiteral("could not create recovery directory");
+        return false;
+    }
     QSaveFile file(m_path);
     file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error) *error = file.errorString();
         return false;
     }
-    const QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (file.write(payload) != payload.size() || !file.commit()) {
         if (error) *error = file.errorString();
         return false;

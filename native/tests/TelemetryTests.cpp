@@ -645,7 +645,9 @@ void TelemetryTests::writesRecoverySnapshotsAtomically()
     });
     ProjectRecoverySnapshot replacement = first;
     replacement.revision = 3;
-    replacement.project = testProject(9.0);
+    QJsonObject replacementSync = replacement.project.value(QStringLiteral("sync")).toObject();
+    replacementSync.insert(QStringLiteral("offset"), 9.0);
+    replacement.project.insert(QStringLiteral("sync"), replacementSync);
     QVERIFY(!store.write(replacement, &error));
     QVERIFY2(store.load(&loaded, &error), qPrintable(error));
     QCOMPARE(loaded.revision, first.revision);
@@ -3441,7 +3443,9 @@ void TelemetryTests::rejectsMismatchedVersionedRecoveryPayloadIdentity()
     const ProjectRecoverySnapshot mixed{
         projectPath, QStringLiteral("document-a"), 2, 1,
         QStringLiteral("2026-08-25T12:00:00.000Z"), mixedPayload, true};
-    QVERIFY2(store.write(mixed, &error), qPrintable(error));
+    QVERIFY(!store.write(mixed, &error));
+    QVERIFY(error.contains(QStringLiteral("metadata")));
+    QVERIFY(!QFileInfo(recoveryPath).exists());
 
     AppController restarted(nullptr, recoveryPath);
     QVERIFY(!restarted.recoveryPending());

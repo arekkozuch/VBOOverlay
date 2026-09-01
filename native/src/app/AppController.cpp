@@ -1477,7 +1477,27 @@ bool AppController::saveProject(const QUrl &url)
     }
     AppLog::info(QStringLiteral("Project save requested: %1").arg(path));
     const QJsonObject project = currentProjectObject(path, m_documentState.revision());
+    QString validationError;
+    if (!ProjectLimits::validateProject(project, &validationError)) {
+        AppLog::error(QStringLiteral("Project save rejected: %1").arg(validationError));
+        setStatus(QStringLiteral("Project save error: %1").arg(validationError));
+        if (m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) {
+            emit destructiveActionChanged();
+        }
+        return false;
+    }
     const QByteArray payload = QJsonDocument(project).toJson(QJsonDocument::Indented);
+    if (payload.size() > ProjectLimits::projectBytes) {
+        const QString sizeError = QStringLiteral("Project is %1 bytes; the limit is %2 bytes.")
+                                      .arg(payload.size())
+                                      .arg(ProjectLimits::projectBytes);
+        AppLog::error(QStringLiteral("Project save rejected: %1").arg(sizeError));
+        setStatus(QStringLiteral("Project save error: %1").arg(sizeError));
+        if (m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) {
+            emit destructiveActionChanged();
+        }
+        return false;
+    }
     const ProjectWriter::Result writeResult = m_projectWriter.write(path, payload);
     if (!writeResult.success) {
         AppLog::error(QStringLiteral("Project save failed: %1: %2").arg(path, writeResult.error));
