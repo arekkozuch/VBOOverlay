@@ -313,7 +313,7 @@ private:
     void startVboLoad(const QString &path, quint64 generation, bool markDocumentDirty,
                       QJsonObject expectedFingerprint = {}, bool relink = false);
     void startProjectSources(const ProjectLoadResult &result);
-    void commitProjectLoad(const ProjectLoadResult &result);
+    [[nodiscard]] bool commitProjectLoad(const ProjectLoadResult &result);
     void commitVideoProbe(const VideoProbeResult &result, bool markDocumentDirty);
     void commitVboLoad(const VboLoadResult &result, bool markDocumentDirty);
     void setProjectLoadState(bool loading, QString stage = {}, QString error = {});

@@ -290,8 +290,9 @@ AppController::AppController(QObject *parent, QString recoveryPath,
             setStatus(QStringLiteral("Project load cancelled because the current document changed."));
             return;
         }
-        commitProjectLoad(result);
-        startProjectSources(result);
+        if (commitProjectLoad(result)) {
+            startProjectSources(result);
+        }
     });
     retireLegacyDocumentSettings();
     restoreStartupState();
@@ -1303,7 +1304,9 @@ bool AppController::beginProjectLoad(
         result.vboReference, result.projectPath);
 
     setProjectLoadState(true, QStringLiteral("Applying project"));
-    commitProjectLoad(result);
+    if (!commitProjectLoad(result)) {
+        return false;
+    }
 
     startProjectSources(result);
     return true;
@@ -1334,7 +1337,7 @@ void AppController::setProjectLoadState(bool loading, QString stage, QString err
     emit projectLoadChanged();
 }
 
-void AppController::commitProjectLoad(const ProjectLoadResult &result)
+bool AppController::commitProjectLoad(const ProjectLoadResult &result)
 {
     const QScopedValueRollback suppressDirty(m_suppressDirtyTracking, true);
     setProjectLoadState(true, QStringLiteral("Applying project"));
@@ -1343,7 +1346,7 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
                           .arg(result.projectPath));
         setProjectLoadState(false, {}, QStringLiteral("widget scene could not be applied."));
         setStatus("Project could not be opened: widget scene could not be applied.");
-        return;
+        return false;
     }
     m_projectTemplate = result.project;
     m_videoReference = result.videoReference;
@@ -1412,6 +1415,7 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
         AppLog::info(QStringLiteral("Saved project restored from disk: %1").arg(result.projectPath));
         setStatus(QStringLiteral("Project opened: %1").arg(QFileInfo(result.projectPath).fileName()));
     }
+    return true;
 }
 
 QJsonObject AppController::currentProjectObject(
