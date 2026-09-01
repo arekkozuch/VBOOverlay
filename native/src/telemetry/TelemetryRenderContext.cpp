@@ -210,6 +210,12 @@ QVariantMap TelemetryRenderContext::lapTiming() const
     result.insert(QStringLiteral("state"), QStringLiteral("running"));
     result.insert(QStringLiteral("currentLapNumber"), static_cast<int>(passIndex + 1));
     result.insert(QStringLiteral("currentElapsedSeconds"), currentElapsed);
+    const auto currentSpeed = m_session
+        ? m_session->valueAt("speed", currentTime, InterpolationMode::Linear)
+        : std::nullopt;
+    if (currentSpeed && std::isfinite(*currentSpeed)) {
+        result.insert(QStringLiteral("currentSpeedKmh"), *currentSpeed);
+    }
 
     if (bestCompletedLap && m_lapSession.selectedStartGate) {
         const auto referenceTrace = std::find_if(
@@ -237,6 +243,16 @@ QVariantMap TelemetryRenderContext::lapTiming() const
                 if (reference) {
                     result.insert(QStringLiteral("liveDeltaSeconds"),
                                   currentElapsed - reference->elapsedSeconds);
+                    const auto referenceSpeed = m_session->valueAt(
+                        "speed", referenceTrace->startTelemetryTime
+                                     + reference->elapsedSeconds,
+                        InterpolationMode::Linear);
+                    if (currentSpeed && referenceSpeed && std::isfinite(*currentSpeed)
+                        && std::isfinite(*referenceSpeed)) {
+                        result.insert(QStringLiteral("referenceSpeedKmh"), *referenceSpeed);
+                        result.insert(QStringLiteral("speedDeltaKmh"),
+                                      *currentSpeed - *referenceSpeed);
+                    }
                 }
             }
         }

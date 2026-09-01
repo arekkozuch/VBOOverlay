@@ -83,12 +83,37 @@
       "source3": "", "label3": "THROTTLE", "unit3": "%", "decimals3": 0,
       "source4": "", "label4": "BRAKE", "unit4": "%", "decimals4": 0
     },
-    "lapTiming": {
-      "title": "LAP TIMING", "showTitle": false, "showBorder": false,
-      "showBest": true, "showCurrent": true, "showDelta": true,
+    "lapBest": {
+      "label": "Best", "showBorder": false,
+      "backgroundColor": "#343941", "backgroundOpacity": 0.76,
+      "accentColor": "#20d05a", "accentColor2": "#ef4f5f", "timingDecimals": 1
+    },
+    "lapCurrent": {
+      "label": "Current", "showBorder": false,
+      "backgroundColor": "#343941", "backgroundOpacity": 0.76,
+      "accentColor": "#20d05a", "accentColor2": "#ef4f5f", "timingDecimals": 1
+    },
+    "lapDelta": {
+      "label": "Delta", "showBorder": false,
       "backgroundColor": "#343941", "backgroundOpacity": 0.76,
       "accentColor": "#20d05a", "accentColor2": "#ef4f5f",
-      "timingDecimals": 1, "deltaDecimals": 2, "deltaRangeSeconds": 10
+      "deltaDecimals": 2, "deltaRangeSeconds": 10
+    },
+    "speedBest": {
+      "label": "Best", "unit": "km/h", "showBorder": false,
+      "backgroundColor": "#343941", "backgroundOpacity": 0.76,
+      "accentColor": "#20d05a", "accentColor2": "#ef4f5f", "speedDecimals": 0
+    },
+    "speedCurrent": {
+      "label": "Current", "unit": "km/h", "showBorder": false,
+      "backgroundColor": "#343941", "backgroundOpacity": 0.76,
+      "accentColor": "#20d05a", "accentColor2": "#ef4f5f", "speedDecimals": 0
+    },
+    "speedDelta": {
+      "label": "Delta", "unit": "km/h", "showBorder": false,
+      "backgroundColor": "#343941", "backgroundOpacity": 0.76,
+      "accentColor": "#20d05a", "accentColor2": "#ef4f5f",
+      "speedDeltaDecimals": 1, "speedDeltaRangeKmh": 30
     },
     "retroGrandPrix": {
       "showBackground": false, "showBorder": false, "padding": 0,

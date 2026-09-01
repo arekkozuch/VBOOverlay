@@ -57,7 +57,8 @@ QVariantMap defaultSettings(const QString &type)
 const QStringList widgetTypes = {
     "speed",          "rpm",       "heartRate",       "pedals", "gForce",
     "f1GForceRadar",  "gForceMagnitudeBar", "track", "customValue", "retroCustomValue", "arcGauge", "dialGauge",
-    "telemetryOverlay", "lapTiming", "retroGrandPrix", "retroTachometer", "retroGear",
+    "telemetryOverlay", "lapBest", "lapCurrent", "lapDelta", "speedBest", "speedCurrent",
+    "speedDelta", "retroGrandPrix", "retroTachometer", "retroGear",
     "retroPedal", "retroSpeedArc", "retroNameplate", "brandLogo"};
 
 QPair<double, double> defaultSize(const QString &type)
@@ -92,8 +93,9 @@ QPair<double, double> defaultSize(const QString &type)
     if (type == "telemetryOverlay") {
         return {0.42, 0.12};
     }
-    if (type == "lapTiming") {
-        return {0.48, 0.14};
+    if (type == "lapBest" || type == "lapCurrent" || type == "lapDelta"
+        || type == "speedBest" || type == "speedCurrent" || type == "speedDelta") {
+        return {0.17, 0.14};
     }
     if (type == "retroGrandPrix") {
         return {0.42, 0.61};
@@ -202,6 +204,9 @@ QVariant normalizeSettingValue(
     }
     if (name == QStringLiteral("deltaRangeSeconds")) {
         return finiteNumber(value, &number) ? bounded(number, 1.0, 60.0) : fallback();
+    }
+    if (name == QStringLiteral("speedDeltaRangeKmh")) {
+        return finiteNumber(value, &number) ? bounded(number, 1.0, 300.0) : fallback();
     }
     if (name == QStringLiteral("ringStepG")) {
         return finiteNumber(value, &number) ? bounded(number, 0.01, 10.0) : fallback();

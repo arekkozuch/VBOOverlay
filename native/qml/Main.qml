@@ -97,9 +97,34 @@ ApplicationWindow {
             "icon": "▤"
         },
         {
-            "label": "Lap timing",
-            "type": "lapTiming",
-            "icon": "LAP"
+            "label": "Best lap time",
+            "type": "lapBest",
+            "icon": "T★"
+        },
+        {
+            "label": "Current lap time",
+            "type": "lapCurrent",
+            "icon": "NOW"
+        },
+        {
+            "label": "Lap delta",
+            "type": "lapDelta",
+            "icon": "ΔT"
+        },
+        {
+            "label": "Best-lap speed",
+            "type": "speedBest",
+            "icon": "V★"
+        },
+        {
+            "label": "Current speed",
+            "type": "speedCurrent",
+            "icon": "V"
+        },
+        {
+            "label": "Speed delta",
+            "type": "speedDelta",
+            "icon": "ΔV"
         },
         {
             "label": "Retro RPM",

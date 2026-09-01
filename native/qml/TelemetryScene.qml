@@ -104,7 +104,8 @@ Item {
             property bool rendererOwnsPanel: ["speed", "pedals", "heartRate",
                                                "retroCustomValue", "gForceMagnitudeBar",
                                                "f1GForceRadar", "retroTachometer",
-                                               "lapTiming"].indexOf(widgetType) >= 0
+                                               "lapBest", "lapCurrent", "lapDelta",
+                                               "speedBest", "speedCurrent", "speedDelta"].indexOf(widgetType) >= 0
 
             function configuredFontSize() {
                 const value = Number(widgetSettings.fontSize ?? 0);
@@ -189,7 +190,12 @@ Item {
                     case "arcGauge": return "widgets/ArcGaugeWidget.qml";
                     case "dialGauge": return "widgets/DialGaugeWidget.qml";
                     case "telemetryOverlay": return "widgets/TelemetryOverlayWidget.qml";
-                    case "lapTiming": return "widgets/LapTimingWidget.qml";
+                    case "lapBest":
+                    case "lapCurrent":
+                    case "lapDelta":
+                    case "speedBest":
+                    case "speedCurrent":
+                    case "speedDelta": return "widgets/ComparisonTileWidget.qml";
                     case "retroGrandPrix": return "widgets/RetroGrandPrixWidget.qml";
                     case "retroTachometer": return "widgets/RetroTachometerWidget.qml";
                     case "retroGear": return "widgets/RetroGearWidget.qml";

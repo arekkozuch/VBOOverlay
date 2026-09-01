@@ -11,6 +11,8 @@ Rectangle {
     }
     property var settings: selectedWidget.settings || ({})
     readonly property bool isGForceWidget: ["gForce", "f1GForceRadar", "gForceMagnitudeBar"].includes(selectedWidget.type)
+    readonly property bool isComparisonTile: ["lapBest", "lapCurrent", "lapDelta",
+                                               "speedBest", "speedCurrent", "speedDelta"].includes(selectedWidget.type)
     property int currentTab: 0
     signal selectionCleared
     signal selectionRequested(int index)
@@ -172,34 +174,37 @@ Rectangle {
                             onEditingFinished: root.setSetting("name", text)
                         }
                         Label {
+                            visible: !root.isComparisonTile
                             text: qsTr("Title")
                             color: "#8b98a8"
                             font.pixelSize: 11
                         }
                         FeTextField {
+                            visible: !root.isComparisonTile
                             Layout.fillWidth: true
                             text: root.settings.title || ""
                             placeholderText: qsTr("Optional heading")
                             onEditingFinished: root.setSetting("title", text)
                         }
                         FeCheckBox {
+                            visible: !root.isComparisonTile
                             text: qsTr("Show title")
                             checked: root.settings.showTitle ?? false
                             onToggled: root.setSetting("showTitle", checked)
                         }
 
                         SectionTitle {
-                            visible: root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "brandLogo" && !root.isComparisonTile
                             text: qsTr("Telemetry & format")
                         }
                         Label {
-                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && !root.isComparisonTile && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             text: qsTr("Source channel")
                             color: "#8b98a8"
                             font.pixelSize: 11
                         }
                         FeComboBox {
-                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && !root.isComparisonTile && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             model: root.channelModel()
                             currentIndex: Math.max(0, model.indexOf(root.settings.source || qsTr("Automatic")))
@@ -207,7 +212,7 @@ Rectangle {
                         }
 
                         GridLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && !root.isComparisonTile && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             columns: 2
                             columnSpacing: 8
@@ -305,7 +310,7 @@ Rectangle {
                             }
                         }
                         RowLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && !root.isComparisonTile && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             FeCheckBox {
                                 text: qsTr("Show unit")
                                 checked: root.settings.showUnit ?? true
@@ -319,38 +324,29 @@ Rectangle {
                         }
 
                         ColumnLayout {
-                            visible: root.selectedWidget.type === "lapTiming"
+                            visible: root.selectedWidget.type === "lapDelta" || root.selectedWidget.type === "speedDelta"
                             Layout.fillWidth: true
                             spacing: 6
                             SectionTitle {
-                                text: qsTr("Lap timing fields")
-                            }
-                            FeCheckBox {
-                                text: qsTr("Show current lap")
-                                checked: root.settings.showCurrent ?? true
-                                onToggled: root.setSetting("showCurrent", checked)
-                            }
-                            FeCheckBox {
-                                text: qsTr("Show best lap")
-                                checked: root.settings.showBest ?? true
-                                onToggled: root.setSetting("showBest", checked)
-                            }
-                            FeCheckBox {
-                                text: qsTr("Show live delta")
-                                checked: root.settings.showDelta ?? true
-                                onToggled: root.setSetting("showDelta", checked)
+                                text: qsTr("Comparison range")
                             }
                             Label {
-                                text: qsTr("Delta gauge range (seconds)")
+                                text: root.selectedWidget.type === "lapDelta"
+                                    ? qsTr("Gauge range (seconds)") : qsTr("Gauge range (km/h)")
                                 color: "#8b98a8"
                                 font.pixelSize: 11
                             }
                             FeSpinBox {
                                 Layout.fillWidth: true
                                 from: 1
-                                to: 60
-                                value: Number(root.settings.deltaRangeSeconds ?? 10)
-                                onValueModified: root.setSetting("deltaRangeSeconds", value)
+                                to: root.selectedWidget.type === "lapDelta" ? 60 : 300
+                                value: root.selectedWidget.type === "lapDelta"
+                                    ? Number(root.settings.deltaRangeSeconds ?? 10)
+                                    : Number(root.settings.speedDeltaRangeKmh ?? 30)
+                                onValueModified: root.setSetting(
+                                    root.selectedWidget.type === "lapDelta"
+                                        ? "deltaRangeSeconds" : "speedDeltaRangeKmh",
+                                    value)
                             }
                         }
 
