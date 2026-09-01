@@ -4,7 +4,7 @@ FlappedEar Telemetry is a native desktop editor for synchronizing motorsport tel
 
 ## Status
 
-The application is a Qt 6, C++20, and QML native application in alpha and active development. Development has been validated on macOS. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; broader hardware and packaging validation remain pending.
+The application is a Qt 6, C++20, and QML native application in alpha and active development. The established editor/export baseline has been validated on macOS. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; broader hardware and packaging validation remain pending. The September 2026 lap-timing and comparison-widget additions are implemented but have not yet completed the deferred macOS build, runtime, or real-fixture validation pass.
 
 ## Current capabilities
 
@@ -13,16 +13,18 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates. Both editor sidebars remain fully scrollable at the supported 1180×720 minimum size.
 - Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.
+- Source-defined RaceChrono Start-gate parsing, raw-GPS lap derivation, fastest-lap state, and a lap list that seeks the main playback timeline.
+- Independent Best, Current, and Delta tiles for lap time and speed comparison against the best completed lap.
 - Source-driven CFR HEVC/AAC MP4 export at the effective rational export rate, including runtime raster/profile checks, validated 8-bit and 10-bit SDR preservation, optional custom source ranges, progress, cancellation, and verbose diagnostics retained in a durable per-export log.
+- Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
+- Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
+- Resource-bounded external JSON documents and subprocess output, with visible recovery-protection warnings when automatic snapshots cannot be persisted.
 
 ## Keyboard controls
 
 Space plays or pauses. Left/Right seek five seconds; Shift+Left/Right seek thirty seconds; Home/End seek to the first/last actual video frame. These playback shortcuts are disabled while typing or operating a focused editor control. Ctrl/Cmd+E opens Export, Ctrl/Cmd+Shift+A toggles Telemetry Analysis, and F11/Escape enter and leave full screen. Full-screen preview provides the same visible transport and scrubber as the editor.
 
 Very Verbose export diagnostics follow the live tail until the user scrolls into history. Historical inspection stays fixed while new lines arrive; **Jump to latest** explicitly resumes following.
-- Portable `.fetproject` media references with project-relative lookup, bounded source fingerprints, missing-media recovery, explicit relinking, and stale asynchronous-result rejection.
-- Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
-- Resource-bounded external JSON documents and subprocess output, with visible recovery-protection warnings when automatic snapshots cannot be persisted.
 
 ## Requirements
 
@@ -55,6 +57,8 @@ The application keeps telemetry parsing, synchronization, video/media handling, 
 G-Force widgets can invert lateral and longitudinal presentation axes independently, without changing imported telemetry. Alongside the classic target, the widget catalog includes an **F1 G-Force Radar** with a dark semi-transparent circular field, 1.5 g range, and six 0.25 g concentric-ring levels by default, plus a compact **G-Force Bar** that shows true combined magnitude while clamping only its fill. Speed, pedals, Heart Rate, Retro Custom, and G-Force Bar use the same translucent charcoal broadcast panel, typography, rounded border, and neutral bar-track treatment; throttle is green, brake is red only when it has fill, and G-Force is amber. The analog retro tachometer keeps its circular identity with a matching rounded dark RPM plate. `Retro Custom` accepts arbitrary channel, adjustment, formatting, unit, fallback, and palette settings. Text-bearing value widgets offer **Font size**: `Auto` retains their responsive legacy sizing, while a positive canonical size is scene-scaled consistently for preview and every export resolution.
 
 Templates have two explicit operations. **Save current** updates the custom template that was applied (or just created), preserving its ID, name, and description. Selecting a template alone does not make it editable, so Save current opens **Save as new** until that custom template is applied. Built-in templates are immutable and always use Save as new.
+
+Lap and speed comparison tiles use the same compact translucent panel family. Each Best, Current, and Delta tile is an independent widget with its own position, scale, rotation, visibility, and appearance. Scaling a comparison tile scales its typography, margins, gauge strokes, border, and corner radius together. Editor interaction geometry follows widget rotation, and normalized size/scale changes keep the unrotated widget rectangle inside the canvas.
 
 A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup only when their logical document state is newer than the saved authority. A leftover snapshot after successful Save is cleanup debt, not degraded recovery protection or a user warning. QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
 
@@ -91,5 +95,6 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 - Rotation and sample-aspect-ratio display-transform preservation, HDR/Log color-managed preservation, and production 8K validation remain pending. One real HERO11 5312×2988 10-bit SDR fixture has passed native and 3840×2160 macOS exports; this is not a broader hardware guarantee.
 - Real-media coverage remains limited.
 - Interactive map tiles are pending; the local GPS track view works without map tiles.
+- Lap detection, lap-start seeking, live deltas, and the six comparison tiles still require the deferred deterministic/macOS/private-Jastrząb validation pass. The current static audit also identified two open lap-state edge cases: a recording ending inside the Start-gate corridor may omit its final passage, and Current remains unavailable until at least one complete lap exists.
 
 For remaining work, see [ROADMAP.md](ROADMAP.md). Developer contribution rules are in [AGENTS.md](AGENTS.md), and local test guidance is in [docs/testing.md](docs/testing.md).

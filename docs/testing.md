@@ -57,6 +57,12 @@ The August 2026 macOS real-fixture regression run measured 1,536 GPMF packets, 2
 
 Unit and synthetic integration tests do not replace manual real-media validation. The latter should identify the fixture class, platform, source range, output properties, and any untested behavior.
 
+## Deferred September 2026 coverage
+
+The source timing-gate parser, lap detector/trace derivation, inverse lap-start seek boundary, live lap comparison, six independent comparison tiles, widget canvas clamping, rotated editor interaction, and playback-decoder error surfaces were implemented after the last completed local gate. They are not covered by the current committed test list above and must not yet be described as runtime-validated.
+
+The next macOS validation pass must add deterministic malformed/ambiguous parser and detector cases, telemetry-end-inside-gate behavior, first-pass Current behavior, controller publication/clearing, QML startup coverage for all six tile types, and the optional private Jastrząb fixture. It must then run the normal local gate, both visual-smoke backgrounds, and the complete open/sync/analyze/edit/save/reopen/export workflow with the real session material.
+
 ## Before claiming a feature works
 
 - Run the focused test and the normal local gate when applicable.

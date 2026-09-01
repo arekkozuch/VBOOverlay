@@ -2,7 +2,9 @@
 
 ## Status / baseline
 
-This is the authoritative architecture specification for the first Lap Timing & Session Analysis product slice. It is design-only: no lap-timing production code, QML, project-format fields, or committed deterministic tests exist at this commit.
+This document records the original architecture specification for the first Lap Timing & Session Analysis product slice. The production implementation now exists on `main`: source gates, raw-GPS passage/lap derivation, `LapSession` publication, Analysis lap list/seek, live best-lap comparison, and six independent lap/speed tiles are present. The deterministic/macOS/private-fixture validation pass remains deferred, so implementation presence must not be read as runtime acceptance.
+
+The original baseline and scope language below is retained as design history. Later implementation extended the initial non-goals by adding live delta, lap traces, and lap/speed overlay tiles. The current product status is tracked in `ROADMAP.md`, `docs/telemetry-semantics.md`, and `currentstate.md`.
 
 The source-of-truth product-code baseline is `0749eff31c87698a737cc62a1b54bd2fc9d1fb2c` (`fix: preserve Canvas widgets in offscreen export`). The documentation baseline is its exact child `9598e534d6baa960582a8e83a95be1f81b8d0193` (`docs: capture current development state`). This design is written on `feature/lap-timing-foundation` from that documentation baseline.
 

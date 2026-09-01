@@ -1,7 +1,7 @@
 # VBOOverlay / FlappedEar Telemetry — Current Development State
 
-**State captured:** 2026-08-30
-**Product-code baseline:** `2af522cb64b735c7d4d1725f1b772904a79ef724` plus the direct-main integer-export and preview-boundary continuation in this working tree
+**State captured:** 2026-09-01
+**Product-code baseline:** `3be684ee45b8c4b9c074f58ac1abc7bc7af0e8fc` plus this documentation update
 **Repository:** `arekkozuch/VBOOverlay`  
 **Baseline branch:** `main`  
 **Application version in CMake:** `0.2.0`  
@@ -15,7 +15,7 @@
 
 ## 1. One-paragraph project state
 
-FlappedEar Telemetry is now a native Qt 6 / C++20 / QML desktop application for synchronizing motorsport telemetry with video, editing telemetry overlays, analyzing synchronized channels, and exporting frame-correct HEVC/AAC video. The original Electron/React prototype has been removed. The current architecture has a robust VBO telemetry model, GoPro GPMF GPS extraction, GPS-speed synchronization, project persistence and recovery, portable media relinking, a reusable QML telemetry scene shared by preview/export, an offscreen QRhi export renderer, a two-stage FFmpeg export pipeline, strong output-file safety, bounded untrusted inputs, extensive Qt Test coverage, and a current accepted nine-widget motorsport-broadcast HUD. Export scheduling now uses inclusive integer frame ranges and exact rational transport timestamps; a 1..10 terminal-frame warning requires complete staging evidence, agreeing Stage-B progress when present, and exact contiguous-CFR final timing. The editor preview derives its widget viewport from loaded media geometry and clamps its visible endpoint to the last actual video frame. The next intended product milestone is **lap timing and session analysis using real track-session data after the next track day**, not a widget-system rewrite.
+FlappedEar Telemetry is now a native Qt 6 / C++20 / QML desktop application for synchronizing motorsport telemetry with video, editing telemetry overlays, analyzing synchronized channels, deriving laps, and exporting frame-correct HEVC/AAC video. The established baseline still includes portable project/recovery handling, a shared preview/export scene, bounded inputs, staged exact-CFR export, and the accepted motorsport-broadcast HUD. The September 2026 product slice adds bounded RaceChrono Start gates, raw-GPS passage and lap derivation, fastest-lap state, Analysis lap list/seek, live best-lap comparison, and six independent lap/speed Best/Current/Delta tiles. The same session also hardened project transactionality, persistence validation, widget canvas geometry, rotation-aware editor controls, tile scaling, consistent speed presentation, and decoder-error visibility. Those additions are committed and published but have not yet passed the deferred macOS build/runtime/private-Jastrząb validation gate, so they are implemented rather than accepted as stable runtime behavior.
 
 ---
 
@@ -36,7 +36,7 @@ The intended real workflow is approximately:
 7. Arrange/customize telemetry widgets.
 8. Save the work as a `.fetproject`.
 9. Export a deterministic HEVC/AAC MP4 where the rendered telemetry corresponds to the same absolute source time as preview.
-10. In the next product phase, derive laps/sectors/session metrics from real track data and use them in both analysis and overlays.
+10. Derive laps/session metrics from real track data and use them in both analysis and overlays; sectors and theoretical best remain a later phase.
 
 The product is not meant to fabricate unavailable telemetry. In particular, missing brake data must remain missing; it must never be replaced by an unrelated channel or interpreted as measured zero.
 
@@ -1484,7 +1484,7 @@ Current project-specific workflow decisions retained from development discussion
 - macOS/current primary local tree is the development source of truth;
 - Surface Laptop 4 / Windows is validation-only, not a place from which code/commits become authoritative;
 - do not make Windows-side commits/patches the source of truth;
-- do not push unless the user explicitly asks;
+- ChatGPT Work/shared-repository sessions push completed commits under the user's standing authorization; locally run Codex does not push unless explicitly asked;
 - every completed fix/implementation gets a focused local commit;
 - documentation is part of every iteration;
 - review README/ROADMAP/AGENTS/relevant docs when behavior changes;
@@ -1493,7 +1493,7 @@ Current project-specific workflow decisions retained from development discussion
 - normal local build/CTest are the required gate;
 - cloud CI is intentionally off.
 
-This `currentstate.md` commit is an explicitly requested GitHub documentation write and does not change product code.
+Documentation-only commits do not change product runtime claims or substitute for the local validation gate.
 
 ---
 
@@ -1522,11 +1522,13 @@ Still open/current roadmap:
 - multi-chapter GoPro timelines;
 - chart zoom/range selection/annotations/configurable axes;
 - interactive map tiles/offline-safe map export behavior;
+- deterministic/macOS/private-fixture acceptance of lap timing and comparison widgets;
+- end-of-telemetry gate-cluster finalization and first-pass Current presentation;
 - macOS signing/notarization;
 - Windows signing;
 - self-contained installers/update strategy.
 
-The new intended product priority, however, is lap timing/session analysis before returning to these broader roadmap items unless a blocker appears.
+The immediate product priority is completing the full macOS workflow and lap-timing acceptance before returning to these broader roadmap items unless a blocker appears.
 
 ---
 
@@ -1666,56 +1668,35 @@ This is explicitly **backlog**, because undertaking it now would pull developmen
 
 ---
 
-# PART XVIII — NEXT PRODUCT MILESTONE: LAP TIMING
+# PART XVIII — CURRENT PRODUCT MILESTONE: LAP TIMING VALIDATION
 
-## 65. Why lap timing is next
+## 65. Current lap-timing status
 
-The user deliberately stopped the widget-runtime exploration because it would create a large architectural detour.
+The private Jastrząb session supplied the required source evidence: RaceChrono Start metadata, regular raw telemetry time, and repeated GPS passages. Production code now parses the source gate, derives passages/laps/traces, publishes lap state to Analysis and the render context, and provides independent lap/speed comparison widgets.
 
-The next track day should provide the missing ingredient: **real session data** suitable for designing lap detection against actual GPS/timestamp behavior rather than synthetic assumptions.
-
-Therefore the working checkpoint is:
-
-> Stable telemetry/video/export baseline. Next product milestone: **Lap Timing & Session Analysis using real track-session data**.
+The implementation is not yet accepted as runtime-complete. The user deferred automated and host-runtime tests until the macOS machine and large source material are available.
 
 ---
 
-## 66. Planned lap-timing development sequence
-
-The current intended sequence is:
+## 66. Implemented lap-timing sequence
 
 ### 66.1 Lap detection foundation
 
-- define/select start-finish line;
-- detect GPS line crossing;
-- assign lap numbers;
-- calculate lap start/end;
-- calculate lap time;
-- reject obvious duplicate/false crossings;
-- test low-frequency/noisy GPS behavior from the actual track fixture.
+- bounded RaceChrono `[laptiming]` Start-gate parsing;
+- shared coordinate normalization and local metric projection;
+- finite-gate corridor passage clustering;
+- speed, normal-motion, direction, gap, re-arm, refractory, and duration filtering;
+- complete raw-time laps between accepted same-direction passages.
 
 ### 66.2 Session model
 
-Introduce a real session/lap domain model containing at least:
-
-- session bounds;
-- lap list;
-- outlap/inlap distinction where derivable;
-- lap validity/state;
-- fastest lap;
-- session duration/distance;
-- explicit start/finish definition;
-- ability to correct start/finish rather than hard-coding one guessed detector result.
+`LapSession` now carries the selected source gate, accepted passages, complete laps, fastest-lap index, lap traces, status, and bounded diagnostics. It is derived state and is not persisted in `.fetproject`. Manual gate correction, explicit outlap/inlap state, and session-level distance remain future work.
 
 ### 66.3 Lap comparison
 
-- choose reference lap;
-- align laps on distance/progress rather than raw timestamp alone;
-- time delta versus reference;
-- speed comparison;
-- later pedal/G/other channel comparisons on common lap distance.
+The best completed lap is the current reference. Live comparison projects current GPS into a bounded time-local search of that lap trace and publishes elapsed-time delta, current/reference speed, and speed delta. Distance-normalized charts and pedal/G/other channel comparison remain future work.
 
-### 66.4 Sectors
+### 66.4 Sectors — not implemented
 
 Initial approach should prefer explicit/manual sector points over premature automatic sector discovery.
 
@@ -1728,49 +1709,22 @@ Needed outputs:
 
 ### 66.5 Overlay integration
 
-Potential overlay fields after session model is correct:
-
-- current lap;
-- previous lap;
-- best lap;
-- current/reference delta;
-- sector delta;
-- lap counter.
-
-Do **not** design these as fake values before the session model is verified.
+Six independent widgets now exist: lap Best/Current/Delta and speed Best/Current/Delta. They share one comparison-tile renderer and remain individually positionable, scalable, rotatable, visible, and configurable. Sector and previous-lap widgets are not implemented.
 
 ### 66.6 Analysis integration
 
-Post-drive Analysis should eventually show:
-
-- lap table;
-- fastest/selected/reference lap;
-- speed traces by lap distance;
-- throttle/brake comparison;
-- G-force comparison;
-- HR comparison;
-- delta trace;
-- sector summary.
+Analysis now shows the lap table, fastest state, deltas, and lap-start seeking through the central inverse synchronization transform. Lap-distance channel charts, explicit reference selection, sector summary, and cross-lap channel comparison remain open.
 
 ---
 
-## 67. Lap-timing implementation rule
+## 67. Immediate correctness and validation work
 
-Do not implement a sophisticated lap detector before inspecting the new real track fixture.
-
-First inspect:
-
-- GPS frequency;
-- timestamp regularity;
-- coordinate noise;
-- approach/departure around start/finish;
-- stops/pit/outlap/inlap behavior;
-- track direction;
-- whether session contains repeated close passes near the line;
-- RaceChrono/VBO channel naming for that recording;
-- any external lap markers already present in telemetry that can serve as validation without becoming an unquestioned source of truth.
-
-Then define the algorithm and deterministic fixtures.
+- finalize an active gate cluster at end of telemetry;
+- expose Current after the first accepted Start passage;
+- add deterministic parser, detector, inverse-sync, controller, and QML coverage;
+- validate the expected four passes and three laps against the private Jastrząb fixture;
+- run the full macOS build/test/visual-smoke workflow;
+- execute the complete video + VBO + sync + analysis + widget + save/reopen + export workflow.
 
 ---
 
@@ -1779,6 +1733,20 @@ Then define the algorithm and deterministic fixtures.
 ## 68. Historical milestone commits
 
 This is not meant to replace `git log`; it is the high-signal development history a future engineer/reviewer should know.
+
+### 2026-09-01 — lap timing, native close dialog, and static-audit fixes
+
+- `a0ebd2a` — parse RaceChrono timing gates;
+- `da5e59a` — derive laps from raw telemetry;
+- `263fc3b` — publish derived lap timing;
+- `a3105a5` — add lap timing to Analysis;
+- `be1b0b8` — use the native unsaved-changes dialog;
+- `c54193a`, `5354e66`, `28fc913` — lap overlay, live delta, and independent lap/speed tiles;
+- `e105167`, `75d4749` — transactional project apply and pre-write persistence validation;
+- `8111794`, `eae4f48`, `9ce989e` — canvas geometry, rotated editor controls, and proportional tile scaling;
+- `9b3bf0a`, `3be684e` — consistent comparison speed presentation and visible decoder errors.
+
+These commits are published on `main`. Their code state is statically reviewed, but the deferred macOS Qt/runtime/private-fixture pass has not run.
 
 ### 2026-08-19 — project and editor foundation
 
@@ -1896,7 +1864,7 @@ This is not meant to replace `git log`; it is the high-signal development histor
 
 # PART XX — WHAT NOT TO DO NEXT
 
-## 69. Avoid these distractions before lap timing unless a blocker appears
+## 69. Avoid these distractions before the full macOS workflow passes unless a blocker appears
 
 Do not immediately:
 
@@ -1921,9 +1889,9 @@ The project has reached a point where **product capability should now lead archi
 
 ## 70. Exact current checkpoint
 
-At product-code baseline `0749eff31c87698a737cc62a1b54bd2fc9d1fb2c`:
+At product-code baseline `3be684ee45b8c4b9c074f58ac1abc7bc7af0e8fc`:
 
-### Working / considered stable enough for next product work
+### Present in the current codebase
 
 - native Qt editor;
 - VBO parsing;
@@ -1940,7 +1908,14 @@ At product-code baseline `0749eff31c87698a737cc62a1b54bd2fc9d1fb2c`:
 - corrected QML Canvas offscreen readiness;
 - persistent diagnostics/logging;
 - bounded external inputs;
-- current manual application export with the accepted HUD.
+- current manual application export with the accepted HUD;
+- source-defined timing-gate and derived `LapSession` implementation;
+- Analysis lap table and central lap-start seek;
+- live best-lap comparison and six independent lap/speed tiles;
+- native macOS unsaved-changes dialog;
+- write-side project/recovery validation and guarded project-source startup;
+- bounded widget geometry and rotation-matched editor interaction;
+- visible main/Analysis decoder failures.
 
 ### Explicitly not complete
 
@@ -1952,12 +1927,15 @@ At product-code baseline `0749eff31c87698a737cc62a1b54bd2fc9d1fb2c`:
 - multi-chapter GoPro timeline;
 - interactive maps;
 - advanced analysis tools;
-- lap/session timing;
+- runtime acceptance of the September lap/session and comparison-widget implementation;
+- deterministic lap parser/detector/controller/QML coverage;
+- final-passage handling when telemetry ends inside the gate corridor;
+- Current presentation before the first completed lap;
 - future widget package/editor architecture.
 
 ### Immediate next action
 
-Wait for the real next track-session data, ingest it as a private development fixture, characterize its GPS/timing behavior, then design and implement **Lap Timing & Session Analysis** against that evidence.
+On the macOS development machine, add the deferred deterministic coverage, fix the two known lap-state edge cases, then run the private Jastrząb fixture and the complete product workflow. Do not claim the new lap features work at runtime before that gate passes.
 
 ---
 
@@ -1965,7 +1943,7 @@ Wait for the real next track-session data, ingest it as a private development fi
 
 If a future development session starts with only this file, the minimum correct mental model is:
 
-> VBOOverlay is FlappedEar Telemetry, a native Qt 6/C++20/QML motorsport telemetry editor. Preview/export share `TelemetryScene.qml`. Telemetry is time-based, missing != zero, brake is never fabricated, HR comes from VBO. Projects v2 are atomic and portable; recovery is separate unsaved state. Export is a deliberately staged QRhi -> premultiplied FFV1/BGRA -> FFmpeg HEVC/AAC pipeline with exact rational CFR. Main10 requires explicit overlay unpremultiplication/straight-alpha YUV10 composition. Offscreen export requires a deterministic Qt Quick preparation frame before frame zero so Canvas widgets paint. Current product-code baseline is `0749eff`; the current accepted HUD uses tach, speed, pedals, three temperatures, HR, F1 radar and G-force bar. The large manifest/`.fewidget` widget-runtime idea was discussed but explicitly deferred. The next product milestone is lap timing/session analysis using real data from the next track day. macOS primary tree is source of truth; Windows is validation-only; no cloud CI; never run qmllint; do not push unless explicitly asked; do not claim validation you did not actually run.
+> VBOOverlay is FlappedEar Telemetry, a native Qt 6/C++20/QML motorsport telemetry editor. Preview/export share `TelemetryScene.qml`. Telemetry is time-based, missing != zero, brake is never fabricated, and HR comes from VBO. Projects v2 are atomic and portable; recovery is separate unsaved state. Export is a staged QRhi -> premultiplied FFV1/BGRA -> FFmpeg HEVC/AAC pipeline with exact rational CFR. Main10 requires explicit overlay unpremultiplication/straight-alpha YUV10 composition. The current code baseline is `3be684e`. Source Start gates, derived laps/traces, Analysis lap seeking, live best-lap comparison, and six independent lap/speed tiles are implemented but not yet runtime-validated. Two known lap edge cases remain: telemetry-end cluster finalization and Current before a completed lap. The `.fewidget` runtime remains deferred. macOS is the primary validation environment; Windows coverage is limited; cloud CI is disabled. ChatGPT Work publishes completed commits under the user's standing authorization, while locally run Codex does not push without an explicit request. Never claim validation that did not run.
 
 ---
 

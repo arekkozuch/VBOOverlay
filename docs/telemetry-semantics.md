@@ -65,3 +65,13 @@ Track construction ignores non-finite latitude/longitude values, latitudes outsi
 The normalized track outline is static for the lifetime of an assigned geometry and is cached for QML rendering. Time changes update only the independently rendered current-position marker. Replacing or clearing geometry invalidates the cached outline and marker together; this rendering lifecycle does not alter GPS lookup or missing-data semantics.
 
 RaceChrono coordinates supplied as signed total arc-minutes are converted to degrees when their magnitude identifies that representation.
+
+## Lap timing and comparison values
+
+RaceChrono `[laptiming]` records are parsed as bounded source telemetry metadata. Malformed gates add a bounded warning but do not make otherwise valid channel data fail. Source order is retained, but the current derivation proceeds only when exactly one valid Start gate is available.
+
+`LapTiming` operates on aligned raw latitude/longitude samples and raw telemetry timestamps. It does not use video frames, export cadence, overlay smoothing, or QML interpolation. A finite-segment corridor groups nearby samples into one candidate passage; ground speed, motion normal to the gate, direction, source gaps, re-arming, cluster duration, and a refractory interval filter invalid or duplicate candidates. Complete laps exist only between consecutive accepted same-direction passages. Fastest-lap selection and deltas use unrounded durations, and lap-start seeking applies the central inverse synchronization transform in C++.
+
+`TelemetryRenderContext::lapTiming` is the presentation boundary for the live tiles. It compares the current GPS position with a bounded time-local search of the best completed lap trace. Current and reference speed use the same presentation interpolation, stale-gap handling, and 150 ms smoothing as the ordinary Speed widget; the underlying passage times and lap durations remain raw.
+
+Current implementation status is provisional until the deferred validation pass. Two known edge cases remain open: an active candidate cluster is not finalized when a recording ends inside the gate corridor, and the live Current state is unavailable until the derived session contains at least one complete lap.

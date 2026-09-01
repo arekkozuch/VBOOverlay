@@ -49,10 +49,14 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 
 ### Lap timing and session analysis
 
-- [ ] Parse bounded source-defined RaceChrono timing gates without making malformed timing metadata fatal to otherwise valid telemetry.
-- [ ] Derive robust same-direction Start passages, complete timed laps, and fastest-lap state from raw GPS and raw telemetry time.
-- [ ] Add a minimal lap list and lap-start seek to the existing Analysis workspace, backed by deterministic tests and optional private-fixture validation.
-- [ ] Later: manual Start/Finish override, sectors/theoretical best, reference-lap comparisons and deltas, and lap overlays.
+- [x] Parse bounded source-defined RaceChrono timing gates without making malformed timing metadata fatal to otherwise valid telemetry.
+- [x] Derive same-direction Start passages, complete timed laps, lap traces, and fastest-lap state from raw GPS and raw telemetry time.
+- [x] Add a minimal lap list and lap-start seek to the existing Analysis workspace.
+- [x] Add live best-lap comparison plus independent Best, Current, and Delta tiles for lap time and speed.
+- [ ] Finalize an active Start-gate cluster when telemetry ends inside the corridor, so the last completed lap is not omitted.
+- [ ] Publish Current state after the first accepted Start passage instead of requiring an already completed lap.
+- [ ] Add the deferred deterministic parser/detector/controller/QML coverage and validate the private Jastrząb fixture on the macOS Qt toolchain.
+- [ ] Later: manual Start/Finish override, sectors/theoretical best, distance-normalized comparison charts, and automatic sectors.
 
 ### Multi-chapter GoPro timelines
 

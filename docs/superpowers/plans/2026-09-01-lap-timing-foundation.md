@@ -1,6 +1,6 @@
 # Lap Timing Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** Production tasks 1–4 are implemented on `main`. This is a historical execution record, not an instruction to invoke Superpowers. Automated/macOS/private-fixture validation remains deferred.
 
 **Goal:** Turn RaceChrono Start metadata and raw GPS samples into a usable lap list in the existing Analysis workspace, without requiring video, changing projects, or touching export.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Work directly on `main`; do not create a branch, worktree, or push.
+- Work was completed directly on `main`; publication follows the active environment's repository policy.
 - Preserve raw, time-based telemetry semantics. Never use FPS, video frames, render smoothing, or export cadence for lap detection.
 - Missing GPS remains missing and breaks continuity; it is never interpolated across a source gap.
 - Malformed or absent `[laptiming]` data must not prevent ordinary VBO loading.
@@ -42,7 +42,7 @@
 - Produces `TelemetrySession::timingGates` in original source order.
 - Preserves current channel coordinate normalization through the same helper.
 
-- [ ] **Step 1: Add shared coordinate and timing-gate value types**
+- [x] **Step 1: Add shared coordinate and timing-gate value types**
 
 ```cpp
 enum class CoordinateAxis { Latitude, Longitude };
@@ -68,7 +68,7 @@ struct TimingGate {
 };
 ```
 
-- [ ] **Step 2: Extract coordinate normalization and local projection**
+- [x] **Step 2: Extract coordinate normalization and local projection**
 
 ```cpp
 std::optional<double> normalizeCoordinateDegrees(CoordinateAxis axis, double value);
@@ -77,11 +77,11 @@ MetricPoint projectCoordinate(const GeoCoordinate &coordinate, const GeoCoordina
 
 Return no value for non-finite or out-of-range degrees. Convert signed total arc-minutes only within ±5400 latitude and ±10800 longitude. Keep projection east/north; `TrackGeometry` alone negates north for screen Y.
 
-- [ ] **Step 3: Parse `[laptiming]` independently from metadata**
+- [x] **Step 3: Parse `[laptiming]` independently from metadata**
 
 Parse exactly one name token, four finite numeric coordinate tokens in longitude/latitude order, and at most 4096 characters of trailing description. Classify `Start` and `Split` case-insensitively, retain unknown names, reject identical endpoints, cap accepted gates at 128, and add bounded parser warnings without failing telemetry.
 
-- [ ] **Step 4: Store gates on the parsed telemetry session**
+- [x] **Step 4: Store gates on the parsed telemetry session**
 
 ```cpp
 class TelemetrySession {
@@ -92,7 +92,7 @@ public:
 
 Do not add the gates to project serialization or source fingerprints.
 
-- [ ] **Step 5: Review the focused diff and commit**
+- [x] **Step 5: Review the focused diff and commit**
 
 ```bash
 git diff --check
@@ -113,7 +113,7 @@ git commit -m "feat: parse RaceChrono timing gates"
 - Consumes `TelemetrySession`, one normalized `TimingGate`, `LapDetectionOptions`, and `CancellationCheck`.
 - Produces `LapSession detectLaps(...)` containing accepted passes, complete laps, fastest-lap index, status, and bounded diagnostics.
 
-- [ ] **Step 1: Add the immutable result model**
+- [x] **Step 1: Add the immutable result model**
 
 ```cpp
 enum class LapSessionStatus {
@@ -144,23 +144,23 @@ struct TimedLap {
 };
 ```
 
-- [ ] **Step 2: Implement bounded finite-segment geometry**
+- [x] **Step 2: Implement bounded finite-segment geometry**
 
 Calculate closest points between the vehicle segment and the finite gate segment, returning distance plus fractions on both segments. Reject non-finite geometry and gate lengths outside 1–200 m.
 
-- [ ] **Step 3: Implement the passage state machine**
+- [x] **Step 3: Implement the passage state machine**
 
 Use the specified defaults: 5 m inner corridor, 10 m outer corridor, 2 m/s ground speed, 2 m/s absolute normal speed, 0.10 normal ratio, 1 s refractory interval, and 5 s maximum cluster duration. Start disarmed, discard clusters interrupted by gaps, require an outside observation before re-arming, and establish accepted direction from the first qualified passage.
 
-- [ ] **Step 4: Enforce cadence, cancellation, and resource bounds**
+- [x] **Step 4: Enforce cadence, cancellation, and resource bounds**
 
 Use aligned raw latitude/longitude timestamps, `telemetryGapThreshold()`, cancellation checks at least every 256 segments, O(1) active-cluster state, and a hard maximum of 100000 accepted passes.
 
-- [ ] **Step 5: Derive complete laps and fastest state**
+- [x] **Step 5: Derive complete laps and fastest state**
 
 For `N` accepted passages, create exactly `max(0, N - 1)` positive-duration laps. Choose the earliest lap on an exact fastest-time tie and compute deltas from unrounded durations.
 
-- [ ] **Step 6: Review the focused diff and commit**
+- [x] **Step 6: Review the focused diff and commit**
 
 ```bash
 git diff --check
@@ -184,7 +184,7 @@ git commit -m "feat: derive laps from raw telemetry"
 - Produces `videoMillisecondsForTelemetryTime(double)` for safe lap-start seeking.
 - Extends `VboLoadResult` with one `LapSession` committed with its matching session and track geometry.
 
-- [ ] **Step 1: Add the safe inverse sync boundary**
+- [x] **Step 1: Add the safe inverse sync boundary**
 
 ```cpp
 std::optional<double> telemetryToVideoTime(double telemetryTime, const SyncTransform &transform);
@@ -192,23 +192,23 @@ std::optional<double> telemetryToVideoTime(double telemetryTime, const SyncTrans
 
 Return no value when input or transform fields are non-finite or `timeScale <= 0`.
 
-- [ ] **Step 2: Run detection in the existing VBO worker**
+- [x] **Step 2: Run detection in the existing VBO worker**
 
 Select a Start gate only when exactly one parsed Start exists. Return explicit no-source or ambiguous statuses otherwise. Call `detectLaps()` under the existing VBO cancellation token and store the result on `VboLoadResult`.
 
-- [ ] **Step 3: Commit and clear lap state atomically**
+- [x] **Step 3: Commit and clear lap state atomically**
 
 Assign `m_lapSession` only in the same accepted-generation path that assigns the parsed session and track geometry. Reset it whenever committed telemetry is cleared or replaced. Do not call `markPersistentChange()` for derived state.
 
-- [ ] **Step 4: Expose bounded QML summaries**
+- [x] **Step 4: Expose bounded QML summaries**
 
 Each summary map contains `number`, `startTelemetryTime`, `durationSeconds`, `deltaToBestSeconds`, and `isBest`. Every non-available status exposes an empty list and one concise status string.
 
-- [ ] **Step 5: Expose safe lap-start conversion**
+- [x] **Step 5: Expose safe lap-start conversion**
 
 Convert telemetry seconds centrally, reject negative or non-finite video time, reject times after the actual loaded-media boundary when known, and return `-1` to QML when seeking is unavailable.
 
-- [ ] **Step 6: Review the focused diff and commit**
+- [x] **Step 6: Review the focused diff and commit**
 
 ```bash
 git diff --check
@@ -230,23 +230,23 @@ git commit -m "feat: publish derived lap timing"
 - Consumes `appController.lapTimingStatus`, `appController.lapSummaries`, and `appController.videoMillisecondsForTelemetryTime()`.
 - Emits `seekRequested(real milliseconds)` through the existing Analysis path.
 
-- [ ] **Step 1: Add a compact bounded lap panel**
+- [x] **Step 1: Add a compact bounded lap panel**
 
 Show columns `LAP`, `TIME`, and `DELTA`; format durations to one decimal place; show `BEST` in green for the fastest row and a signed delta for all other rows. Keep selection styling independent from fastest state.
 
-- [ ] **Step 2: Add explicit no-data states**
+- [x] **Step 2: Add explicit no-data states**
 
 Show one concise status for missing timing metadata, ambiguous Start gates, invalid gate, unusable GPS, no accepted passes, or insufficient passes. Do not hide charts or the track map.
 
-- [ ] **Step 3: Route activation to main playback**
+- [x] **Step 3: Route activation to main playback**
 
 On row activation, call the controller conversion for `startTelemetryTime`; emit seek only for a non-negative result. Do not perform sync arithmetic in QML and do not create another media player.
 
-- [ ] **Step 4: Mount the panel above existing charts**
+- [x] **Step 4: Mount the panel above existing charts**
 
 Keep the current Analysis workspace layout, decoder lifetime, chart behavior, and minimum dimensions. The panel receives a bounded preferred height and does not turn the existing chart area into an unreachable nested scroller.
 
-- [ ] **Step 5: Review the focused diff and commit**
+- [x] **Step 5: Review the focused diff and commit**
 
 ```bash
 git diff --check

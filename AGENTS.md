@@ -19,7 +19,9 @@
 - Always test synchronization changes with deterministic and ambiguous signals.
 - Do not commit API keys, secrets, user paths, generated video, or build artifacts.
 - Finish every completed implementation or fix with a focused local commit and a descriptive commit
-  message. Do not push or synchronize it unless the user explicitly asks.
+  message. In ChatGPT Work/shared-repository sessions, push each completed commit when the user has
+  authorized automatic publication for that session. A locally run Codex must not push or synchronize
+  unless the user explicitly asks it to do so.
 - Add no unrelated dependencies. Verify current versions, compatibility, maintenance, and licenses first.
 - Do not implement roadmap features unless requested.
 - Do not claim functionality works without running the relevant command or integration fixture.
