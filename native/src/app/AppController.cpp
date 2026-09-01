@@ -502,6 +502,47 @@ QVariantMap AppController::currentTrackPoint() const
 {
     return m_previewRenderContext.currentTrackPoint();
 }
+QString AppController::lapTimingStatus() const
+{
+    if (!m_session) return QStringLiteral("Open a VBO file for lap timing");
+    switch (m_lapSession.status) {
+    case LapSessionStatus::Available:
+        return QStringLiteral("%1 complete lap%2")
+            .arg(m_lapSession.timedLaps.size())
+            .arg(m_lapSession.timedLaps.size() == 1 ? QString() : QStringLiteral("s"));
+    case LapSessionStatus::NoSourceStartGate:
+        return QStringLiteral("No Start gate in telemetry");
+    case LapSessionStatus::AmbiguousSourceStartGate:
+        return QStringLiteral("Multiple Start gates in telemetry");
+    case LapSessionStatus::InvalidGate:
+        return QStringLiteral("Start gate geometry is invalid");
+    case LapSessionStatus::NoUsableGps:
+        return QStringLiteral("No usable GPS for lap timing");
+    case LapSessionStatus::NoAcceptedPasses:
+        return QStringLiteral("No Start-line passages detected");
+    case LapSessionStatus::InsufficientPasses:
+        return QStringLiteral("One Start-line passage detected; no complete lap");
+    }
+    return QStringLiteral("Lap timing unavailable");
+}
+QVariantList AppController::lapSummaries() const
+{
+    if (m_lapSession.status != LapSessionStatus::Available) return {};
+    QVariantList summaries;
+    summaries.reserve(m_lapSession.timedLaps.size());
+    for (qsizetype index = 0; index < m_lapSession.timedLaps.size(); ++index) {
+        const TimedLap &lap = m_lapSession.timedLaps[index];
+        summaries.append(QVariantMap{
+            {QStringLiteral("number"), lap.number},
+            {QStringLiteral("startTelemetryTime"), lap.startTelemetryTime},
+            {QStringLiteral("durationSeconds"), lap.durationSeconds},
+            {QStringLiteral("deltaToBestSeconds"), lap.deltaToBestSeconds},
+            {QStringLiteral("isBest"), m_lapSession.fastestLapIndex
+                    && *m_lapSession.fastestLapIndex == index},
+        });
+    }
+    return summaries;
+}
 QStringList AppController::analysisChannels() const { return m_analysisChannels; }
 bool AppController::analysisVisible() const { return m_analysisVisible; }
 int AppController::analysisWindowX() const { return m_settings.value("analysis/windowX", -1).toInt(); }
@@ -737,6 +778,19 @@ void AppController::startVboLoad(
             }
             result.geometry = buildTrackGeometry(
                 result.session, [cancellation] { return cancellation->load(); });
+            const auto cancelled = [cancellation] { return cancellation->load(); };
+            QVector<TimingGate> startGates;
+            for (const TimingGate &gate : result.session.timingGates) {
+                if (gate.type == TimingGateType::Start) startGates.append(gate);
+            }
+            if (startGates.isEmpty()) {
+                result.lapSession.status = LapSessionStatus::NoSourceStartGate;
+            } else if (startGates.size() > 1) {
+                result.lapSession.status = LapSessionStatus::AmbiguousSourceStartGate;
+            } else {
+                result.lapSession = detectLaps(
+                    result.session, startGates.constFirst(), {}, cancelled);
+            }
             result.fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(
                 path, result.session);
             result.success = !cancellation->load();
@@ -781,6 +835,7 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     AppLog::info(QStringLiteral("VBO load succeeded: %1").arg(result.path));
     m_session = std::make_unique<TelemetrySession>(result.session);
     m_trackGeometry = result.geometry;
+    m_lapSession = result.lapSession;
     m_trackPoints = trackPointsFor(m_trackGeometry);
     m_telemetryPath = result.path;
     m_vboReference = ProjectSourceReferenceCodec::forLoadedSource(
@@ -921,6 +976,7 @@ void AppController::performClearProject()
     m_telemetryPath.clear();
     m_vboReference = {};
     m_session.reset();
+    m_lapSession = {};
     m_trackGeometry = {};
     m_previewRenderContext.setSession(nullptr);
     m_previewRenderContext.setTrackGeometry(nullptr);
@@ -1021,6 +1077,19 @@ QVariantMap AppController::telemetrySeries(
         {"maximum", maximum},
         {"unit", channel == m_session->channels.cend() ? QString() : channel->unit},
     };
+}
+
+qint64 AppController::videoMillisecondsForTelemetryTime(const double telemetryTime) const
+{
+    if (!m_exportSourceInfo.videoSize.isValid()) return -1;
+    const auto videoTime = telemetryToVideoTime(telemetryTime, m_sync);
+    if (!videoTime || *videoTime < 0.0) return -1;
+    const double milliseconds = *videoTime * 1'000.0;
+    if (!std::isfinite(milliseconds)
+        || milliseconds > static_cast<double>(previewEndPositionMilliseconds())) {
+        return -1;
+    }
+    return static_cast<qint64>(std::llround(milliseconds));
 }
 
 void AppController::toggleAnalysisChannel(const QString &channelName)
@@ -1295,6 +1364,7 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
                                              : QStringLiteral("loading");
     m_telemetryPath.clear();
     m_session.reset();
+    m_lapSession = {};
     m_trackGeometry = {};
     m_trackPoints = trackPointsFor(m_trackGeometry);
     m_vboLoadState = result.vboReference.isEmpty() ? QStringLiteral("idle")

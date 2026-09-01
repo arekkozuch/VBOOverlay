@@ -227,4 +227,15 @@ double videoToTelemetryTime(const double videoTime, const SyncTransform &transfo
     return videoTime * transform.timeScale + transform.offset;
 }
 
+std::optional<double> telemetryToVideoTime(
+    const double telemetryTime, const SyncTransform &transform)
+{
+    if (!std::isfinite(telemetryTime) || !std::isfinite(transform.offset)
+        || !std::isfinite(transform.timeScale) || transform.timeScale <= 0.0) {
+        return std::nullopt;
+    }
+    const double videoTime = (telemetryTime - transform.offset) / transform.timeScale;
+    return std::isfinite(videoTime) ? std::optional<double>(videoTime) : std::nullopt;
+}
+
 } // namespace FlappedEar

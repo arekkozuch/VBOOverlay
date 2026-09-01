@@ -1,5 +1,6 @@
 #pragma once
 
+#include "telemetry/LapTiming.h"
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
@@ -62,6 +63,8 @@ class AppController final : public QObject {
     Q_PROPERTY(WidgetModel *widgetModel READ widgetModel CONSTANT)
     Q_PROPERTY(QVariantList trackPoints READ trackPoints NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY liveValuesChanged)
+    Q_PROPERTY(QString lapTimingStatus READ lapTimingStatus NOTIFY telemetryChanged)
+    Q_PROPERTY(QVariantList lapSummaries READ lapSummaries NOTIFY telemetryChanged)
     Q_PROPERTY(QStringList analysisChannels READ analysisChannels WRITE setAnalysisChannels NOTIFY analysisChanged)
     Q_PROPERTY(bool analysisVisible READ analysisVisible WRITE setAnalysisVisible NOTIFY analysisChanged)
     Q_PROPERTY(int analysisWindowX READ analysisWindowX CONSTANT)
@@ -125,6 +128,8 @@ public:
     [[nodiscard]] WidgetModel *widgetModel();
     [[nodiscard]] QVariantList trackPoints() const;
     [[nodiscard]] QVariantMap currentTrackPoint() const;
+    [[nodiscard]] QString lapTimingStatus() const;
+    [[nodiscard]] QVariantList lapSummaries() const;
     [[nodiscard]] QStringList analysisChannels() const;
     [[nodiscard]] bool analysisVisible() const;
     [[nodiscard]] int analysisWindowX() const;
@@ -163,6 +168,7 @@ public:
     Q_INVOKABLE QVariant telemetryValue(const QString &channelName) const;
     Q_INVOKABLE QVariantMap telemetrySeries(
         const QString &channelName, double videoStart, double videoEnd, int maximumPoints) const;
+    Q_INVOKABLE qint64 videoMillisecondsForTelemetryTime(double telemetryTime) const;
     Q_INVOKABLE void toggleAnalysisChannel(const QString &channelName);
     Q_INVOKABLE void requestNewProject();
     Q_INVOKABLE void requestOpenProject(const QUrl &url);
@@ -269,6 +275,7 @@ private:
         QString path;
         TelemetrySession session;
         TrackGeometry geometry;
+        LapSession lapSession;
         QString error;
         quint64 generation = 0;
         QJsonObject fingerprint;
@@ -346,6 +353,7 @@ private:
     ProjectSourceReference m_vboReference;
     QString m_statusText = QStringLiteral("Open a video and VBO to begin.");
     std::unique_ptr<TelemetrySession> m_session;
+    LapSession m_lapSession;
     WidgetModel m_widgetModel;
     TrackGeometry m_trackGeometry;
     TelemetryRenderContext m_previewRenderContext;

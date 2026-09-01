@@ -63,6 +63,8 @@ public:
 };
 
 [[nodiscard]] double videoToTelemetryTime(double videoTime, const SyncTransform &transform);
+[[nodiscard]] std::optional<double> telemetryToVideoTime(
+    double telemetryTime, const SyncTransform &transform);
 [[nodiscard]] double telemetryGapThreshold(
     const TelemetryChannel &channel, double minimumSeconds = 0.0);
 
