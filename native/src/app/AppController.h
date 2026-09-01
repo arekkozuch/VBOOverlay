@@ -201,6 +201,7 @@ public:
     Q_INVOKABLE qint64 clampPreviewPositionMilliseconds(qint64 requestedMilliseconds) const;
     Q_INVOKABLE QString previewTimecodeForPositionMilliseconds(qint64 positionMilliseconds) const;
     Q_INVOKABLE QString previewEndTimecode() const;
+    Q_INVOKABLE void reportPlaybackError(const QString &message);
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void cancelExportAndQuit();
     Q_INVOKABLE void dismissExportProgress();

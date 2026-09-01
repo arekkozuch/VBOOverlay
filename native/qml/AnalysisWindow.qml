@@ -79,6 +79,10 @@ Window {
                     play();
             }
         }
+        onErrorOccurred: function(error, errorString) {
+            pause();
+            appController.reportPlaybackError(errorString);
+        }
     }
 
     Shortcut { sequence: "Space"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.togglePlaybackRequested() }
@@ -169,6 +173,16 @@ Window {
                         visible: !root.videoSource.toString()
                         text: qsTr("No video loaded")
                         color: "#657386"
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        width: Math.max(0, parent.width - 32)
+                        visible: analysisPlayer.error !== MediaPlayer.NoError
+                        text: analysisPlayer.errorString || qsTr("The selected video could not be decoded.")
+                        color: "#ff8f99"
+                        font.pixelSize: 11
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
                     }
                 }
 

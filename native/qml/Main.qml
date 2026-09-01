@@ -1383,6 +1383,11 @@ ApplicationWindow {
                 position = appController.previewEndPositionMilliseconds();
             }
         }
+        onErrorOccurred: function(error, errorString) {
+            pause();
+            appController.reportPlaybackError(errorString);
+            window.fullScreenControlsVisible = true;
+        }
     }
 
     Loader {
@@ -1885,6 +1890,40 @@ ApplicationWindow {
                                 selectedIndices: window.selectedWidgetIndices
                                 onSelectionRequested: (index, additive) => window.selectWidget(index, additive)
                                 onFullScreenRequested: window.toggleFullScreen()
+                            }
+                            Rectangle {
+                                visible: mediaPlayer.error !== MediaPlayer.NoError
+                                z: 10
+                                x: videoViewport.x + (videoViewport.width - width) / 2
+                                y: videoViewport.y + (videoViewport.height - height) / 2
+                                width: Math.max(0, Math.min(480, videoViewport.width - 32))
+                                height: playbackErrorContent.implicitHeight + 24
+                                radius: 10
+                                color: "#e6111720"
+                                border.color: "#ef4f5f"
+
+                                Column {
+                                    id: playbackErrorContent
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.margins: 12
+                                    spacing: 6
+                                    Label {
+                                        width: parent.width
+                                        text: qsTr("Video playback failed")
+                                        color: "#ffffff"
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Label {
+                                        width: parent.width
+                                        text: mediaPlayer.errorString || qsTr("The selected video could not be decoded.")
+                                        color: "#ffb9bf"
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
                             }
                             Rectangle {
                                 id: fullScreenTransport

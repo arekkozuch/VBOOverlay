@@ -477,6 +477,15 @@ QString AppController::previewEndTimecode() const
     const auto range = ExportEngine::fullVideoFrameRange(m_exportSourceInfo, rate);
     return range ? ExportEngine::formatSmpteTimecode(range->lastFrame, rate) : QString();
 }
+void AppController::reportPlaybackError(const QString &message)
+{
+    const QString normalized = message.trimmed();
+    const QString detail = normalized.isEmpty()
+        ? QStringLiteral("The selected video could not be decoded.")
+        : normalized.left(1'024);
+    AppLog::error(QStringLiteral("Video playback failed: %1").arg(detail));
+    setStatus(QStringLiteral("Video playback failed: %1").arg(detail));
+}
 qint64 AppController::recommendedExportBitrate(const int width, const int height, const qint64 numerator,
                                                const qint64 denominator, const QString &quality) const
 {
