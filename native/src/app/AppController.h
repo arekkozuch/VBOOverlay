@@ -83,6 +83,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QString pendingDestructiveAction READ pendingDestructiveAction NOTIFY destructiveActionChanged)
     Q_PROPERTY(QString videoLoadState READ videoLoadState NOTIFY sourceLoadStateChanged)
     Q_PROPERTY(QString vboLoadState READ vboLoadState NOTIFY sourceLoadStateChanged)
+    Q_PROPERTY(qint64 previewEndPositionMilliseconds READ previewEndPositionMilliseconds NOTIFY previewMetadataChanged)
+    Q_PROPERTY(QString previewEndTimecode READ previewEndTimecode NOTIFY previewMetadataChanged)
     Q_PROPERTY(bool projectLoading READ projectLoading NOTIFY projectLoadChanged)
     Q_PROPERTY(QString projectLoadStage READ projectLoadStage NOTIFY projectLoadChanged)
     Q_PROPERTY(QString projectLoadError READ projectLoadError NOTIFY projectLoadChanged)
@@ -237,6 +239,7 @@ signals:
     void documentStateChanged();
     void destructiveActionChanged();
     void sourceLoadStateChanged();
+    void previewMetadataChanged();
     void projectLoadChanged();
     void recoveryChanged();
     void sourceMismatchChanged();

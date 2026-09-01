@@ -507,7 +507,7 @@ ApplicationWindow {
         if (mediaPlayer.playbackState === MediaPlayer.PlayingState)
             mediaPlayer.pause();
         else {
-            if (mediaPlayer.position >= appController.previewEndPositionMilliseconds())
+            if (mediaPlayer.position >= appController.previewEndPositionMilliseconds)
                 mediaPlayer.position = 0;
             mediaPlayer.play();
         }
@@ -586,7 +586,7 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+Left"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(-30000) }
     Shortcut { sequence: "Shift+Right"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: window.seekPlayback(30000) }
     Shortcut { sequence: "Home"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = 0; window.showFullScreenControls(); } }
-    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = appController.previewEndPositionMilliseconds(); window.showFullScreenControls(); } }
+    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !window.playbackShortcutBlocked(); onActivated: { mediaPlayer.position = appController.previewEndPositionMilliseconds; window.showFullScreenControls(); } }
     Shortcut {
         sequence: "Ctrl+E"
         context: Qt.WindowShortcut
@@ -1378,9 +1378,16 @@ ApplicationWindow {
             appController.playbackTime = position / 1000.0;
         }
         onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.LoadedMedia) {
+                // AVFoundation does not reliably submit the initial paused frame until it
+                // receives a position request. Keep the current position (normally zero),
+                // bounded by the probe-derived final frame, so the editor and fullscreen
+                // preview have the same first-frame initialization.
+                position = appController.clampPreviewPositionMilliseconds(position);
+            }
             if (mediaStatus === MediaPlayer.EndOfMedia) {
                 pause();
-                position = appController.previewEndPositionMilliseconds();
+                position = appController.previewEndPositionMilliseconds;
             }
         }
         onErrorOccurred: function(error, errorString) {
@@ -1398,7 +1405,7 @@ ApplicationWindow {
                 videoSource: appController.videoSource
                 playbackPosition: mediaPlayer.position
                 playbackRunning: mediaPlayer.playbackState === MediaPlayer.PlayingState
-                mediaDuration: appController.previewEndPositionMilliseconds()
+                mediaDuration: appController.previewEndPositionMilliseconds
                 onSeekRequested: milliseconds => mediaPlayer.position = appController.clampPreviewPositionMilliseconds(milliseconds)
                 onTogglePlaybackRequested: window.togglePlayback()
             }
@@ -1822,7 +1829,10 @@ ApplicationWindow {
                             }
                             Item {
                                 id: videoViewport
-                                property var geometry: appController.previewViewport(stageFrame.width, stageFrame.height)
+                                property var geometry: {
+                                    appController.videoSource;
+                                    return appController.previewViewport(stageFrame.width, stageFrame.height);
+                                }
                                 x: geometry.x
                                 y: geometry.y
                                 width: geometry.width
@@ -1960,7 +1970,7 @@ ApplicationWindow {
                                         id: fullScreenTimeline
                                         Layout.fillWidth: true
                                         from: 0
-                                        to: Math.max(1, appController.previewEndPositionMilliseconds())
+                                        to: Math.max(1, appController.previewEndPositionMilliseconds)
                                         value: mediaPlayer.position
                                         onPressedChanged: {
                                             window.fullScreenScrubbing = pressed;
@@ -1977,7 +1987,7 @@ ApplicationWindow {
                                         }
                                     }
                                     Label {
-                                        text: appController.previewEndTimecode()
+                                        text: appController.previewEndTimecode
                                         color: "#9aa8b8"
                                         font.family: "Menlo"
                                         font.pixelSize: 10
@@ -2020,7 +2030,7 @@ ApplicationWindow {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     from: 0
-                                    to: Math.max(1, appController.previewEndPositionMilliseconds())
+                                    to: Math.max(1, appController.previewEndPositionMilliseconds)
                                     value: mediaPlayer.position
                                     onMoved: mediaPlayer.position = appController.clampPreviewPositionMilliseconds(value)
                                 }
@@ -2028,9 +2038,9 @@ ApplicationWindow {
                                     model: window.selectedWidgetCues()
                                     Rectangle {
                                         required property var modelData
-                                        x: Math.max(0, Math.min(parent.width, Number(modelData.start || 0) * 1000 / Math.max(1, appController.previewEndPositionMilliseconds()) * parent.width))
+                                        x: Math.max(0, Math.min(parent.width, Number(modelData.start || 0) * 1000 / Math.max(1, appController.previewEndPositionMilliseconds) * parent.width))
                                         y: 1
-                                        width: Math.max(3, Math.min(parent.width - x, Number(modelData.duration || 0) * 1000 / Math.max(1, appController.previewEndPositionMilliseconds()) * parent.width))
+                                        width: Math.max(3, Math.min(parent.width - x, Number(modelData.duration || 0) * 1000 / Math.max(1, appController.previewEndPositionMilliseconds) * parent.width))
                                         height: 4
                                         radius: 2
                                         color: "#55e6a5"
@@ -2039,7 +2049,7 @@ ApplicationWindow {
                                 }
                             }
                             Label {
-                                text: appController.previewEndTimecode()
+                                text: appController.previewEndTimecode
                                 color: "#6f7e90"
                                 font.family: "Menlo"
                                 font.pixelSize: 10

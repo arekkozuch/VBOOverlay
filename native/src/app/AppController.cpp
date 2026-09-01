@@ -818,6 +818,7 @@ void AppController::commitVideoProbe(const VideoProbeResult &result, const bool 
     m_pendingVideoPath.clear();
     m_syncCandidate.clear();
     emit videoSourceChanged();
+    emit previewMetadataChanged();
     emit exportChanged();
     emit syncCandidateChanged();
     emit sourceLoadStateChanged();
@@ -991,6 +992,7 @@ void AppController::performClearProject()
     clearActiveTemplate();
     m_widgetModel.resetDefaults();
     emit videoSourceChanged();
+    emit previewMetadataChanged();
     emit telemetryChanged();
     emit playbackTimeChanged();
     emit syncChanged();
@@ -1407,6 +1409,7 @@ bool AppController::commitProjectLoad(const ProjectLoadResult &result)
         }
     }
     emit videoSourceChanged();
+    emit previewMetadataChanged();
     emit telemetryChanged();
     emit exportChanged();
     emit playbackTimeChanged();
