@@ -81,6 +81,7 @@ private slots:
     void publishesCurrentLapAfterFirstAcceptedPass();
     void publishesAndClearsLapStateWithController();
     void derivesNavigableLapFragmentsAndHotlapExportRange();
+    void routesNewDocumentSaveAsThroughPendingQuit();
     void mapsLapStartTelemetryTimesBackToVideoBounds();
     void rendersAllComparisonTilesInProductionScene();
     void parsesOptionalRealVbo();
@@ -1358,6 +1359,34 @@ void TelemetryTests::derivesNavigableLapFragmentsAndHotlapExportRange()
                                                    hotlap.value(QStringLiteral("inTimecode")).toString(),
                                                    hotlap.value(QStringLiteral("outTimecode")).toString()),
              hotlap.value(QStringLiteral("durationSeconds")).toDouble());
+}
+
+void TelemetryTests::routesNewDocumentSaveAsThroughPendingQuit()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    AppController controller(nullptr, directory.filePath(QStringLiteral("recovery.json")));
+    controller.setSyncOffset(1.0); // A dirty new document has no project path.
+
+    QSignalSpy saveAsSpy(&controller, &AppController::saveAsRequested);
+    QSignalSpy quitSpy(&controller, &AppController::quitApproved);
+    QVERIFY(!controller.saveCurrentProject());
+    QCOMPARE(saveAsSpy.count(), 1);
+
+    controller.requestQuit();
+    QCOMPARE(controller.pendingDestructiveAction(), QStringLiteral("quit"));
+    controller.resolveDestructiveAction(QStringLiteral("save"));
+    QCOMPARE(saveAsSpy.count(), 2);
+    QCOMPARE(controller.pendingDestructiveAction(), QStringLiteral("quit"));
+
+    const QString path = directory.filePath(QStringLiteral("saved-from-quit.fetproject"));
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(path)));
+    QCOMPARE(quitSpy.count(), 1);
+    QVERIFY(QFileInfo::exists(path));
+    QVERIFY(!controller.dirty());
 }
 
 void TelemetryTests::mapsLapStartTelemetryTimesBackToVideoBounds()

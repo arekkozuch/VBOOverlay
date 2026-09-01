@@ -297,7 +297,7 @@ ApplicationWindow {
                 dirtyProjectDialog.close()
         }
         function onSaveAsRequested() {
-            projectSaveDialog.open()
+            window.openProjectSaveDialog()
         }
         function onQuitApproved() {
             window.closeApproved = true
@@ -361,7 +361,7 @@ ApplicationWindow {
             Action {
                 text: qsTr("Save Project As…")
                 shortcut: StandardKey.SaveAs
-                onTriggered: projectSaveDialog.open()
+                onTriggered: window.openProjectSaveDialog()
             }
             Action {
                 text: qsTr("Export…")
@@ -439,6 +439,11 @@ ApplicationWindow {
             exportQuitDialog.open()
         else
             appController.requestQuit()
+    }
+    function openProjectSaveDialog() {
+        // A native macOS FileDialog cannot reliably become modal while the native
+        // Save/Discard/Cancel dialog is still unwinding its button callback.
+        Qt.callLater(() => projectSaveDialog.open())
     }
     function enterFullScreen() {
         if (visibility !== Window.FullScreen)
