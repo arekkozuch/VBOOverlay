@@ -3,6 +3,7 @@
 #include <QtGlobal>
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace FlappedEar {
 
@@ -105,6 +106,59 @@ QVariantMap TelemetryRenderContext::currentTrackPoint() const
     return point ? QVariantMap{{"x", point->x()}, {"y", point->y()}} : QVariantMap();
 }
 
+QVariantMap TelemetryRenderContext::lapTiming() const
+{
+    QVariantMap result{{QStringLiteral("available"), false},
+                       {QStringLiteral("state"), QStringLiteral("unavailable")}};
+    if (m_lapSession.status != LapSessionStatus::Available
+        || m_lapSession.acceptedPasses.size() < 2 || m_lapSession.timedLaps.isEmpty()) {
+        return result;
+    }
+
+    result.insert(QStringLiteral("available"), true);
+    const double currentTime = telemetryTime();
+    const double firstPassTime = m_lapSession.acceptedPasses.constFirst().telemetryTime;
+    if (!std::isfinite(currentTime) || currentTime < firstPassTime) {
+        result.insert(QStringLiteral("state"), QStringLiteral("waiting"));
+        return result;
+    }
+
+    const auto completedEnd = std::upper_bound(
+        m_lapSession.timedLaps.cbegin(), m_lapSession.timedLaps.cend(), currentTime,
+        [](const double time, const TimedLap &lap) { return time < lap.endTelemetryTime; });
+    if (completedEnd != m_lapSession.timedLaps.cbegin()) {
+        const auto bestLap = std::min_element(
+            m_lapSession.timedLaps.cbegin(), completedEnd,
+            [](const TimedLap &left, const TimedLap &right) {
+                return left.durationSeconds < right.durationSeconds;
+            });
+        const TimedLap &lastLap = *(completedEnd - 1);
+        result.insert(QStringLiteral("bestLapSeconds"), bestLap->durationSeconds);
+        result.insert(QStringLiteral("lastLapNumber"), lastLap.number);
+        result.insert(QStringLiteral("lastLapSeconds"), lastLap.durationSeconds);
+        result.insert(QStringLiteral("lastDeltaToBestSeconds"),
+                      lastLap.durationSeconds - bestLap->durationSeconds);
+        result.insert(QStringLiteral("lastLapIsBest"), lastLap.number == bestLap->number);
+    }
+
+    if (m_session && m_session->duration > 0.0 && currentTime > m_session->duration) {
+        result.insert(QStringLiteral("state"), QStringLiteral("finished"));
+        return result;
+    }
+
+    const auto nextPass = std::upper_bound(
+        m_lapSession.acceptedPasses.cbegin(), m_lapSession.acceptedPasses.cend(), currentTime,
+        [](const double time, const GatePass &pass) { return time < pass.telemetryTime; });
+    const qsizetype passIndex = std::distance(
+        m_lapSession.acceptedPasses.cbegin(), nextPass) - 1;
+    const GatePass &currentStart = m_lapSession.acceptedPasses[passIndex];
+    result.insert(QStringLiteral("state"), QStringLiteral("running"));
+    result.insert(QStringLiteral("currentLapNumber"), static_cast<int>(passIndex + 1));
+    result.insert(QStringLiteral("currentElapsedSeconds"),
+                  std::max(0.0, currentTime - currentStart.telemetryTime));
+    return result;
+}
+
 const TelemetrySession *TelemetryRenderContext::session() const { return m_session; }
 SyncTransform TelemetryRenderContext::syncTransform() const { return m_sync; }
 
@@ -131,6 +185,13 @@ void TelemetryRenderContext::setTrackGeometry(const TrackGeometry *geometry)
     }
     ++m_trackRevision;
     emit trackGeometryChanged();
+    emit sourceChanged();
+    emit timeChanged();
+}
+
+void TelemetryRenderContext::setLapSession(const LapSession &lapSession)
+{
+    m_lapSession = lapSession;
     emit sourceChanged();
     emit timeChanged();
 }

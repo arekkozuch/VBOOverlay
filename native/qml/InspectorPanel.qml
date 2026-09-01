@@ -193,13 +193,13 @@ Rectangle {
                             text: qsTr("Telemetry & format")
                         }
                         Label {
-                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             text: qsTr("Source channel")
                             color: "#8b98a8"
                             font.pixelSize: 11
                         }
                         FeComboBox {
-                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "track" && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             model: root.channelModel()
                             currentIndex: Math.max(0, model.indexOf(root.settings.source || qsTr("Automatic")))
@@ -207,7 +207,7 @@ Rectangle {
                         }
 
                         GridLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             Layout.fillWidth: true
                             columns: 2
                             columnSpacing: 8
@@ -305,7 +305,7 @@ Rectangle {
                             }
                         }
                         RowLayout {
-                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
+                            visible: root.selectedWidget.type !== "track" && root.selectedWidget.type !== "pedals" && !root.isGForceWidget && root.selectedWidget.type !== "telemetryOverlay" && root.selectedWidget.type !== "lapTiming" && root.selectedWidget.type !== "retroGrandPrix" && root.selectedWidget.type !== "retroNameplate" && root.selectedWidget.type !== "brandLogo"
                             FeCheckBox {
                                 text: qsTr("Show unit")
                                 checked: root.settings.showUnit ?? true
@@ -315,6 +315,30 @@ Rectangle {
                                 text: qsTr("Clamp")
                                 checked: root.settings.clampValue ?? false
                                 onToggled: root.setSetting("clampValue", checked)
+                            }
+                        }
+
+                        ColumnLayout {
+                            visible: root.selectedWidget.type === "lapTiming"
+                            Layout.fillWidth: true
+                            spacing: 6
+                            SectionTitle {
+                                text: qsTr("Lap timing fields")
+                            }
+                            FeCheckBox {
+                                text: qsTr("Show last lap")
+                                checked: root.settings.showLast ?? true
+                                onToggled: root.setSetting("showLast", checked)
+                            }
+                            FeCheckBox {
+                                text: qsTr("Show best lap")
+                                checked: root.settings.showBest ?? true
+                                onToggled: root.setSetting("showBest", checked)
+                            }
+                            FeCheckBox {
+                                text: qsTr("Show delta to best")
+                                checked: root.settings.showDelta ?? true
+                                onToggled: root.setSetting("showDelta", checked)
                             }
                         }
 

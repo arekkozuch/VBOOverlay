@@ -49,7 +49,8 @@ public:
         const TelemetrySession *session,
         const TrackGeometry *geometry,
         SyncTransform sync,
-        QSize outputSize);
+        QSize outputSize,
+        const LapSession *lapSession = nullptr);
     [[nodiscard]] QImage renderFrame(double sourceVideoTime);
     [[nodiscard]] QString errorString() const;
     [[nodiscard]] QString graphicsApiName() const;

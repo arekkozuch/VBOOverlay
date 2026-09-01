@@ -97,6 +97,11 @@ ApplicationWindow {
             "icon": "▤"
         },
         {
+            "label": "Lap timing",
+            "type": "lapTiming",
+            "icon": "LAP"
+        },
+        {
             "label": "Retro RPM",
             "type": "retroTachometer",
             "icon": "R"

@@ -382,4 +382,28 @@ LapSession detectLaps(
     return result;
 }
 
+LapSession deriveSourceLapSession(
+    const TelemetrySession &session,
+    const LapDetectionOptions &options,
+    const CancellationCheck &cancelled)
+{
+    throwIfCancelled(cancelled);
+    const TimingGate *startGate = nullptr;
+    for (const TimingGate &gate : session.timingGates) {
+        if (gate.type != TimingGateType::Start) continue;
+        if (startGate) {
+            LapSession result;
+            result.status = LapSessionStatus::AmbiguousSourceStartGate;
+            return result;
+        }
+        startGate = &gate;
+    }
+    if (!startGate) {
+        LapSession result;
+        result.status = LapSessionStatus::NoSourceStartGate;
+        return result;
+    }
+    return detectLaps(session, *startGate, options, cancelled);
+}
+
 } // namespace FlappedEar

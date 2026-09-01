@@ -1,5 +1,6 @@
 #pragma once
 
+#include "telemetry/LapTiming.h"
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TrackGeometry.h"
 
@@ -18,6 +19,7 @@ class TelemetryRenderContext final : public QObject {
     Q_PROPERTY(QVariantList trackPoints READ trackPoints NOTIFY trackGeometryChanged)
     Q_PROPERTY(quint64 trackRevision READ trackRevision NOTIFY trackGeometryChanged)
     Q_PROPERTY(QVariantMap currentTrackPoint READ currentTrackPoint NOTIFY timeChanged)
+    Q_PROPERTY(QVariantMap lapTiming READ lapTiming NOTIFY timeChanged)
 
 public:
     explicit TelemetryRenderContext(QObject *parent = nullptr);
@@ -27,11 +29,13 @@ public:
     [[nodiscard]] quint64 trackRevision() const;
     [[nodiscard]] quint64 trackConversionCount() const;
     [[nodiscard]] QVariantMap currentTrackPoint() const;
+    [[nodiscard]] QVariantMap lapTiming() const;
     [[nodiscard]] const TelemetrySession *session() const;
     [[nodiscard]] SyncTransform syncTransform() const;
 
     void setSession(const TelemetrySession *session);
     void setTrackGeometry(const TrackGeometry *geometry);
+    void setLapSession(const LapSession &lapSession);
     void setSyncTransform(SyncTransform transform);
 
     Q_INVOKABLE QVariant telemetryValue(const QString &channelName) const;
@@ -50,6 +54,7 @@ signals:
 private:
     const TelemetrySession *m_session = nullptr;
     const TrackGeometry *m_geometry = nullptr;
+    LapSession m_lapSession;
     QVariantList m_trackPoints;
     SyncTransform m_sync;
     double m_time = 0.0;

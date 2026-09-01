@@ -74,5 +74,9 @@ struct LapSession {
     const TimingGate &startGate,
     const LapDetectionOptions &options = {},
     const CancellationCheck &cancelled = {});
+[[nodiscard]] LapSession deriveSourceLapSession(
+    const TelemetrySession &session,
+    const LapDetectionOptions &options = {},
+    const CancellationCheck &cancelled = {});
 
 } // namespace FlappedEar

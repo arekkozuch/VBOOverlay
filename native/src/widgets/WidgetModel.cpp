@@ -57,7 +57,7 @@ QVariantMap defaultSettings(const QString &type)
 const QStringList widgetTypes = {
     "speed",          "rpm",       "heartRate",       "pedals", "gForce",
     "f1GForceRadar",  "gForceMagnitudeBar", "track", "customValue", "retroCustomValue", "arcGauge", "dialGauge",
-    "telemetryOverlay", "retroGrandPrix", "retroTachometer", "retroGear",
+    "telemetryOverlay", "lapTiming", "retroGrandPrix", "retroTachometer", "retroGear",
     "retroPedal", "retroSpeedArc", "retroNameplate", "brandLogo"};
 
 QPair<double, double> defaultSize(const QString &type)
@@ -91,6 +91,9 @@ QPair<double, double> defaultSize(const QString &type)
     }
     if (type == "telemetryOverlay") {
         return {0.42, 0.12};
+    }
+    if (type == "lapTiming") {
+        return {0.27, 0.14};
     }
     if (type == "retroGrandPrix") {
         return {0.42, 0.61};

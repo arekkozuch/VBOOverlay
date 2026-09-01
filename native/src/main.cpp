@@ -9,6 +9,7 @@
 #include "export/ExportArtifactManifest.h"
 #include "telemetry/VboParser.h"
 #include "telemetry/TrackGeometry.h"
+#include "telemetry/LapTiming.h"
 #include "widgets/WidgetModel.h"
 
 #include <QGuiApplication>
@@ -365,6 +366,11 @@ int exportWorker(const QString &configPath)
         currentMessage = QStringLiteral("Preparing track geometry");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
         const FlappedEar::TrackGeometry geometry = FlappedEar::buildTrackGeometry(session, cancelled);
+        currentOperation = QStringLiteral("deriveLapTiming");
+        currentMessage = QStringLiteral("Deriving lap timing");
+        emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
+        const FlappedEar::LapSession lapSession = FlappedEar::deriveSourceLapSession(
+            session, {}, cancelled);
         const QJsonObject syncJson = config.value("sync").toObject();
         const FlappedEar::SyncTransform sync{
             syncJson.value("offset").toDouble(), syncJson.value("timeScale").toDouble(1.0)};
@@ -385,7 +391,7 @@ int exportWorker(const QString &configPath)
         FlappedEar::TelemetryFrameRenderer renderer;
         const QSize outputSize(config.value("outputWidth").toInt(input.videoSize.width()),
                                config.value("outputHeight").toInt(input.videoSize.height()));
-        if (!renderer.initialize(&widgets, &session, &geometry, sync, outputSize)) {
+        if (!renderer.initialize(&widgets, &session, &geometry, sync, outputSize, &lapSession)) {
             writeExportEvent({{"state", "failed"}, {"error", renderer.errorString()}});
             return EXIT_FAILURE;
         }

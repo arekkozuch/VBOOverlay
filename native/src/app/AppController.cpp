@@ -779,18 +779,7 @@ void AppController::startVboLoad(
             result.geometry = buildTrackGeometry(
                 result.session, [cancellation] { return cancellation->load(); });
             const auto cancelled = [cancellation] { return cancellation->load(); };
-            QVector<TimingGate> startGates;
-            for (const TimingGate &gate : result.session.timingGates) {
-                if (gate.type == TimingGateType::Start) startGates.append(gate);
-            }
-            if (startGates.isEmpty()) {
-                result.lapSession.status = LapSessionStatus::NoSourceStartGate;
-            } else if (startGates.size() > 1) {
-                result.lapSession.status = LapSessionStatus::AmbiguousSourceStartGate;
-            } else {
-                result.lapSession = detectLaps(
-                    result.session, startGates.constFirst(), {}, cancelled);
-            }
+            result.lapSession = deriveSourceLapSession(result.session, {}, cancelled);
             result.fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(
                 path, result.session);
             result.success = !cancellation->load();
@@ -845,6 +834,7 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     m_syncCandidate.clear();
     m_previewRenderContext.setSession(m_session.get());
     m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
+    m_previewRenderContext.setLapSession(m_lapSession);
     reconcileAnalysisChannels();
     emit telemetryChanged();
     emit liveValuesChanged();
@@ -980,6 +970,7 @@ void AppController::performClearProject()
     m_trackGeometry = {};
     m_previewRenderContext.setSession(nullptr);
     m_previewRenderContext.setTrackGeometry(nullptr);
+    m_previewRenderContext.setLapSession({});
     m_trackPoints.clear();
     setAnalysisChannels({});
     setAnalysisVisible(false);
@@ -1372,6 +1363,7 @@ void AppController::commitProjectLoad(const ProjectLoadResult &result)
                                            : QStringLiteral("loading");
     m_previewRenderContext.setSession(nullptr);
     m_previewRenderContext.setTrackGeometry(nullptr);
+    m_previewRenderContext.setLapSession({});
     m_sync = result.sync;
     m_previewRenderContext.setSyncTransform(m_sync);
     m_playbackTime = 0.0;

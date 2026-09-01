@@ -77,7 +77,8 @@ bool TelemetryFrameRenderer::initialize(
     const TelemetrySession *session,
     const TrackGeometry *geometry,
     const SyncTransform sync,
-    const QSize outputSize)
+    const QSize outputSize,
+    const LapSession *lapSession)
 {
     m_error.clear();
     if (QThread::currentThread() != qApp->thread()) {
@@ -91,6 +92,7 @@ bool TelemetryFrameRenderer::initialize(
 
     m_context.setSession(session);
     m_context.setTrackGeometry(geometry);
+    m_context.setLapSession(lapSession ? *lapSession : LapSession{});
     m_context.setSyncTransform(sync);
     m_outputSize = outputSize;
     m_rootItem = nullptr;
