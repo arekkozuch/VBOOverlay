@@ -1,5 +1,7 @@
 #pragma once
 
+#include "telemetry/TimingGate.h"
+
 #include <QHash>
 #include <QPointF>
 #include <QString>
@@ -38,6 +40,7 @@ public:
     QHash<QString, TelemetryChannel> channels;
     QHash<QString, QString> aliases;
     QStringList warnings;
+    QVector<TimingGate> timingGates;
     qsizetype sampleCount = 0;
 
     // Public telemetry semantics are intentionally strict: queries outside a

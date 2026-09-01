@@ -1,6 +1,6 @@
 #include "telemetry/TrackGeometry.h"
+#include "telemetry/TelemetryGeometry.h"
 
-#include <QtMath>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -14,11 +14,9 @@ QPointF toLocal(
     const double originLatitude,
     const double originLongitude)
 {
-    constexpr double earthRadius = 6'371'000.0;
-    const double latitudeScale = M_PI / 180.0;
-    return {(longitude - originLongitude) * latitudeScale * earthRadius
-                * std::cos(originLatitude * latitudeScale),
-            -(latitude - originLatitude) * latitudeScale * earthRadius};
+    const MetricPoint projected = projectCoordinate(
+        {latitude, longitude}, {originLatitude, originLongitude});
+    return {projected.eastMeters, -projected.northMeters};
 }
 
 } // namespace

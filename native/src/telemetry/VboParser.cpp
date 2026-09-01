@@ -1,4 +1,5 @@
 #include "telemetry/VboParser.h"
+#include "telemetry/TelemetryGeometry.h"
 
 #include <QFile>
 #include <QRegularExpression>
@@ -131,22 +132,83 @@ std::optional<ParsedTimestamp> parseTimestamp(const QString &value)
     return ParsedTimestamp{numeric, TimestampFormat::RelativeSeconds};
 }
 
-double normalizeCoordinate(const QString &name, const double value)
+std::optional<CoordinateAxis> coordinateAxisForName(const QString &name)
 {
     const bool latitude = name.compare("lat", Qt::CaseInsensitive) == 0
         || name.compare("latitude", Qt::CaseInsensitive) == 0;
     const bool longitude = name.compare("lon", Qt::CaseInsensitive) == 0
         || name.compare("long", Qt::CaseInsensitive) == 0
         || name.compare("longitude", Qt::CaseInsensitive) == 0;
-    if (latitude && std::abs(value) > 90.0
-        && std::abs(value) <= 5400.0) {
-        return value / 60.0;
+    if (latitude) return CoordinateAxis::Latitude;
+    if (longitude) return CoordinateAxis::Longitude;
+    return std::nullopt;
+}
+
+double normalizeChannelValue(const QString &name, const double value)
+{
+    const auto axis = coordinateAxisForName(name);
+    if (!axis) return value;
+    return normalizeCoordinateDegrees(*axis, value).value_or(
+        std::numeric_limits<double>::quiet_NaN());
+}
+
+struct TimingGateParseResult {
+    std::optional<TimingGate> gate;
+    QString error;
+};
+
+TimingGateParseResult parseTimingGate(const QString &line)
+{
+    static const QRegularExpression gateLine(
+        QStringLiteral("^(\\S+)\\s+(\\S+)\\s+(\\S+)\\s+(\\S+)\\s+(\\S+)(?:\\s+(.*))?$"));
+    const QRegularExpressionMatch match = gateLine.match(line);
+    if (!match.hasMatch()) {
+        return {{}, QStringLiteral("expected a gate name and four coordinates")};
     }
-    if (longitude && std::abs(value) > 180.0
-        && std::abs(value) <= 10800.0) {
-        return value / 60.0;
+    if (match.captured(1).size() > VboParser::kMaximumFieldCharacters) {
+        return {{}, QStringLiteral("gate name exceeds the supported field limit")};
     }
-    return value;
+    const QString description = match.captured(6).trimmed();
+    if (description.size() > 4'096) {
+        return {{}, QStringLiteral("gate description exceeds 4096 characters")};
+    }
+    double sourceCoordinates[4]{};
+    for (int index = 0; index < 4; ++index) {
+        const QString token = match.captured(index + 2);
+        if (token.size() > VboParser::kMaximumFieldCharacters) {
+            return {{}, QStringLiteral("coordinate exceeds the supported field limit")};
+        }
+        bool valid = false;
+        sourceCoordinates[index] = token.toDouble(&valid);
+        if (!valid || !std::isfinite(sourceCoordinates[index])) {
+            return {{}, QStringLiteral("coordinate %1 is not finite").arg(index + 1)};
+        }
+    }
+    const auto longitudeA = normalizeCoordinateDegrees(
+        CoordinateAxis::Longitude, sourceCoordinates[0]);
+    const auto latitudeA = normalizeCoordinateDegrees(
+        CoordinateAxis::Latitude, sourceCoordinates[1]);
+    const auto longitudeB = normalizeCoordinateDegrees(
+        CoordinateAxis::Longitude, sourceCoordinates[2]);
+    const auto latitudeB = normalizeCoordinateDegrees(
+        CoordinateAxis::Latitude, sourceCoordinates[3]);
+    if (!longitudeA || !latitudeA || !longitudeB || !latitudeB) {
+        return {{}, QStringLiteral("coordinate is outside the supported degree range")};
+    }
+    const GeoCoordinate endpointA{*latitudeA, *longitudeA};
+    const GeoCoordinate endpointB{*latitudeB, *longitudeB};
+    if (endpointA.latitudeDegrees == endpointB.latitudeDegrees
+        && endpointA.longitudeDegrees == endpointB.longitudeDegrees) {
+        return {{}, QStringLiteral("gate endpoints must be distinct")};
+    }
+    const QString sourceName = match.captured(1);
+    TimingGateType type = TimingGateType::Unknown;
+    if (sourceName.compare(QStringLiteral("Start"), Qt::CaseInsensitive) == 0) {
+        type = TimingGateType::Start;
+    } else if (sourceName.compare(QStringLiteral("Split"), Qt::CaseInsensitive) == 0) {
+        type = TimingGateType::Split;
+    }
+    return {TimingGate{type, sourceName, endpointA, endpointB, description}, {}};
 }
 
 QHash<QString, QString> resolveAliases(const QStringList &names)
@@ -247,8 +309,40 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
     }
 
     TelemetrySession session;
+    constexpr qsizetype warningLimit = 200;
+    qsizetype omittedWarnings = 0;
+    const auto appendWarning = [&session, &omittedWarnings](QString warning) {
+        if (session.warnings.size() < warningLimit) {
+            session.warnings.append(std::move(warning));
+        } else {
+            ++omittedWarnings;
+        }
+    };
+    constexpr qsizetype maximumTimingGates = 128;
+    const QStringList timingLines = sections.value(QStringLiteral("laptiming"));
+    bool timingLimitWarningAdded = false;
+    for (qsizetype index = 0; index < timingLines.size(); ++index) {
+        if ((index & 0x3f) == 0) throwIfCancelled(cancelled);
+        const TimingGateParseResult parsed = parseTimingGate(timingLines[index]);
+        if (!parsed.gate) {
+            appendWarning(QStringLiteral("Timing line %1 ignored: %2.")
+                              .arg(index + 1)
+                              .arg(parsed.error));
+            continue;
+        }
+        if (session.timingGates.size() >= maximumTimingGates) {
+            if (!timingLimitWarningAdded) {
+                appendWarning(QStringLiteral(
+                    "Additional timing gates ignored after the supported limit of 128."));
+                timingLimitWarningAdded = true;
+            }
+            continue;
+        }
+        session.timingGates.append(*parsed.gate);
+    }
     for (auto iterator = sections.cbegin(); iterator != sections.cend(); ++iterator) {
-        if (iterator.key().contains("column") || iterator.key().contains("data")) {
+        if (iterator.key().contains("column") || iterator.key().contains("data")
+            || iterator.key() == QStringLiteral("laptiming")) {
             continue;
         }
         for (const QString &entry : iterator.value()) {
@@ -308,15 +402,6 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
     double clockDayOffset = 0.0;
     constexpr double lateDayThreshold = 23.0 * 3600.0;
     constexpr double earlyDayThreshold = 1.0 * 3600.0;
-    constexpr qsizetype warningLimit = 200;
-    qsizetype omittedWarnings = 0;
-    const auto appendWarning = [&session, &omittedWarnings](QString warning) {
-        if (session.warnings.size() < warningLimit) {
-            session.warnings.append(std::move(warning));
-        } else {
-            ++omittedWarnings;
-        }
-    };
     for (qsizetype rowIndex = 0; rowIndex < dataSection.size(); ++rowIndex) {
         if ((rowIndex & 0xff) == 0) throwIfCancelled(cancelled);
         const QStringList cells = splitRow(dataSection[rowIndex]);
@@ -385,7 +470,7 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
             bool valid = false;
             const double parsed = column < cells.size() ? cells[column].toDouble(&valid) : 0.0;
             rawValues[column].append(valid && std::isfinite(parsed)
-                                         ? static_cast<float>(normalizeCoordinate(names[column], parsed))
+                                         ? static_cast<float>(normalizeChannelValue(names[column], parsed))
                                          : std::numeric_limits<float>::quiet_NaN());
         }
         previousAbsoluteTime = absoluteTime;
