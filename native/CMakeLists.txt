@@ -144,6 +144,7 @@ qt_add_qml_module(flappedear_native
         qml/ColorField.qml
         qml/AnalysisPanel.qml
         qml/AnalysisWindow.qml
+        qml/LapTimingPanel.qml
         qml/FeButton.qml
         qml/FeCheckBox.qml
         qml/FeComboBox.qml

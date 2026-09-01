@@ -60,6 +60,13 @@ Rectangle {
             }
         }
 
+        LapTimingPanel {
+            Layout.fillWidth: true
+            Layout.preferredHeight: implicitHeight
+            Layout.minimumHeight: 118
+            onSeekRequested: milliseconds => root.seekRequested(milliseconds)
+        }
+
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
