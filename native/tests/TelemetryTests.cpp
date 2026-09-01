@@ -23,6 +23,7 @@
 #include "export/TemporaryOverlayValidation.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/LapTiming.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/VboParser.h"
@@ -74,6 +75,7 @@ private slots:
     void cachesTelemetryChannelCadence();
     void enforcesVboResourceLimits();
     void convertsArcMinuteCoordinates();
+    void finalizesGatePassWhenTelemetryEndsInsideCorridor();
     void parsesOptionalRealVbo();
     void benchmarksCachedOptionalRealVboPresentationLookups();
     void persistsWidgetScenes();
@@ -1100,6 +1102,33 @@ void TelemetryTests::convertsArcMinuteCoordinates()
         u"[column names]\ntime latitude longitude\n[data]\n0 3120 -1260\n1 3126 -1266");
     QCOMPARE(session.channels.value("latitude").values[0], 52.0F);
     QCOMPARE(session.channels.value("longitude").values[0], -21.0F);
+}
+
+void TelemetryTests::finalizesGatePassWhenTelemetryEndsInsideCorridor()
+{
+    TelemetrySession session;
+    const auto addCoordinateChannel = [&session](
+                                          const QString &name, const QVector<float> &values) {
+        TelemetryChannel channel;
+        channel.name = name;
+        channel.timestamps = {0.0, 1.0, 2.0};
+        channel.values = values;
+        session.channels.insert(name, channel);
+        session.aliases.insert(name, name);
+    };
+    addCoordinateChannel(QStringLiteral("latitude"), {52.0001F, 52.0001F, 52.0001F});
+    addCoordinateChannel(QStringLiteral("longitude"), {21.0002F, 21.0002F, 21.0F});
+    session.duration = 2.0;
+
+    TimingGate startGate;
+    startGate.type = TimingGateType::Start;
+    startGate.endpointA = {52.0, 21.0};
+    startGate.endpointB = {52.0002, 21.0};
+
+    const LapSession result = detectLaps(session, startGate);
+    QCOMPARE(result.status, LapSessionStatus::InsufficientPasses);
+    QCOMPARE(result.acceptedPasses.size(), qsizetype(1));
+    QVERIFY(qAbs(result.acceptedPasses.constFirst().telemetryTime - 2.0) < 0.001);
 }
 
 void TelemetryTests::parsesOptionalRealVbo()

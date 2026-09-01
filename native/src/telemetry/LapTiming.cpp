@@ -440,6 +440,7 @@ LapSession detectLaps(
         }
         previous = current;
     }
+    finalizeCluster();
     throwIfCancelled(cancelled);
     if (result.diagnostics.usableGpsSegments == 0) {
         result.status = LapSessionStatus::NoUsableGps;
