@@ -40,12 +40,15 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
+#include <QMediaPlayer>
 #include <QProcess>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUuid>
+#include <QVideoSink>
+#include <QVideoFrame>
 #include <QtEndian>
 #include <QtTest>
 #include <cmath>
@@ -86,6 +89,7 @@ private slots:
     void rendersAllComparisonTilesInProductionScene();
     void parsesOptionalRealVbo();
     void derivesOptionalRealVboLaps();
+    void decodesOptionalRealVideoFrameWithNativeSink();
     void benchmarksCachedOptionalRealVboPresentationLookups();
     void persistsWidgetScenes();
     void normalizesWidgetSemanticsAcrossMutationAndImport();
@@ -1483,6 +1487,34 @@ void TelemetryTests::derivesOptionalRealVboLaps()
                                  .arg(lap.durationSeconds, 0, 'f', 3)
                                  .arg(lap.deltaToBestSeconds, 0, 'f', 3);
     }
+}
+
+void TelemetryTests::decodesOptionalRealVideoFrameWithNativeSink()
+{
+    const QString path = qEnvironmentVariable("FLAPPEDEAR_REAL_GOPRO");
+    if (path.isEmpty()) QSKIP("FLAPPEDEAR_REAL_GOPRO is not set");
+    QVERIFY2(QFileInfo::exists(path), qPrintable(path));
+
+    QMediaPlayer player;
+    QVideoSink sink;
+    QSignalSpy frameSpy(&sink, &QVideoSink::videoFrameChanged);
+    player.setVideoSink(&sink);
+    player.setSource(QUrl::fromLocalFile(path));
+
+    QTRY_VERIFY_WITH_TIMEOUT(player.mediaStatus() == QMediaPlayer::LoadedMedia
+                                 || player.mediaStatus() == QMediaPlayer::BufferedMedia,
+                             15'000);
+    player.setPosition(17);
+    QTest::qWait(250);
+    const qsizetype pausedSeekFrameCount = frameSpy.count();
+
+    player.play();
+    QTRY_VERIFY_WITH_TIMEOUT(frameSpy.count() > 0, 15'000);
+    player.pause();
+    QVERIFY(sink.videoFrame().isValid());
+    qInfo().noquote() << QStringLiteral("real video sink: %1 frames after paused seek, first playback frame at %2 ms")
+                             .arg(pausedSeekFrameCount)
+                             .arg(player.position());
 }
 
 void TelemetryTests::benchmarksCachedOptionalRealVboPresentationLookups()

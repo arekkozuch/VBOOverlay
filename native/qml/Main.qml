@@ -23,8 +23,8 @@ ApplicationWindow {
     palette.highlightedText: "#07140f"
 
     property bool fullScreenPreview: false
-    property int previewSurfaceRefresh: 0
-    property bool previewSurfaceRefreshPending: false
+    property bool previewPrimeFramePending: false
+    property int previewPrimeTargetPosition: 0
     property bool closeApproved: false
     property int editorVisibility: Window.Windowed
     property bool fullScreenControlsVisible: false
@@ -446,13 +446,6 @@ ApplicationWindow {
         // A native macOS FileDialog cannot reliably become modal while the native
         // Save/Discard/Cancel dialog is still unwinding its button callback.
         Qt.callLater(() => projectSaveDialog.open())
-    }
-    function refreshPreviewSurface() {
-        // AVFoundation can retain an unpainted surface for an initially-paused source.
-        // A one-pixel geometry transition recreates the normal editor video node, just
-        // as entering fullscreen does, without reopening the media or changing time.
-        previewSurfaceRefresh += 1
-        Qt.callLater(() => previewSurfaceRefresh += 1)
     }
     function enterFullScreen() {
         if (visibility !== Window.FullScreen)
@@ -1469,7 +1462,10 @@ ApplicationWindow {
     MediaPlayer {
         id: mediaPlayer
         source: appController.videoSource
-        audioOutput: AudioOutput {}
+        audioOutput: AudioOutput {
+            // The initial decoder priming is intentionally inaudible.
+            muted: window.previewPrimeFramePending
+        }
         videoOutput: videoOutput
         onPlaybackStateChanged: {
             if (playbackState !== MediaPlayer.PlayingState)
@@ -1479,24 +1475,17 @@ ApplicationWindow {
         }
         onPositionChanged: function(position) {
             appController.playbackTime = position / 1000.0;
-            if (window.previewSurfaceRefreshPending) {
-                window.previewSurfaceRefreshPending = false;
-                Qt.callLater(window.refreshPreviewSurface);
-            }
         }
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.LoadedMedia) {
-                // AVFoundation does not reliably submit the initial paused frame until it
-                // receives a position request. Start on user-visible timeline frame 1,
-                // so a successful load is immediately distinguishable from frame 0.
-                position = appController.previewInitialPositionMilliseconds();
-                window.previewSurfaceRefreshPending = true;
-                Qt.callLater(() => {
-                    if (window.previewSurfaceRefreshPending) {
-                        window.previewSurfaceRefreshPending = false;
-                        window.refreshPreviewSurface();
-                    }
-                });
+                // AVFoundation does not submit a paused seek frame for this GoPro source.
+                // Prime decoding silently and pause only once VideoOutput has received a
+                // frame at timeline frame 1 (or later).
+                window.previewPrimeTargetPosition = appController.previewInitialPositionMilliseconds();
+                window.previewPrimeFramePending = true;
+                position = window.previewPrimeTargetPosition;
+                play();
+                previewPrimeTimeout.restart();
             }
             if (mediaStatus === MediaPlayer.EndOfMedia) {
                 pause();
@@ -1504,9 +1493,23 @@ ApplicationWindow {
             }
         }
         onErrorOccurred: function(error, errorString) {
+            window.previewPrimeFramePending = false;
+            previewPrimeTimeout.stop();
             pause();
             appController.reportPlaybackError(errorString);
             window.fullScreenControlsVisible = true;
+        }
+    }
+
+    Timer {
+        id: previewPrimeTimeout
+        interval: 1000
+        repeat: false
+        onTriggered: {
+            if (!window.previewPrimeFramePending)
+                return;
+            window.previewPrimeFramePending = false;
+            mediaPlayer.pause();
         }
     }
 
@@ -1948,12 +1951,23 @@ ApplicationWindow {
                                 }
                                 x: geometry.x
                                 y: geometry.y
-                                width: Math.max(0, geometry.width - (window.previewSurfaceRefresh % 2))
+                                width: Math.max(0, geometry.width)
                                 height: geometry.height
                                 VideoOutput {
                                     id: videoOutput
                                     anchors.fill: parent
                                     fillMode: VideoOutput.PreserveAspectFit
+                                }
+                            }
+                            Connections {
+                                target: videoOutput.videoSink
+                                function onVideoFrameChanged(frame) {
+                                    if (!window.previewPrimeFramePending
+                                            || mediaPlayer.position < window.previewPrimeTargetPosition)
+                                        return;
+                                    window.previewPrimeFramePending = false;
+                                    previewPrimeTimeout.stop();
+                                    mediaPlayer.pause();
                                 }
                             }
                             MouseArea {
