@@ -76,6 +76,7 @@ private slots:
     void enforcesVboResourceLimits();
     void convertsArcMinuteCoordinates();
     void finalizesGatePassWhenTelemetryEndsInsideCorridor();
+    void publishesCurrentLapAfterFirstAcceptedPass();
     void parsesOptionalRealVbo();
     void benchmarksCachedOptionalRealVboPresentationLookups();
     void persistsWidgetScenes();
@@ -1129,6 +1130,36 @@ void TelemetryTests::finalizesGatePassWhenTelemetryEndsInsideCorridor()
     QCOMPARE(result.status, LapSessionStatus::InsufficientPasses);
     QCOMPARE(result.acceptedPasses.size(), qsizetype(1));
     QVERIFY(qAbs(result.acceptedPasses.constFirst().telemetryTime - 2.0) < 0.001);
+}
+
+void TelemetryTests::publishesCurrentLapAfterFirstAcceptedPass()
+{
+    TelemetrySession session;
+    TelemetryChannel speed;
+    speed.name = QStringLiteral("speed");
+    speed.timestamps = {10.0, 12.0, 20.0};
+    speed.values = {72.0F, 90.0F, 108.0F};
+    session.channels.insert(speed.name, speed);
+    session.aliases.insert(QStringLiteral("speed"), speed.name);
+    session.duration = 20.0;
+
+    LapSession laps;
+    laps.status = LapSessionStatus::InsufficientPasses;
+    laps.acceptedPasses.append({10.0, 0.0, 1, 0.5, 20.0, 20.0});
+
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    context.setLapSession(laps);
+    context.setTime(12.0);
+    const QVariantMap timing = context.lapTiming();
+
+    QVERIFY(timing.value(QStringLiteral("available")).toBool());
+    QCOMPARE(timing.value(QStringLiteral("state")).toString(), QStringLiteral("running"));
+    QCOMPARE(timing.value(QStringLiteral("currentLapNumber")).toInt(), 1);
+    QCOMPARE(timing.value(QStringLiteral("currentElapsedSeconds")).toDouble(), 2.0);
+    QCOMPARE(timing.value(QStringLiteral("currentSpeedKmh")).toDouble(), 90.0);
+    QVERIFY(!timing.contains(QStringLiteral("bestLapSeconds")));
+    QVERIFY(!timing.contains(QStringLiteral("liveDeltaSeconds")));
 }
 
 void TelemetryTests::parsesOptionalRealVbo()

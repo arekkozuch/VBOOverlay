@@ -161,8 +161,9 @@ QVariantMap TelemetryRenderContext::lapTiming() const
 {
     QVariantMap result{{QStringLiteral("available"), false},
                        {QStringLiteral("state"), QStringLiteral("unavailable")}};
-    if (m_lapSession.status != LapSessionStatus::Available
-        || m_lapSession.acceptedPasses.size() < 2 || m_lapSession.timedLaps.isEmpty()) {
+    if ((m_lapSession.status != LapSessionStatus::Available
+         && m_lapSession.status != LapSessionStatus::InsufficientPasses)
+        || m_lapSession.acceptedPasses.isEmpty()) {
         return result;
     }
 
