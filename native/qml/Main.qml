@@ -159,47 +159,38 @@ ApplicationWindow {
         onAccepted: appController.cancelExportAndQuit()
     }
 
-    Dialog {
+    MessageDialog {
         id: dirtyProjectDialog
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
-        width: 450
-        property bool resolvingDecision: false
-        title: {
+        parentWindow: window
+        title: qsTr("FlappedEar Telemetry")
+        property bool actionHandled: false
+        text: {
             if (appController.pendingDestructiveAction === "new") return qsTr("Save before creating a new project?")
             if (appController.pendingDestructiveAction === "open") return qsTr("Save before opening another project?")
             return qsTr("Save before quitting?")
         }
-        contentItem: Label {
-            width: 390
-            text: qsTr("This project has unsaved changes. Save them before continuing?")
-            wrapMode: Text.WordWrap
-            color: "#e8edf4"
+        informativeText: qsTr("This project has unsaved changes. Save them before continuing?")
+        buttons: MessageDialog.Save | MessageDialog.Discard | MessageDialog.Cancel
+        onVisibleChanged: {
+            if (visible)
+                actionHandled = false
         }
-        footer: DialogButtonBox {
-            standardButtons: DialogButtonBox.Save | DialogButtonBox.Discard | DialogButtonBox.Cancel
-            onAccepted: {
-                dirtyProjectDialog.resolvingDecision = true
-                dirtyProjectDialog.close()
+        onButtonClicked: function(button, role) {
+            actionHandled = true
+            switch (button) {
+            case MessageDialog.Save:
                 appController.resolveDestructiveAction("save")
-                dirtyProjectDialog.resolvingDecision = false
-            }
-            onDiscarded: {
-                dirtyProjectDialog.resolvingDecision = true
-                dirtyProjectDialog.close()
+                break
+            case MessageDialog.Discard:
                 appController.resolveDestructiveAction("discard")
-                dirtyProjectDialog.resolvingDecision = false
-            }
-            onRejected: {
-                dirtyProjectDialog.resolvingDecision = true
-                dirtyProjectDialog.close()
+                break
+            case MessageDialog.Cancel:
                 appController.resolveDestructiveAction("cancel")
-                dirtyProjectDialog.resolvingDecision = false
+                break
             }
         }
         onRejected: {
-            if (!resolvingDecision)
+            if (!actionHandled)
                 appController.cancelPendingDestructiveAction()
         }
     }
