@@ -191,37 +191,142 @@ ApplicationWindow {
         onAccepted: appController.cancelExportAndQuit()
     }
 
-    MessageDialog {
+    Dialog {
         id: dirtyProjectDialog
-        parentWindow: window
-        title: qsTr("FlappedEar Telemetry")
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        padding: 0
+        width: 480
         property bool actionHandled: false
-        text: {
+
+        function actionTitle() {
             if (appController.pendingDestructiveAction === "new") return qsTr("Save before creating a new project?")
             if (appController.pendingDestructiveAction === "open") return qsTr("Save before opening another project?")
             return qsTr("Save before quitting?")
         }
-        informativeText: qsTr("This project has unsaved changes. Save them before continuing?")
-        buttons: MessageDialog.Save | MessageDialog.Discard | MessageDialog.Cancel
-        onVisibleChanged: {
-            if (visible)
-                actionHandled = false
-        }
-        onButtonClicked: function(button, role) {
+
+        function resolve(action) {
             actionHandled = true
-            switch (button) {
-            case MessageDialog.Save:
-                appController.resolveDestructiveAction("save")
-                break
-            case MessageDialog.Discard:
-                appController.resolveDestructiveAction("discard")
-                break
-            case MessageDialog.Cancel:
-                appController.resolveDestructiveAction("cancel")
-                break
+            appController.resolveDestructiveAction(action)
+        }
+
+        background: Rectangle {
+            radius: 14
+            color: "#0d151e"
+            border.width: 1
+            border.color: "#3a5367"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 86
+
+                Rectangle {
+                    width: 34
+                    height: 34
+                    radius: 10
+                    color: "#123326"
+                    border.width: 1
+                    border.color: "#28704e"
+                    anchors.left: parent.left
+                    anchors.leftMargin: 28
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "●"
+                        color: "#55e6a5"
+                        font.pixelSize: 18
+                    }
+                }
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 76
+                    anchors.right: parent.right
+                    anchors.rightMargin: 28
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 5
+
+                    Text {
+                        text: dirtyProjectDialog.actionTitle()
+                        color: "#f2f6fa"
+                        font.family: "Helvetica Neue"
+                        font.pixelSize: 17
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        text: qsTr("Your project has unsaved changes.")
+                        color: "#9eafc0"
+                        font.family: "Helvetica Neue"
+                        font.pixelSize: 12
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#263747"
+            }
+
+            Text {
+                Layout.fillWidth: true
+                Layout.leftMargin: 28
+                Layout.rightMargin: 28
+                Layout.topMargin: 22
+                Layout.bottomMargin: 22
+                text: qsTr("Save your changes before continuing? You can also discard them and continue without saving.")
+                color: "#c9d4df"
+                font.family: "Helvetica Neue"
+                font.pixelSize: 13
+                lineHeight: 1.35
+                wrapMode: Text.WordWrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#263747"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 20
+                Layout.rightMargin: 20
+                Layout.topMargin: 16
+                Layout.bottomMargin: 18
+                spacing: 10
+
+                FeButton {
+                    text: qsTr("Discard changes")
+                    danger: true
+                    onClicked: dirtyProjectDialog.resolve("discard")
+                }
+                Item { Layout.fillWidth: true }
+                FeButton {
+                    text: qsTr("Cancel")
+                    onClicked: dirtyProjectDialog.resolve("cancel")
+                }
+                FeButton {
+                    text: qsTr("Save project")
+                    accent: true
+                    onClicked: dirtyProjectDialog.resolve("save")
+                }
             }
         }
-        onRejected: {
+
+        onOpened: {
+            actionHandled = false
+            forceActiveFocus()
+        }
+        onClosed: {
             if (!actionHandled)
                 appController.cancelPendingDestructiveAction()
         }
