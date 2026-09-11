@@ -105,3 +105,11 @@ frame metadata and changed rates: odd durations, residual denominators, sub-fram
 ranges, invalid rationals, overflow and factor cancellation. Counts use checked
 integer floor arithmetic. Native execution is covered by macOS/Windows CI; this
 change does not claim a new private-recording export acceptance run.
+
+## September 11 shipping fixes: synchronization confidence
+
+Refinement cannot increase confidence above the global search result. Automatic
+application also requires twenty seconds of usable resampled overlap in both
+search passes. Regressions cover equal peaks separated by 20 seconds and a short
+overlap with strong correlation; the existing distinctive 3.2-second fixture must
+still auto-apply. Constant-speed and cooperative-cancellation checks remain.

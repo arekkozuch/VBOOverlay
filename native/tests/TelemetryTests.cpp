@@ -122,6 +122,8 @@ private slots:
     void synchronizesGpsSpeed();
     void cancelsSynchronizationDeterministically();
     void reportsAmbiguousGpsSpeed();
+    void retainsGlobalSyncAmbiguity();
+    void rejectsAutomaticSyncWithShortOverlap();
     void gatesWeakSyncCandidates();
     void rendersTelemetryAtExplicitTime();
     void preservesPartialOverlapInAnalysisSeries();
@@ -5684,7 +5686,7 @@ void TelemetryTests::synchronizesGpsSpeed()
     const SyncCandidate candidate = TelemetrySyncEngine::synchronize(video, telemetry);
     QVERIFY2(qAbs(candidate.offset - 3.2) <= 0.11, qPrintable(QString::number(candidate.offset)));
     QVERIFY(candidate.diagnostics.correlation > 0.99);
-    QVERIFY(candidate.confidence > 0.7);
+    QVERIFY(shouldAutoApplySyncCandidate(candidate));
 }
 
 void TelemetryTests::cancelsSynchronizationDeterministically()
@@ -5711,6 +5713,43 @@ void TelemetryTests::reportsAmbiguousGpsSpeed()
     const SyncCandidate candidate = TelemetrySyncEngine::synchronize(video, telemetry);
     QCOMPARE(candidate.diagnostics.correlation, -1.0);
     QCOMPARE(candidate.confidence, 0.0);
+}
+
+void TelemetryTests::retainsGlobalSyncAmbiguity()
+{
+    const auto periodicSession = [](const int seconds) {
+        TelemetrySession session;
+        TelemetryChannel speed;
+        speed.name = QStringLiteral("speed");
+        for (int index = 0; index <= seconds * 10; ++index) {
+            const double time = index / 10.0;
+            speed.timestamps.append(time);
+            speed.values.append(static_cast<float>(70.0
+                + 20.0 * std::sin(2.0 * std::numbers::pi * time / 20.0)
+                + 8.0 * std::sin(2.0 * std::numbers::pi * time / 5.0)));
+        }
+        session.channels.insert(speed.name, speed);
+        session.aliases.insert(QStringLiteral("speed"), speed.name);
+        return session;
+    };
+    // Equally valid offsets of 0, 20, and 40 seconds; only one is inside refinement.
+    const auto candidate = TelemetrySyncEngine::synchronize(periodicSession(40), periodicSession(80));
+    QVERIFY(candidate.diagnostics.correlation > 0.99);
+    QVERIFY(candidate.diagnostics.peakUniqueness < 0.01);
+    QVERIFY(candidate.confidence < kAutomaticSyncConfidenceThreshold);
+    QVERIFY(!shouldAutoApplySyncCandidate(candidate));
+}
+
+void TelemetryTests::rejectsAutomaticSyncWithShortOverlap()
+{
+    // Both inputs pass the sample-count check and correlate strongly, but the
+    // shorter recording cannot provide twenty seconds of usable overlap.
+    const auto candidate = TelemetrySyncEngine::synchronize(
+        speedSession(0.0, 60.0, 0.0), speedSession(0.0, 10.0, 3.2));
+    QVERIFY(candidate.diagnostics.correlation > 0.9);
+    QVERIFY(candidate.diagnostics.validSamples <
+            candidate.diagnostics.sampleRate * kMinimumSyncOverlapSeconds + 1.0);
+    QVERIFY(!shouldAutoApplySyncCandidate(candidate));
 }
 
 void TelemetryTests::syncsOptionalRealRecording()
