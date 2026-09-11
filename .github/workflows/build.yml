@@ -38,6 +38,9 @@ jobs:
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
       QT_QPA_PLATFORM: offscreen
+      # Offscreen QPA otherwise falls back to the software scene-graph
+      # adaptation even when QSG_RHI_BACKEND selects a graphics API.
+      QT_QUICK_BACKEND: rhi
       QT_QUICK_CONTROLS_STYLE: Basic
       QSG_RENDER_LOOP: basic
       QSG_RHI_BACKEND: ${{ matrix.graphics-api }}
