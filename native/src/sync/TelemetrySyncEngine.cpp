@@ -125,6 +125,11 @@ SyncCandidate calculate(
     candidate.confidence = std::round(
         100.0 * strength * (0.35 + 0.4 * uniqueness + 0.25 * durationScore))
         / 100.0;
+    // A correlation over a handful of points can be perfect by accident. Require
+    // twenty seconds worth of usable resampled overlap before automatic use.
+    if (best.samples < sampleRate * kMinimumSyncOverlapSeconds + 1.0) {
+        candidate.confidence = std::min(candidate.confidence, kAutomaticSyncConfidenceThreshold - 0.01);
+    }
     candidate.diagnostics = {best.score, uniqueness, best.samples, sampleRate, 0.0};
     return candidate;
 }
@@ -155,6 +160,11 @@ SyncCandidate TelemetrySyncEngine::synchronize(
     const SyncCandidate coarse = calculate(videoSpeed, telemetrySpeed, window, 1.0, center, cancelled);
     SyncCandidate fine = calculate(videoSpeed, telemetrySpeed, 5.0, 10.0, coarse.offset, cancelled);
     throwIfCancelled(cancelled);
+    // Refinement estimates a more precise offset, but cannot erase competing
+    // peaks outside its local window or improve the global evidence of uniqueness.
+    fine.confidence = std::min(fine.confidence, coarse.confidence);
+    fine.diagnostics.peakUniqueness = std::min(
+        fine.diagnostics.peakUniqueness, coarse.diagnostics.peakUniqueness);
     fine.diagnostics.coarseOffset = coarse.offset;
     return fine;
 }

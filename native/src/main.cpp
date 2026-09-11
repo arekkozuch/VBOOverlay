@@ -1,5 +1,6 @@
 #include "app/AppController.h"
 #include "app/AppLog.h"
+#include "app/GuiSessionLock.h"
 #include "export/TelemetryFrameRenderer.h"
 #include "export/ExportEngine.h"
 #include "export/ExportFormat.h"
@@ -37,6 +38,7 @@
 #include <QTimer>
 #include <cmath>
 #include <numbers>
+#include <memory>
 
 namespace {
 
@@ -622,7 +624,18 @@ int main(int argc, char *argv[])
     const bool applicationMode = !renderStillMode && !renderVisualSmokeMode && !renderVisualSmokeDarkMode
         && !exportTestMode && !exportWorkerMode
         && !benchmarkRenderMode && !startupSmokeMode;
+    std::unique_ptr<FlappedEar::GuiSessionLock> guiSessionLock;
     if (applicationMode) {
+        guiSessionLock = std::make_unique<FlappedEar::GuiSessionLock>();
+        QString startupError;
+        if (!guiSessionLock->tryAcquire(&startupError)) {
+            qCritical().noquote() << startupError;
+            QQmlApplicationEngine errorEngine;
+            errorEngine.setInitialProperties({{QStringLiteral("message"), startupError}});
+            errorEngine.loadFromModule("FlappedEar", "StartupError");
+            if (!errorEngine.rootObjects().isEmpty()) app.exec();
+            return EXIT_FAILURE;
+        }
         static_cast<void>(FlappedEar::AppLog::initialize());
         FlappedEar::AppLog::info(QStringLiteral("Application startup"));
         FlappedEar::AppLog::info(
@@ -704,12 +717,14 @@ int main(int argc, char *argv[])
             // application window. This catches QML binding/Loader regressions
             // across the widget family in one deterministic scene.
             engine.loadFromModule("FlappedEar", "VisualSmokeScene");
+            engine.setInitialProperties({{QStringLiteral("message"), QStringLiteral("Startup guard smoke")}});
+            engine.loadFromModule("FlappedEar", "StartupError");
         }
         if (!engine.rootObjects().isEmpty()) {
             FlappedEar::AppLog::info(QStringLiteral("Main QML loaded"));
         }
         if (startupSmokeMode) {
-            if (engine.rootObjects().size() < 2) {
+            if (engine.rootObjects().size() < 3) {
                 qCritical() << "Startup smoke failed: broadcast HUD composition did not load";
                 result = EXIT_FAILURE;
             } else {

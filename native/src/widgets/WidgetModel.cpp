@@ -475,6 +475,10 @@ int WidgetModel::addWidget(const QString &type)
     if (!validType(type)) {
         return -1;
     }
+    if (m_widgets.size() >= ProjectLimits::maximumWidgets) {
+        setLastError(tr("The scene limit is %1 widgets.").arg(ProjectLimits::maximumWidgets));
+        return -1;
+    }
     const int index = m_widgets.size();
     beginInsertRows({}, index, index);
     m_widgets.append(createWidget(type, index));
@@ -525,6 +529,11 @@ void WidgetModel::removeWidgets(const QVariantList &indices)
 int WidgetModel::duplicateWidget(const int index)
 {
     if (index < 0 || index >= m_widgets.size()) {
+        return -1;
+    }
+    if (m_widgets.size() >= ProjectLimits::maximumWidgets
+        || totalCueCount() + m_widgets[index].cues.size() > ProjectLimits::maximumTotalCues) {
+        setLastError(tr("Duplicating this widget would exceed the scene's widget or animation limit."));
         return -1;
     }
     WidgetData copy = m_widgets[index];
@@ -618,6 +627,11 @@ int WidgetModel::addCue(
     const int index, const double startTime, const double duration, const QString &effect)
 {
     if (index < 0 || index >= m_widgets.size()) {
+        return -1;
+    }
+    if (m_widgets[index].cues.size() >= ProjectLimits::maximumCuesPerWidget
+        || totalCueCount() >= ProjectLimits::maximumTotalCues) {
+        setLastError(tr("The scene's animation limit has been reached."));
         return -1;
     }
     m_widgets[index].cues.append(normalizeCue({{"start", startTime}, {"duration", duration},
@@ -906,43 +920,89 @@ QString WidgetModel::importTemplate(const QUrl &url)
 
 void WidgetModel::reloadTemplates()
 {
-    m_userTemplates = {};
     loadUserTemplates();
     emit templatesChanged();
 }
 
-void WidgetModel::loadUserTemplates()
+void WidgetModel::setLastError(const QString &error)
 {
-    const auto loaded = BoundedJsonLoader::loadFile(
-        templateStorePath(), ProjectLimits::templateStoreBytes, QStringLiteral("Template store"));
-    if (!loaded.success() || !loaded.document.isObject()) {
-        return;
-    }
-    const QJsonObject root = loaded.document.object();
-    if (!ProjectLimits::validateTemplateStore(root)) {
-        return;
-    }
-    for (const QJsonValue &value : root.value("templates").toArray()) {
-        if (value.isObject() && validTemplateObject(value.toObject())) {
-            QJsonObject item = value.toObject();
-            if (normalizeTemplateObject(&item)) m_userTemplates.append(item);
-        }
-    }
+    if (m_lastError == error) return;
+    m_lastError = error;
+    emit lastErrorChanged();
 }
 
-bool WidgetModel::saveUserTemplates() const
+qsizetype WidgetModel::totalCueCount() const
 {
+    qsizetype count = 0;
+    for (const WidgetData &widget : m_widgets) count += widget.cues.size();
+    return count;
+}
+
+void WidgetModel::loadUserTemplates()
+{
+    m_templateStoreWritable = false;
+    const QString path = templateStorePath();
+    if (!QFileInfo::exists(path)) {
+        m_userTemplates = {};
+        m_templateStoreWritable = true;
+        setLastError({});
+        return;
+    }
+    const auto loaded = BoundedJsonLoader::loadFile(
+        path, ProjectLimits::templateStoreBytes, QStringLiteral("Template store"));
+    QString error = loaded.error;
+    const QJsonObject root = loaded.document.object();
+    if (!loaded.success() || !loaded.document.isObject()
+        || !ProjectLimits::validateTemplateStore(root, &error)) {
+        setLastError(tr("Custom templates could not be loaded from %1: %2. "
+                       "The file is preserved; restore it and reload templates before saving.")
+                         .arg(QDir::toNativeSeparators(path), error));
+        return;
+    }
+    QJsonArray templates;
+    for (const QJsonValue &value : root.value("templates").toArray()) {
+        QJsonObject item = value.toObject();
+        if (!validTemplateObject(item) || !normalizeTemplateObject(&item)) {
+            setLastError(tr("Custom templates contain an unsupported widget. "
+                           "The file is preserved; restore it and reload templates before saving."));
+            return;
+        }
+        templates.append(item);
+    }
+    m_userTemplates = templates;
+    m_templateStoreWritable = true;
+    setLastError({});
+}
+
+bool WidgetModel::saveUserTemplates()
+{
+    if (!m_templateStoreWritable) return false;
+    const QJsonObject root{{"schemaVersion", 1}, {"templates", m_userTemplates}};
+    QString error;
+    if (!ProjectLimits::validateTemplateStore(root, &error)) {
+        setLastError(error);
+        return false;
+    }
+    const QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    if (payload.size() > ProjectLimits::templateStoreBytes) {
+        setLastError(tr("Custom templates exceed the %1 MiB storage limit. "
+                       "Delete an unused template before saving another.")
+                         .arg(ProjectLimits::templateStoreBytes / (1024 * 1024)));
+        return false;
+    }
     const QString path = templateStorePath();
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        setLastError(tr("Could not create the custom template directory."));
         return false;
     }
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) {
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly) || file.write(payload) != payload.size() || !file.commit()) {
+        setLastError(tr("Could not save custom templates: %1").arg(file.errorString()));
         return false;
     }
-    const QJsonObject root{{"schemaVersion", 1}, {"templates", m_userTemplates}};
-    return file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) >= 0
-        && file.commit();
+    setLastError({});
+    return true;
 }
 
 QJsonArray WidgetModel::allTemplates() const

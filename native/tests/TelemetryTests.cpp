@@ -1,5 +1,6 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "app/AppController.h"
+#include "app/GuiSessionLock.h"
 #include "app/PreviewPlayback.h"
 #include "export/EncoderDetector.h"
 #include "export/BoundedProcessOutput.h"
@@ -101,6 +102,10 @@ private slots:
     void providesCustomizableArchetypes();
     void persistsAndSharesCustomTemplates();
     void updatesCustomTemplatesInPlace();
+    void rejectsTemplateStoreCountGrowth();
+    void rejectsTemplateStoreByteGrowth();
+    void preservesRejectedTemplateStores();
+    void boundsLiveWidgetAndCueMutations();
     void preservesTemplatePickerSelectionById();
     void preservesOptionalFontSettings();
     void preservesGForcePresentationSettings();
@@ -122,6 +127,8 @@ private slots:
     void synchronizesGpsSpeed();
     void cancelsSynchronizationDeterministically();
     void reportsAmbiguousGpsSpeed();
+    void retainsGlobalSyncAmbiguity();
+    void rejectsAutomaticSyncWithShortOverlap();
     void gatesWeakSyncCandidates();
     void rendersTelemetryAtExplicitTime();
     void preservesPartialOverlapInAnalysisSeries();
@@ -156,6 +163,8 @@ private slots:
     void preservesTenBitFullRangeColorThroughVideoToolboxExport();
     void preservesExactExportRateRationals();
     void schedulesFrameAddressedExportRangesExactly();
+    void floorsConvertedFrameCounts_data();
+    void floorsConvertedFrameCounts();
     void enforcesStrictTerminalFrameDeficitEvidence();
     void derivesStablePreviewViewportAndLastFrameAdapter();
     void exposesReactivePreviewMetadataToQml();
@@ -192,6 +201,9 @@ private slots:
     void commitsNewAndReplacementExports();
     void savesProjectsAtomically();
     void writesRecoverySnapshotsAtomically();
+    void guardsGuiRecoveryAcrossProcesses_data();
+    void guardsGuiRecoveryAcrossProcesses();
+    void failsClosedWhenGuiDataDirectoryIsUnavailable();
     void detectsPartialAndCommitWriteFailures();
     void gatesDirtyDestructiveActions_data();
     void gatesDirtyDestructiveActions();
@@ -634,6 +646,75 @@ void TelemetryTests::commitsNewAndReplacementExports()
         {QStringLiteral("*.part.*"), QStringLiteral("*.backup"), QStringLiteral("*.cancel")},
         QDir::Files | QDir::Hidden);
     QVERIFY2(artifacts.isEmpty(), qPrintable(artifacts.join(',')));
+}
+
+void TelemetryTests::guardsGuiRecoveryAcrossProcesses_data()
+{
+    QTest::addColumn<bool>("crash");
+    QTest::newRow("clean-exit") << false;
+    QTest::newRow("crashed-owner") << true;
+}
+
+void TelemetryTests::guardsGuiRecoveryAcrossProcesses()
+{
+    QFETCH(bool, crash);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString recoveryPath = directory.filePath("project-recovery.json");
+    const QByteArray snapshot("unsaved recovery must survive both contenders");
+    QVERIFY(writeBytes(recoveryPath, snapshot));
+    QProcess owner;
+    owner.start(QStringLiteral(GUI_SESSION_LOCK_HELPER_PATH), {directory.path()});
+    const auto stopOwner = qScopeGuard([&owner] {
+        if (owner.state() != QProcess::NotRunning) {
+            owner.kill();
+            owner.waitForFinished(5'000);
+        }
+    });
+    QVERIFY2(owner.waitForStarted(5'000), qPrintable(owner.errorString()));
+    QByteArray output;
+    // stdio can translate the helper's newline to CRLF on Windows.
+    QTRY_VERIFY2_WITH_TIMEOUT((output += owner.readAllStandardOutput()).trimmed() == "locked",
+        qPrintable(QStringLiteral("Helper output: %1; stderr: %2; state: %3; exit: %4")
+            .arg(QString::fromUtf8(output), QString::fromUtf8(owner.readAllStandardError()))
+            .arg(static_cast<int>(owner.state())).arg(owner.exitCode())), 5'000);
+    const QString lockPath = directory.filePath("gui-session.lock");
+    const QByteArray originalLock = readBytes(lockPath);
+    QVERIFY(!originalLock.isEmpty());
+    {
+        GuiSessionLock contender(directory.path());
+        QString error;
+        QVERIFY(!contender.tryAcquire(&error));
+        QVERIFY(error.contains("already running"));
+        QCOMPARE(readBytes(recoveryPath), snapshot);
+    }
+    // Destroying an unsuccessful contender must not unlock the live owner.
+    QCOMPARE(readBytes(lockPath), originalLock);
+    GuiSessionLock next(directory.path());
+    QVERIFY(!next.tryAcquire());
+    if (crash) owner.kill();
+    else QCOMPARE(owner.write("\n"), qint64(1));
+    QVERIFY(owner.waitForFinished(5'000));
+    if (!crash) QCOMPARE(owner.exitCode(), 0);
+    QString error;
+    QVERIFY2(next.tryAcquire(&error), qPrintable(error));
+    QVERIFY(next.tryAcquire()); // Same guard is idempotent.
+    QCOMPARE(readBytes(recoveryPath), snapshot);
+    GuiSessionLock third(directory.path());
+    QVERIFY(!third.tryAcquire());
+}
+
+void TelemetryTests::failsClosedWhenGuiDataDirectoryIsUnavailable()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString file = directory.filePath("not-a-directory");
+    QVERIFY(writeBytes(file, "keep"));
+    GuiSessionLock guard(file);
+    QString error;
+    QVERIFY(!guard.tryAcquire(&error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(readBytes(file), QByteArray("keep"));
 }
 
 void TelemetryTests::savesProjectsAtomically()
@@ -1844,6 +1925,162 @@ void TelemetryTests::updatesCustomTemplatesInPlace()
     qputenv("FLAPPEDEAR_TEMPLATE_STORE", storePath.toUtf8());
     QVERIFY(compatibleReload.applyTemplate(templateId));
     QCOMPARE(compatibleReload.widget(0).value("settings").toMap().value("fontSize").toDouble(), 60.0);
+}
+
+void TelemetryTests::rejectsTemplateStoreCountGrowth()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray previous = qgetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    const auto restore = qScopeGuard([previous] {
+        if (previous.isNull()) qunsetenv("FLAPPEDEAR_TEMPLATE_STORE");
+        else qputenv("FLAPPEDEAR_TEMPLATE_STORE", previous);
+    });
+    const QString path = directory.filePath("templates.json");
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", path.toUtf8());
+    WidgetModel model;
+    QVERIFY(model.applyTemplate("minimal"));
+    const qsizetype builtInCount = model.templates().size();
+    QJsonArray templates;
+    for (qsizetype index = 0; index < ProjectLimits::maximumTemplateCount; ++index) {
+        templates.append(QJsonObject{{"id", QString("user-%1").arg(index)}, {"name", "Saved"},
+                                     {"widgets", model.toJson()}});
+    }
+    const QByteArray original = QJsonDocument(QJsonObject{
+        {"schemaVersion", 1}, {"templates", templates}}).toJson();
+    QVERIFY(writeBytes(path, original));
+    model.reloadTemplates();
+    QVERIFY(model.lastError().isEmpty());
+    QCOMPARE(model.templates().size(), builtInCount + ProjectLimits::maximumTemplateCount);
+    QVERIFY(model.saveCurrentAsTemplate("One too many", "").isEmpty());
+    QVERIFY(!model.lastError().isEmpty());
+    QCOMPARE(readBytes(path), original);
+    const QString importPath = directory.filePath("import.fettemplate");
+    QVERIFY(writeBytes(importPath, QJsonDocument(templates.first().toObject()).toJson()));
+    QVERIFY(model.importTemplate(QUrl::fromLocalFile(importPath)).isEmpty());
+    QCOMPARE(readBytes(path), original);
+    WidgetModel restarted;
+    QCOMPARE(restarted.templates().size(), builtInCount + ProjectLimits::maximumTemplateCount);
+    QVERIFY(restarted.applyTemplate("user-0"));
+    QVERIFY(restarted.updateTemplate("user-0"));
+    QVERIFY(restarted.deleteTemplate("user-1"));
+    const QString replacement = restarted.saveCurrentAsTemplate("Replacement", "");
+    QVERIFY(!replacement.isEmpty());
+    WidgetModel afterReplacement;
+    QVERIFY(afterReplacement.applyTemplate(replacement));
+    QCOMPARE(afterReplacement.templates().size(), builtInCount + ProjectLimits::maximumTemplateCount);
+}
+
+void TelemetryTests::rejectsTemplateStoreByteGrowth()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray previous = qgetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    const auto restore = qScopeGuard([previous] {
+        if (previous.isNull()) qunsetenv("FLAPPEDEAR_TEMPLATE_STORE");
+        else qputenv("FLAPPEDEAR_TEMPLATE_STORE", previous);
+    });
+    const QString path = directory.filePath("templates.json");
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", path.toUtf8());
+    WidgetModel source;
+    QVERIFY(source.applyTemplate("minimal"));
+    QJsonArray futureData;
+    for (int index = 0; index < 2044; ++index) futureData.append(QString(4096, QLatin1Char('x')));
+    const QJsonObject root{{"schemaVersion", 1}, {"templates", QJsonArray{QJsonObject{
+        {"id", "user-large"}, {"name", "Large compatible template"},
+        {"widgets", source.toJson()}, {"futureData", futureData}}}}};
+    const QByteArray original = QJsonDocument(root).toJson(QJsonDocument::Compact);
+    QVERIFY(original.size() < ProjectLimits::templateStoreBytes);
+    QVERIFY(QJsonDocument(root).toJson(QJsonDocument::Indented).size() > ProjectLimits::templateStoreBytes);
+    QVERIFY(writeBytes(path, original));
+    WidgetModel model;
+    QVERIFY(model.lastError().isEmpty());
+    QVERIFY(model.applyTemplate("user-large"));
+    const QVariantList before = model.templates();
+    QVERIFY(!model.updateTemplate("user-large"));
+    QVERIFY(!model.lastError().isEmpty());
+    QCOMPARE(readBytes(path), original);
+    QCOMPARE(model.templates(), before);
+    QVERIFY(model.saveCurrentAsTemplate("Extra", "").isEmpty());
+    QCOMPARE(readBytes(path), original);
+    WidgetModel restarted;
+    QVERIFY(restarted.applyTemplate("user-large"));
+    QVERIFY(restarted.deleteTemplate("user-large"));
+    QVERIFY(!restarted.saveCurrentAsTemplate("Small", "").isEmpty());
+}
+
+void TelemetryTests::preservesRejectedTemplateStores()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray previous = qgetenv("FLAPPEDEAR_TEMPLATE_STORE");
+    const auto restore = qScopeGuard([previous] {
+        if (previous.isNull()) qunsetenv("FLAPPEDEAR_TEMPLATE_STORE");
+        else qputenv("FLAPPEDEAR_TEMPLATE_STORE", previous);
+    });
+    const QString path = directory.filePath("templates.json");
+    qputenv("FLAPPEDEAR_TEMPLATE_STORE", path.toUtf8());
+    WidgetModel model;
+    QVERIFY(model.applyTemplate("minimal"));
+    const QString id = model.saveCurrentAsTemplate("Preserved", "");
+    QVERIFY(!id.isEmpty());
+    const QByteArray good = readBytes(path);
+    const QVariantList templates = model.templates();
+    QJsonObject tooMany = QJsonDocument::fromJson(good).object();
+    QJsonArray entries;
+    for (qsizetype index = 0; index <= ProjectLimits::maximumTemplateCount; ++index)
+        entries.append(tooMany.value("templates").toArray().first());
+    tooMany.insert("templates", entries);
+    const QList<QByteArray> rejected{
+        QByteArray("{invalid"), QJsonDocument(tooMany).toJson(),
+        QByteArray(ProjectLimits::templateStoreBytes + 1, ' ')};
+    for (const QByteArray &bytes : rejected) {
+        QVERIFY(writeBytes(path, bytes));
+        model.reloadTemplates();
+        QVERIFY(!model.lastError().isEmpty());
+        QCOMPARE(model.templates(), templates); // Retain the last good in-memory collection.
+        QVERIFY(model.saveCurrentAsTemplate("Would overwrite", "").isEmpty());
+        QVERIFY(!model.deleteTemplate(id));
+        QCOMPARE(readBytes(path), bytes);
+        WidgetModel restarted;
+        QVERIFY(!restarted.lastError().isEmpty());
+        QVERIFY(restarted.applyTemplate("minimal")); // Built-ins remain usable.
+        QVERIFY(restarted.saveCurrentAsTemplate("Would overwrite after restart", "").isEmpty());
+        QCOMPARE(readBytes(path), bytes);
+    }
+    QVERIFY(writeBytes(path, good));
+    model.reloadTemplates();
+    QVERIFY(model.lastError().isEmpty());
+    QVERIFY(model.updateTemplate(id));
+}
+
+void TelemetryTests::boundsLiveWidgetAndCueMutations()
+{
+    WidgetModel model;
+    for (qsizetype index = 0; index < ProjectLimits::maximumWidgets; ++index)
+        QVERIFY(model.addWidget("speed") >= 0);
+    const int revision = model.revision();
+    QCOMPARE(model.addWidget("speed"), -1);
+    QCOMPARE(model.duplicateWidget(0), -1);
+    QCOMPARE(model.revision(), revision);
+    QVERIFY(!model.lastError().isEmpty());
+    for (qsizetype index = 0; index < ProjectLimits::maximumCuesPerWidget; ++index)
+        QVERIFY(model.addCue(0, 0, 1, "fade") >= 0);
+    const int cueRevision = model.revision();
+    QCOMPARE(model.addCue(0, 0, 1, "fade"), -1);
+    QCOMPARE(model.revision(), cueRevision);
+    for (qsizetype widget = 1; widget < ProjectLimits::maximumTotalCues / ProjectLimits::maximumCuesPerWidget; ++widget)
+        for (qsizetype cue = 0; cue < ProjectLimits::maximumCuesPerWidget; ++cue)
+            QVERIFY(model.addCue(static_cast<int>(widget), 0, 1, "fade") >= 0);
+    model.removeWidget(model.count() - 1); // Leave room for a widget but not more cues.
+    const int totalRevision = model.revision();
+    QCOMPARE(model.addCue(model.count() - 1, 0, 1, "fade"), -1);
+    QCOMPARE(model.duplicateWidget(0), -1);
+    QCOMPARE(model.revision(), totalRevision);
+    const QJsonObject document{{"version", 2}, {"scene", QJsonObject{{"widgets", model.toJson()}}}};
+    QVERIFY(ProjectLimits::validateProject(document));
+    model.removeCue(0, 0);
+    QVERIFY(model.addCue(model.count() - 1, 0, 1, "fade") >= 0);
 }
 
 void TelemetryTests::preservesTemplatePickerSelectionById()
@@ -4699,6 +4936,62 @@ void TelemetryTests::preservesExactExportRateRationals()
     QVERIFY(qAbs(ExportEngine::outputDuration(60, {60'000, 1'001}) - 1.001) < 0.0000001);
 }
 
+void TelemetryTests::floorsConvertedFrameCounts_data()
+{
+    QTest::addColumn<qint64>("ticks");
+    QTest::addColumn<qint64>("timeBaseNumerator");
+    QTest::addColumn<qint64>("timeBaseDenominator");
+    QTest::addColumn<qint64>("rateNumerator");
+    QTest::addColumn<qint64>("rateDenominator");
+    QTest::addColumn<qint64>("expectedCount"); // Zero means no schedulable range.
+    QTest::newRow("residual-denominator") << qint64(1001) << qint64(1) << qint64(30000)
+        << qint64(30) << qint64(1) << qint64(1);
+    QTest::newRow("odd-half-rate") << qint64(101) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(50);
+    QTest::newRow("both-residual-denominators") << qint64(101) << qint64(1) << qint64(60)
+        << qint64(30000) << qint64(1001) << qint64(50);
+    QTest::newRow("one-frame") << qint64(1) << qint64(1) << qint64(30)
+        << qint64(30) << qint64(1) << qint64(1);
+    QTest::newRow("sub-frame") << qint64(1) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("zero-duration") << qint64(0) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("negative-duration") << qint64(-1) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("invalid-time-base") << qint64(101) << qint64(1) << qint64(0)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("invalid-rate") << qint64(101) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(0) << qint64(0);
+    QTest::newRow("overflow") << std::numeric_limits<qint64>::max() << qint64(1) << qint64(1)
+        << qint64(2) << qint64(1) << qint64(0);
+    QTest::newRow("cancel-before-multiplication") << std::numeric_limits<qint64>::max()
+        << qint64(2) << qint64(2) << qint64(1) << qint64(1)
+        << std::numeric_limits<qint64>::max();
+}
+
+void TelemetryTests::floorsConvertedFrameCounts()
+{
+    QFETCH(qint64, ticks);
+    QFETCH(qint64, timeBaseNumerator);
+    QFETCH(qint64, timeBaseDenominator);
+    QFETCH(qint64, rateNumerator);
+    QFETCH(qint64, rateDenominator);
+    QFETCH(qint64, expectedCount);
+    MediaInfo source;
+    source.timeBase = {timeBaseNumerator, timeBaseDenominator};
+    source.videoDurationTicks = ticks;
+    source.averageFrameRate = {60, 1};
+    for (const qsizetype metadataCount : {qsizetype(0), qsizetype(101)}) {
+        source.videoFrameCount = metadataCount;
+        const auto range = ExportEngine::fullVideoFrameRange(source, {rateNumerator, rateDenominator});
+        QCOMPARE(range.has_value(), expectedCount > 0);
+        if (range) {
+            QCOMPARE(range->firstFrame, qint64(0));
+            QCOMPARE(range->frameCount(), expectedCount);
+        }
+    }
+}
+
 void TelemetryTests::schedulesFrameAddressedExportRangesExactly()
 {
     const MediaRational ntsc{60'000, 1'001};
@@ -5626,7 +5919,7 @@ void TelemetryTests::synchronizesGpsSpeed()
     const SyncCandidate candidate = TelemetrySyncEngine::synchronize(video, telemetry);
     QVERIFY2(qAbs(candidate.offset - 3.2) <= 0.11, qPrintable(QString::number(candidate.offset)));
     QVERIFY(candidate.diagnostics.correlation > 0.99);
-    QVERIFY(candidate.confidence > 0.7);
+    QVERIFY(shouldAutoApplySyncCandidate(candidate));
 }
 
 void TelemetryTests::cancelsSynchronizationDeterministically()
@@ -5653,6 +5946,43 @@ void TelemetryTests::reportsAmbiguousGpsSpeed()
     const SyncCandidate candidate = TelemetrySyncEngine::synchronize(video, telemetry);
     QCOMPARE(candidate.diagnostics.correlation, -1.0);
     QCOMPARE(candidate.confidence, 0.0);
+}
+
+void TelemetryTests::retainsGlobalSyncAmbiguity()
+{
+    const auto periodicSession = [](const int seconds) {
+        TelemetrySession session;
+        TelemetryChannel speed;
+        speed.name = QStringLiteral("speed");
+        for (int index = 0; index <= seconds * 10; ++index) {
+            const double time = index / 10.0;
+            speed.timestamps.append(time);
+            speed.values.append(static_cast<float>(70.0
+                + 20.0 * std::sin(2.0 * std::numbers::pi * time / 20.0)
+                + 8.0 * std::sin(2.0 * std::numbers::pi * time / 5.0)));
+        }
+        session.channels.insert(speed.name, speed);
+        session.aliases.insert(QStringLiteral("speed"), speed.name);
+        return session;
+    };
+    // Equally valid offsets of 0, 20, and 40 seconds; only one is inside refinement.
+    const auto candidate = TelemetrySyncEngine::synchronize(periodicSession(40), periodicSession(80));
+    QVERIFY(candidate.diagnostics.correlation > 0.99);
+    QVERIFY(candidate.diagnostics.peakUniqueness < 0.01);
+    QVERIFY(candidate.confidence < kAutomaticSyncConfidenceThreshold);
+    QVERIFY(!shouldAutoApplySyncCandidate(candidate));
+}
+
+void TelemetryTests::rejectsAutomaticSyncWithShortOverlap()
+{
+    // Both inputs pass the sample-count check and correlate strongly, but the
+    // shorter recording cannot provide twenty seconds of usable overlap.
+    const auto candidate = TelemetrySyncEngine::synchronize(
+        speedSession(0.0, 60.0, 0.0), speedSession(0.0, 10.0, 3.2));
+    QVERIFY(candidate.diagnostics.correlation > 0.9);
+    QVERIFY(candidate.diagnostics.validSamples <
+            candidate.diagnostics.sampleRate * kMinimumSyncOverlapSeconds + 1.0);
+    QVERIFY(!shouldAutoApplySyncCandidate(candidate));
 }
 
 void TelemetryTests::syncsOptionalRealRecording()

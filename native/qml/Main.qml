@@ -1533,6 +1533,14 @@ ApplicationWindow {
                 color: "#9ba7b5"
                 font.pixelSize: 11
             }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: appController.widgetModel.lastError.length > 0
+                        text: appController.widgetModel.lastError
+                        color: "#ff8a92"
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
             FeTextField {
                 id: templateDescription
                 Layout.fillWidth: true
@@ -1791,6 +1799,14 @@ ApplicationWindow {
 
                     SectionTitle {
                         text: qsTr("Layout template")
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: appController.widgetModel.lastError.length > 0
+                        text: appController.widgetModel.lastError
+                        color: "#ff8a92"
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
                     }
                     FeComboBox {
                         id: templatePicker

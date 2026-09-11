@@ -97,3 +97,43 @@ Deterministic tests cover malformed and ambiguous gates, directional passage der
 - For export changes, distinguish staged-overlay tests from final real-media validation.
 - For real media, state platform and fixture scope; do not generalize one machine's result.
 - For UI or host behavior, reproduce the visible interaction rather than inferring it from a build or unit test.
+
+## September 11 shipping fixes: frame counts
+
+`floorsConvertedFrameCounts` exercises the production range calculation with missing
+frame metadata and changed rates: odd durations, residual denominators, sub-frame
+ranges, invalid rationals, overflow and factor cancellation. Counts use checked
+integer floor arithmetic. Native execution is covered by macOS/Windows CI; this
+change does not claim a new private-recording export acceptance run.
+
+## September 11 shipping fixes: synchronization confidence
+
+Refinement cannot increase confidence above the global search result. Automatic
+application also requires twenty seconds of usable resampled overlap in both
+search passes. Regressions cover equal peaks separated by 20 seconds and a short
+overlap with strong correlation; the existing distinctive 3.2-second fixture must
+still auto-apply. Constant-speed and cooperative-cancellation checks remain.
+
+## September 11 shipping fixes: template persistence
+
+Template writes validate the same count, structure and byte limits as reads before
+opening the destination, require a complete atomic write, and roll back the
+in-memory mutation on failure. A rejected store stays untouched and blocks writes
+until a successful reload; errors appear in the template sidebar/save popup.
+Live add/duplicate/cue operations enforce the corresponding document count limits.
+Regressions cover the 128-template boundary, writer byte growth, malformed and
+oversized stores across reload/restart, recovery after restoring a valid store,
+and widget/per-widget/total cue boundaries.
+
+## September 11 shipping fixes: recovery ownership
+
+The editor takes a per-user application-data `GuiSessionLock` before shared
+settings, logs, export cleanup, or AppController initialization. Another editor
+shows a startup error and cannot access recovery; export workers remain separate.
+The lock disables age-based expiry and uses Qt process-identity stale-lock recovery
+([QLockFile](https://doc.qt.io/qt-6/qlockfile.html)). Two-process native tests verify
+exclusion, preservation of recovery bytes, clean release, killed-owner recovery,
+and failure when the directory is unavailable. Startup smoke also loads the guard
+error window. Older app versions do not participate in this lock and must be closed
+before running this build. On Windows, Qt documents a stale-lock detection limitation
+for non-ASCII hostnames; failure remains closed rather than risking recovery data.

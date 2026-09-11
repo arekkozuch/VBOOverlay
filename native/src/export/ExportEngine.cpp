@@ -326,7 +326,9 @@ std::optional<qint64> multiplyDivideFloor(
     qint64 product = 0;
     if (!checkedMultiply(numerators[0], numerators[1], &product)
         || !checkedMultiply(product, numerators[2], &product)) return std::nullopt;
-    return product;
+    // Integer division can be applied sequentially for nonnegative operands:
+    // floor(floor(n / a) / b) == floor(n / (a * b)), without overflowing a * b.
+    return product / denominators[0] / denominators[1];
 }
 
 std::optional<qint64> nominalTimecodeRate(const MediaRational &frameRate)

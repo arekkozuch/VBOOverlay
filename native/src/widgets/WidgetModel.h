@@ -28,6 +28,7 @@ class WidgetModel final : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
     Q_PROPERTY(QVariantList templates READ templates NOTIFY templatesChanged)
+    Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
 
 public:
     enum Role {
@@ -54,6 +55,7 @@ public:
     [[nodiscard]] int count() const;
     [[nodiscard]] int revision() const;
     [[nodiscard]] QVariantList templates() const;
+    [[nodiscard]] QString lastError() const { return m_lastError; }
     [[nodiscard]] const WidgetData *widgetAt(int index) const;
 
     Q_INVOKABLE int addWidget(const QString &type);
@@ -88,17 +90,22 @@ signals:
     void countChanged();
     void revisionChanged();
     void templatesChanged();
+    void lastErrorChanged();
 
 private:
     static WidgetData createWidget(const QString &type, int index);
     static bool validType(const QString &type);
     void update(int index);
     void loadUserTemplates();
-    bool saveUserTemplates() const;
+    bool saveUserTemplates();
+    void setLastError(const QString &error);
+    [[nodiscard]] qsizetype totalCueCount() const;
     [[nodiscard]] QJsonArray allTemplates() const;
 
     QList<WidgetData> m_widgets;
     QJsonArray m_userTemplates;
+    QString m_lastError;
+    bool m_templateStoreWritable = false;
     int m_revision = 0;
 };
 

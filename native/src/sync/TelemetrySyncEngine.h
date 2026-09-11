@@ -29,6 +29,7 @@ struct SyncCandidate {
 // overcome an ambiguous peak or short overlap. This keeps the well-supported
 // real-recording result automatic while making weaker matches reviewable.
 inline constexpr double kAutomaticSyncConfidenceThreshold = 0.75;
+inline constexpr double kMinimumSyncOverlapSeconds = 20.0;
 
 enum class SyncConfidenceLevel { High, Medium, Low };
 
