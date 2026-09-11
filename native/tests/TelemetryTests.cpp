@@ -3307,8 +3307,19 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
         "color=c=black:s=640x360:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video});
     QVERIFY(encoder.waitForFinished(30'000));
     QCOMPARE(encoder.exitCode(), 0);
+    ExportOutputTransaction transaction;
+    QCOMPARE(transaction.prepare(output, video, {source}, false).status,
+             ExportOutputTransaction::PreparationStatus::Ready);
+    const auto id = transaction.transactionId();
+    const auto overlay = QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv").arg(id));
+    const auto manifestPath = ExportArtifactManifest::manifestPathFor(id);
+    QString error;
+    QVERIFY2(ExportArtifactManifest::create({id, QDateTime::currentMSecsSinceEpoch(), overlay,
+        transaction.stagingPath(), output, QCoreApplication::applicationPid(), "preparing"}, &error), qPrintable(error));
+    const auto cleanup = qScopeGuard([&] { static_cast<void>(ExportArtifactManifest::cleanupOwned(manifestPath)); });
     WidgetModel widgets;
-    const QJsonObject settings{{"vboPath", source}, {"inputPath", video}, {"outputPath", output},
+    const QJsonObject settings{{"vboPath", source}, {"inputPath", video}, {"outputPath", transaction.stagingPath()},
+        {"manifestPath", manifestPath}, {"temporaryOverlayPath", overlay},
         {"widgets", widgets.toJson()}, {"sync", QJsonObject{{"offset", .1}, {"timeScale", 1.0}}},
         {"firstFrame", 0}, {"lastFrame", 2}, {"audioEnabled", false}, {"encoder", "libx265"}};
     QVERIFY(writeBytes(config, QJsonDocument(settings).toJson()));
@@ -3318,9 +3329,13 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     QVERIFY2(worker.waitForFinished(60'000), qPrintable(worker.errorString()));
     const auto events = worker.readAllStandardOutput() + worker.readAllStandardError();
     QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
+    QByteArray failures;
+    for (const auto &line : events.split('\n'))
+        if (line.contains("\"passed\":false") || line.contains("\"state\":\"failed\"")) failures += line + '\n';
     // Qt Test truncates long assertion messages; preserve the terminal error.
-    QVERIFY2(worker.exitCode() == 0, events.right(4000).constData());
+    QVERIFY2(worker.exitCode() == 0, (failures.isEmpty() ? events.right(4000) : failures.left(4000)).constData());
     QVERIFY2(events.contains("initializeRenderer"), events.constData());
+    QVERIFY2(transaction.commit(&error), qPrintable(error));
     const auto media = MediaProbe::probe(output, {}, true);
     QVERIFY(QFileInfo(output).size() > 0);
     QCOMPARE(media.videoFrameCount, 3);

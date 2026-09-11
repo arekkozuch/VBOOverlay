@@ -91,7 +91,8 @@ native timestamps and units, primary GPS, missing values and real gaps, invalid
 schemas/lengths/encodings, ambiguous sources, malformed paths, archive corruption,
 resource limits and cancellation. The application suite tests save/reopen/relink and
 a short RCZ export through the production worker. The fixture selects `libx265`
-through the worker's optional `encoder` setting; ordinary editor exports retain
+through the worker's optional `encoder` setting and uses the normal output transaction
+and ownership manifest through final validation/commit; ordinary editor exports retain
 automatic selection. Both suites run in Cloud CI.
 
 A separate private comparison can be run without uploading recordings:
