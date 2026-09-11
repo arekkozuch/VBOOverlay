@@ -223,9 +223,22 @@ set_target_properties(flappedear_native PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+include(GNUInstallDirs)
 install(TARGETS flappedear_native
     BUNDLE DESTINATION .
-    RUNTIME DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+option(FLAPPEDEAR_DEPLOY_QT "Deploy Qt runtime into an internal candidate package" OFF)
+if(FLAPPEDEAR_DEPLOY_QT)
+    if(NOT APPLE AND NOT WIN32)
+        message(FATAL_ERROR "Candidate deployment currently supports macOS and Windows only")
+    endif()
+    qt_generate_deploy_qml_app_script(
+        TARGET flappedear_native
+        OUTPUT_SCRIPT flappedear_deploy_script
+        NO_TRANSLATIONS
+    )
+    install(SCRIPT ${flappedear_deploy_script})
+endif()
 
 add_subdirectory(tests)

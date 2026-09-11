@@ -10,3 +10,5 @@ __MACOSX/
 /*.vbo
 /samples/*.vbo
 *.rcz
+
+__pycache__/
