@@ -3310,7 +3310,7 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     WidgetModel widgets;
     const QJsonObject settings{{"vboPath", source}, {"inputPath", video}, {"outputPath", output},
         {"widgets", widgets.toJson()}, {"sync", QJsonObject{{"offset", .1}, {"timeScale", 1.0}}},
-        {"firstFrame", 0}, {"lastFrame", 2}, {"audioEnabled", false}};
+        {"firstFrame", 0}, {"lastFrame", 2}, {"audioEnabled", false}, {"encoder", "libx265"}};
     QVERIFY(writeBytes(config, QJsonDocument(settings).toJson()));
     QProcess worker;
     worker.start(QStringLiteral(FLAPPEDEAR_NATIVE_PATH), {"--export-worker", config});
@@ -3318,7 +3318,8 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     QVERIFY2(worker.waitForFinished(60'000), qPrintable(worker.errorString()));
     const auto events = worker.readAllStandardOutput() + worker.readAllStandardError();
     QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
-    QVERIFY2(worker.exitCode() == 0, events.constData());
+    // Qt Test truncates long assertion messages; preserve the terminal error.
+    QVERIFY2(worker.exitCode() == 0, events.right(4000).constData());
     QVERIFY2(events.contains("initializeRenderer"), events.constData());
     const auto media = MediaProbe::probe(output, {}, true);
     QVERIFY(QFileInfo(output).size() > 0);

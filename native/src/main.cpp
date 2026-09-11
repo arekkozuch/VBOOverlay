@@ -405,6 +405,7 @@ int exportWorker(const QString &configPath)
         FlappedEar::ExportSettings settings;
         settings.inputPath = config.value("inputPath").toString();
         settings.outputPath = config.value("outputPath").toString();
+        settings.encoder = config.value("encoder").toString();
         settings.outputSize = outputSize;
         settings.frameRate = {config.value("frameRateNumerator").toInteger(), config.value("frameRateDenominator").toInteger(1)};
         if (!settings.frameRate.isValid()) settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);
