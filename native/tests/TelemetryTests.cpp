@@ -156,6 +156,8 @@ private slots:
     void preservesTenBitFullRangeColorThroughVideoToolboxExport();
     void preservesExactExportRateRationals();
     void schedulesFrameAddressedExportRangesExactly();
+    void floorsConvertedFrameCounts_data();
+    void floorsConvertedFrameCounts();
     void enforcesStrictTerminalFrameDeficitEvidence();
     void derivesStablePreviewViewportAndLastFrameAdapter();
     void exposesReactivePreviewMetadataToQml();
@@ -4697,6 +4699,62 @@ void TelemetryTests::preservesExactExportRateRationals()
     QVERIFY((!MediaRational{30'000, 1'001}.isEquivalentTo({30, 1})));
     QVERIFY(qAbs(ExportEngine::outputDuration(600, {30'000, 1'001}) - 20.02) < 0.0000001);
     QVERIFY(qAbs(ExportEngine::outputDuration(60, {60'000, 1'001}) - 1.001) < 0.0000001);
+}
+
+void TelemetryTests::floorsConvertedFrameCounts_data()
+{
+    QTest::addColumn<qint64>("ticks");
+    QTest::addColumn<qint64>("timeBaseNumerator");
+    QTest::addColumn<qint64>("timeBaseDenominator");
+    QTest::addColumn<qint64>("rateNumerator");
+    QTest::addColumn<qint64>("rateDenominator");
+    QTest::addColumn<qint64>("expectedCount"); // Zero means no schedulable range.
+    QTest::newRow("residual-denominator") << qint64(1001) << qint64(1) << qint64(30000)
+        << qint64(30) << qint64(1) << qint64(1);
+    QTest::newRow("odd-half-rate") << qint64(101) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(50);
+    QTest::newRow("both-residual-denominators") << qint64(101) << qint64(1) << qint64(60)
+        << qint64(30000) << qint64(1001) << qint64(50);
+    QTest::newRow("one-frame") << qint64(1) << qint64(1) << qint64(30)
+        << qint64(30) << qint64(1) << qint64(1);
+    QTest::newRow("sub-frame") << qint64(1) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("zero-duration") << qint64(0) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("negative-duration") << qint64(-1) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("invalid-time-base") << qint64(101) << qint64(1) << qint64(0)
+        << qint64(30) << qint64(1) << qint64(0);
+    QTest::newRow("invalid-rate") << qint64(101) << qint64(1) << qint64(60)
+        << qint64(30) << qint64(0) << qint64(0);
+    QTest::newRow("overflow") << std::numeric_limits<qint64>::max() << qint64(1) << qint64(1)
+        << qint64(2) << qint64(1) << qint64(0);
+    QTest::newRow("cancel-before-multiplication") << std::numeric_limits<qint64>::max()
+        << qint64(2) << qint64(2) << qint64(1) << qint64(1)
+        << std::numeric_limits<qint64>::max();
+}
+
+void TelemetryTests::floorsConvertedFrameCounts()
+{
+    QFETCH(qint64, ticks);
+    QFETCH(qint64, timeBaseNumerator);
+    QFETCH(qint64, timeBaseDenominator);
+    QFETCH(qint64, rateNumerator);
+    QFETCH(qint64, rateDenominator);
+    QFETCH(qint64, expectedCount);
+    MediaInfo source;
+    source.timeBase = {timeBaseNumerator, timeBaseDenominator};
+    source.videoDurationTicks = ticks;
+    source.averageFrameRate = {60, 1};
+    for (const qsizetype metadataCount : {qsizetype(0), qsizetype(101)}) {
+        source.videoFrameCount = metadataCount;
+        const auto range = ExportEngine::fullVideoFrameRange(source, {rateNumerator, rateDenominator});
+        QCOMPARE(range.has_value(), expectedCount > 0);
+        if (range) {
+            QCOMPARE(range->firstFrame, qint64(0));
+            QCOMPARE(range->frameCount(), expectedCount);
+        }
+    }
 }
 
 void TelemetryTests::schedulesFrameAddressedExportRangesExactly()

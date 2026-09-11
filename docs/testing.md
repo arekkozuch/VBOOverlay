@@ -97,3 +97,11 @@ Deterministic tests cover malformed and ambiguous gates, directional passage der
 - For export changes, distinguish staged-overlay tests from final real-media validation.
 - For real media, state platform and fixture scope; do not generalize one machine's result.
 - For UI or host behavior, reproduce the visible interaction rather than inferring it from a build or unit test.
+
+## September 11 shipping fixes: frame counts
+
+`floorsConvertedFrameCounts` exercises the production range calculation with missing
+frame metadata and changed rates: odd durations, residual denominators, sub-frame
+ranges, invalid rationals, overflow and factor cancellation. Counts use checked
+integer floor arithmetic. Native execution is covered by macOS/Windows CI; this
+change does not claim a new private-recording export acceptance run.
