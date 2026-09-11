@@ -49,25 +49,29 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 
 ### Native RaceChrono RCZ import
 
-Requested 11 September 2026. Queue after the current release-correctness fixes;
-RCZ support is not implemented yet.
+Requested and implemented 11 September 2026 for flat, uninterrupted version-1 shared sessions.
+See [supported format and validation](docs/rcz-format.md). Resumed sessions, backups and
+multiple-session selection remain unsupported and fail explicitly.
 
-- [ ] Inspect a representative RCZ session and matching VBO export from the same
+- [x] Inspect a representative RCZ session and matching VBO export from the same
   RaceChrono version; record archive/schema variants and verified channel/unit mappings.
-- [ ] Import RCZ directly into the existing `TelemetrySession` model alongside VBO,
+- [x] Import RCZ directly into the existing `TelemetrySession` model alongside VBO,
   preserving per-channel timestamps, missing values, GPS, recorded OBD channels and heart rate.
   Never infer an unavailable channel or couple telemetry time to video FPS.
-- [ ] Define supported single-session, resumed-session and multi-session archive behavior;
+- [x] Define supported single-session, resumed-session and multi-session archive behavior;
   require explicit selection or reject unsupported variants rather than silently choosing data.
-- [ ] Bound archive/member counts and compressed/expanded bytes, validate paths and metadata,
+- [x] Bound archive/member counts and compressed/expanded bytes, validate paths and metadata,
   reject malformed/truncated/unsupported inputs, and keep loading cooperatively cancellable.
-- [ ] Preserve source timing-gate metadata where supported and verify lap results against
+- [x] Preserve source timing-gate metadata where supported and verify lap results against
   the corresponding recording; do not invent gates from undocumented fields.
-- [ ] Support RCZ in file dialogs, asynchronous import, project save/reopen/relink/recovery,
+- [x] Support RCZ in file dialogs, asynchronous import, project save/reopen/relink/recovery,
   and the export worker. Preview and export must resolve the same telemetry and transform.
-- [ ] Add synthetic native regression fixtures to both CI platforms and separate private
+- [x] Add synthetic native regression fixtures to both CI platforms and separate private
   RCZ/VBO equivalence acceptance for timestamps, units, overlapping channels, gaps and laps,
   allowing documented precision/sampling differences between the formats.
+
+- [ ] Correct RaceChrono VBO gate interpretation after checking exporter variants; the new
+  private pair exposed three detected VBO laps versus five recorded/native RCZ laps.
 
 ### Lap timing and session analysis
 
