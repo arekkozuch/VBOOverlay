@@ -114,4 +114,5 @@ multiple-session selection remain unsupported and fail explicitly.
 
 - [ ] macOS signing and notarization.
 - [ ] Windows code signing.
-- [ ] Repeatable self-contained packages, installers, and update strategy.
+- [x] Windows per-user NSIS internal installer with exact-file removal and CI lifecycle checks.
+- [ ] Complete distribution packaging/signing and an automatic update strategy; initial Windows candidates use uninstall/reinstall.

@@ -33,7 +33,7 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 - Qt 6.8 or newer with Concurrent, Core, Gui and matching GuiPrivate headers, Qml, Quick, Quick Controls 2, Multimedia, and Test; include the SVG and Shader Tools modules in binary SDK installations.
 - FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; the command-line tools are not bundled. A small production-filter preflight also requires explicit alpha-mode support.
 
-Development targets are macOS and Windows. CI pins Qt 6.8.3 and produces internal Release candidates with deployed Qt runtimes. Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
+Development targets are macOS and Windows. CI pins Qt 6.8.3 and produces internal Release candidates with deployed Qt runtimes. Windows Release candidates also include a [per-user NSIS installer](docs/windows-installer.md). Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
 
 ## Build
 

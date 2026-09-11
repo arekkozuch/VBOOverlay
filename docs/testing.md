@@ -13,7 +13,7 @@ The native suite assigns a unique test application identity and checks a default
 
 ## Cloud CI
 
-[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Four jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application Qt Test suite, RCZ/parser suite and production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives.
+[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Four jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application Qt Test suite, RCZ/parser suite and production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows Release also compiles NSIS and runs two install/uninstall cycles, checking payload hashes, per-user registration/shortcuts, SDK-hidden startup, overwrite rejection and preservation of a user-added file. See [Windows installer](windows-installer.md).
 
 | Job | Renderer | Toolchain |
 | --- | --- | --- |

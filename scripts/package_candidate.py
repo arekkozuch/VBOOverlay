@@ -10,6 +10,34 @@ import subprocess
 import tempfile
 
 
+def smoke_installed(executable, sdk, log_path):
+    system = platform.system()
+    env = os.environ.copy()
+    for key in ("QT_PLUGIN_PATH", "QML_IMPORT_PATH", "QML2_IMPORT_PATH", "DYLD_LIBRARY_PATH",
+                "DYLD_FRAMEWORK_PATH", "QT_ROOT_DIR"):
+        env.pop(key, None)
+    env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep)
+                                  if not Path(p).resolve().is_relative_to(sdk))
+    env.update(QT_QPA_PLATFORM="cocoa" if system == "Darwin" else "windows",
+               QT_QUICK_BACKEND="software", QT_FORCE_STDERR_LOGGING="1")
+    hidden_sdk = sdk.with_name(sdk.name + "-candidate-smoke-hidden")
+    if hidden_sdk.exists():
+        raise RuntimeError("SDK isolation destination already exists")
+    sdk.rename(hidden_sdk)
+    try:
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run([str(executable), "--startup-smoke"], cwd=cwd, env=env,
+                                    capture_output=True, text=True, errors="replace", timeout=60)
+    finally:
+        hidden_sdk.rename(sdk)
+    log = result.stdout + result.stderr
+    log_path.write_text(log, encoding="utf-8")
+    if result.returncode or "Startup smoke passed" not in log or any(
+            marker in log for marker in ("ReferenceError", "TypeError", "Binding loop")):
+        raise RuntimeError("Installed candidate failed startup smoke:\n" + log[-8000:])
+
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", type=Path, required=True)
@@ -32,29 +60,7 @@ def main():
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(bundle)], check=True)
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(bundle)], check=True)
 
-    env = os.environ.copy()
-    for key in ("QT_PLUGIN_PATH", "QML_IMPORT_PATH", "QML2_IMPORT_PATH", "DYLD_LIBRARY_PATH",
-                "DYLD_FRAMEWORK_PATH", "QT_ROOT_DIR"):
-        env.pop(key, None)
-    env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep)
-                                  if not Path(p).resolve().is_relative_to(sdk))
-    env.update(QT_QPA_PLATFORM="cocoa" if system == "Darwin" else "windows",
-               QT_QUICK_BACKEND="software", QT_FORCE_STDERR_LOGGING="1")
-    hidden_sdk = sdk.with_name(sdk.name + "-candidate-smoke-hidden")
-    if hidden_sdk.exists():
-        raise RuntimeError("SDK isolation destination already exists")
-    sdk.rename(hidden_sdk)
-    try:
-        with tempfile.TemporaryDirectory() as cwd:
-            result = subprocess.run([str(executable), "--startup-smoke"], cwd=cwd, env=env,
-                                    capture_output=True, text=True, errors="replace", timeout=60)
-    finally:
-        hidden_sdk.rename(sdk)
-    log = result.stdout + result.stderr
-    (repo / "ci-logs/candidate-smoke.txt").write_text(log, encoding="utf-8")
-    if result.returncode or "Startup smoke passed" not in log or any(
-            marker in log for marker in ("ReferenceError", "TypeError", "Binding loop")):
-        raise RuntimeError("Installed candidate failed startup smoke:\n" + log[-8000:])
+    smoke_installed(executable, sdk, repo / "ci-logs/candidate-smoke.txt")
 
     for name in ("README.md", "ROADMAP.md", "currentstate.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copyfile(repo / name, stage / name)

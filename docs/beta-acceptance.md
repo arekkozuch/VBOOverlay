@@ -34,7 +34,7 @@ These are internal test packages, not published releases. macOS uses an ad-hoc s
 Developer ID signing/notarization and Windows publisher signing remain pending. Qt
 deployment can include multimedia codec libraries supplied by the Qt SDK; it does not
 install the external `ffmpeg`/`ffprobe` command-line tools. Exact redistribution notices,
-license/source obligations, installer UX and signing must be completed before distribution
+license/source obligations, interactive installer acceptance and signing must be completed before distribution
 is approved. See [third-party inventory](../THIRD_PARTY_NOTICES.md).
 
 To reproduce the candidate build with the same platform/compiler and Qt 6.8.3 SDK:
@@ -54,8 +54,9 @@ environment: its `--qt-root` directory is temporarily renamed during the startup
 ## Installation and prerequisites for acceptance
 
 1. Download a candidate from a successful workflow and verify its SHA-256 sidecar.
-2. Extract the inner archive. macOS contains `stage/FlappedEar Telemetry.app`; Windows
-   contains `stage/bin/FlappedEar Telemetry.exe`. Keep the complete extracted tree.
+2. Windows: run the `*-setup.exe` candidate installer; see [Windows installer](windows-installer.md).
+   Alternatively extract the portable archive and keep its complete tree, including
+   `stage/bin/FlappedEar Telemetry.exe`. macOS: extract `stage/FlappedEar Telemetry.app`.
 3. Install compatible external FFmpeg and ffprobe. Both must resolve on PATH; macOS
    also searches `/opt/homebrew/bin` and `/usr/local/bin`. Record `ffmpeg -version` and
    `ffprobe -version`. Export checks a working HEVC encoder and the actual composition

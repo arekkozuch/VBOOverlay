@@ -13,6 +13,8 @@ The September 1 handoff is preserved in [the historical checkpoint](docs/history
 - Verified RaceChrono Pro 10.2.4 VBO timing gates convert centre/direction vectors into perpendicular finite gates. Generic VBO endpoints remain unchanged; unverified identified RaceChrono versions omit gates with a warning.
 - Debug/Release CI and internal Release deployment are defined for macOS ARM64 and Windows x64 with Qt 6.8.3. Successful Release jobs attach candidate archives, hashes and build manifests after installed startup with the build SDK hidden.
 
+- Windows Release CI builds an unsigned NSIS 3.12 installer, with per-user shortcuts/registration, installed startup, uninstall/reinstall and preservation checks. See [installer contract](docs/windows-installer.md).
+
 ## Evidence
 
 | Evidence | Result / boundary |
