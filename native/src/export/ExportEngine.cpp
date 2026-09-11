@@ -529,10 +529,26 @@ double ExportEngine::audioDurationForRange(
         || !std::isfinite(source.audioDuration) || source.audioDuration <= 0.0) {
         return 0.0;
     }
+    if (!std::isfinite(source.videoStartTime)) return 0.0;
+    const double rangeStart = source.videoStartTime + sourceRangeStart;
+    const double rangeEnd = source.videoStartTime + sourceRangeEnd;
     const double audioEnd = source.audioStartTime + source.audioDuration;
     if (!std::isfinite(audioEnd)) return 0.0;
-    return qMax(0.0, qMin(sourceRangeEnd, audioEnd)
-                     - qMax(sourceRangeStart, source.audioStartTime));
+    return qMax(0.0, qMin(rangeEnd, audioEnd)
+                     - qMax(rangeStart, source.audioStartTime));
+}
+
+double ExportEngine::audioStartForRange(const MediaInfo &source, const double start, const double end)
+{
+    return audioDurationForRange(source, start, end) > 0.0
+        ? std::max(0.0, source.audioStartTime - (source.videoStartTime + start)) : 0.0;
+}
+
+QString ExportEngine::stageBAudioFilterGraph(const StageBSourceAccess &access)
+{
+    // Subtract the selected VIDEO origin, retaining a real track-relative delay.
+    return QStringLiteral("[0:a]atrim=start=%1:end=%2,asetpts=PTS-(%1)/TB[audio]")
+        .arg(access.trimStartTimestamp, access.trimEndTimestamp);
 }
 
 double ExportEngine::framePresentationTime(
@@ -1333,11 +1349,9 @@ ExportResult ExportEngine::exportVideo(
                     {QStringLiteral("-x265-params"), x265ColorParameters.join(':')});
             }
         }
-        if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
-            compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
-                ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
-                .arg(sourceAccess->trimStartTimestamp)
-                .arg(sourceAccess->trimEndTimestamp);
+        if (settings.audioEnabled && !source.audioCodecs.isEmpty()
+            && audioDurationForRange(source, sourceRangeStart, sourceRangeEnd) > 0.0) {
+            compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += ";" + stageBAudioFilterGraph(*sourceAccess);
             compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", QString::number(settings.audioBitrate)});
         } else {
             compositionArguments.append("-an");
@@ -1511,7 +1525,8 @@ ExportResult ExportEngine::exportVideo(
         const qint64 expectedFrameCount = static_cast<qint64>(expectedFrames);
         const double videoDuration = result.mediaInfo.videoDuration > 0.0
             ? result.mediaInfo.videoDuration : result.mediaInfo.duration;
-        const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty();
+        const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty()
+            && audioDurationForRange(source, sourceRangeStart, sourceRangeEnd) > 0.0;
         // Audio can legitimately end before the video stream (as on real action-camera
         // recordings). Validate against the selected audio-timeline intersection.
         const double expectedAudioDuration = audioDurationForRange(
@@ -1522,11 +1537,12 @@ ExportResult ExportEngine::exportVideo(
             result.mediaInfo.audioTimeBase.isValid() ? result.mediaInfo.audioTimeBase.value() : 0.0,
             audioFrameDuration);
         const bool audioPresent = !result.mediaInfo.audioCodecs.isEmpty();
+        const double expectedAudioStart = audioStartForRange(source, sourceRangeStart, sourceRangeEnd);
         const bool audioStartOk = !audioExpected
-            || qAbs(result.mediaInfo.audioStartTime - result.mediaInfo.videoStartTime)
-                <= audioTimingTolerance;
+            || qAbs(result.mediaInfo.audioStartTime - result.mediaInfo.videoStartTime - expectedAudioStart)
+                <= audioTimingTolerance + 1e-6;
         const bool audioDurationOk = !audioExpected
-            || qAbs(result.mediaInfo.audioDuration - expectedAudioDuration) <= audioTimingTolerance;
+            || qAbs(result.mediaInfo.audioDuration - expectedAudioDuration) <= audioTimingTolerance + 1e-6;
         const bool audioOk = !audioExpected || (audioPresent && audioStartOk && audioDurationOk);
         const bool otherValidationPassed = codecOk && dimensionsOk && averageRateOk && nominalRateOk
             && pixelFormatOk && bitDepthOk && encoderProfileOk && colorRangeOk && colorSpaceOk
@@ -1613,7 +1629,7 @@ ExportResult ExportEngine::exportVideo(
                                ? QStringLiteral("none") : result.mediaInfo.audioCodecs.join(','), audioOk);
         if (audioExpected) {
             finalValidationLog(QStringLiteral("checkAudioStart"), QStringLiteral("A/V start delta"),
-                               QStringLiteral("≤ %1 s").arg(audioTimingTolerance, 0, 'f', 6),
+                               QStringLiteral("%1 ± %2 s").arg(expectedAudioStart, 0, 'f', 6).arg(audioTimingTolerance, 0, 'f', 6),
                                QString::number(qAbs(result.mediaInfo.audioStartTime
                                                     - result.mediaInfo.videoStartTime), 'f', 9),
                                audioStartOk);

@@ -57,6 +57,7 @@
 #include <cmath>
 #include <atomic>
 #include <array>
+#include <bit>
 #include <limits>
 #include <numbers>
 #include <thread>
@@ -71,6 +72,7 @@ private slots:
     void cleanupTestCase();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
+    void exportsSyntheticRczThroughWorker_data();
     void exportsSyntheticRczThroughWorker();
     void toleratesMalformedRows();
     void preservesRepeatedDataSections();
@@ -3295,20 +3297,38 @@ void TelemetryTests::surfacesAndRetriesRecoveryPersistenceFailure()
     QVERIFY(QFileInfo(recoveryPath).isFile());
 }
 
+void TelemetryTests::exportsSyntheticRczThroughWorker_data()
+{
+    QTest::addColumn<int>("sourcePts"); QTest::addColumn<bool>("withAudio");
+    QTest::addColumn<int>("firstFrame"); QTest::addColumn<int>("lastFrame");
+    QTest::newRow("rcz") << 0 << false << 0 << 2;
+    QTest::newRow("positive-pts") << 2 << false << 0 << 29;
+    QTest::newRow("delayed-short-audio") << 2 << true << 0 << 89;
+    QTest::newRow("range-after-audio") << 2 << true << 60 << 89;
+    QTest::newRow("range-within-audio") << 2 << true << 36 << 41;
+    QTest::newRow("range-before-audio") << 2 << true << 0 << 14;
+}
+
 void TelemetryTests::exportsSyntheticRczThroughWorker()
 {
+    QFETCH(int, sourcePts); QFETCH(bool, withAudio);
+    QFETCH(int, firstFrame); QFETCH(int, lastFrame);
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString ffmpeg = FfmpegTools::ffmpegPath();
     QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for the RCZ pipeline regression.");
     const auto source = directory.filePath("synthetic.rcz");
-    const auto video = directory.filePath("input.mp4");
+    const auto video = directory.filePath("input.mov");
     const auto output = directory.filePath("output.mp4");
     const auto config = directory.filePath("worker.json");
     QVERIFY(writeBytes(source, RczFixture::zip(RczFixture::members())));
     QProcess encoder;
-    encoder.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-        "color=c=black:s=640x360:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video});
+    QStringList inputArgs{"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=black:s=640x360:r=30:d=4"};
+    if (withAudio) inputArgs += QStringList{"-itsoffset", "1", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.5",
+        "-map", "0:v", "-map", "1:a", "-c:a", "pcm_s16le"};
+    inputArgs += QStringList{"-c:v", "libx264", "-pix_fmt", "yuv420p", "-output_ts_offset", QString::number(sourcePts), video};
+    encoder.start(ffmpeg, inputArgs);
     QVERIFY(encoder.waitForFinished(30'000));
     QCOMPARE(encoder.exitCode(), 0);
     ExportOutputTransaction transaction;
@@ -3325,7 +3345,7 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     const QJsonObject settings{{"vboPath", source}, {"inputPath", video}, {"outputPath", transaction.stagingPath()},
         {"manifestPath", manifestPath}, {"temporaryOverlayPath", overlay},
         {"widgets", widgets.toJson()}, {"sync", QJsonObject{{"offset", .1}, {"timeScale", 1.0}}},
-        {"firstFrame", 0}, {"lastFrame", 2}, {"audioEnabled", false}, {"encoder", "libx265"}};
+        {"firstFrame", firstFrame}, {"lastFrame", lastFrame}, {"audioEnabled", withAudio}, {"encoder", "libx265"}};
     QVERIFY(writeBytes(config, QJsonDocument(settings).toJson()));
     QProcess worker;
     worker.start(QStringLiteral(FLAPPEDEAR_NATIVE_PATH), {"--export-worker", config});
@@ -3342,7 +3362,27 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     QVERIFY2(transaction.commit(&error), qPrintable(error));
     const auto media = MediaProbe::probe(output, {}, true);
     QVERIFY(QFileInfo(output).size() > 0);
-    QCOMPARE(media.videoFrameCount, 3);
+    QCOMPARE(media.videoFrameCount, lastFrame - firstFrame + 1);
+    const double start = firstFrame / 30.0, end = (lastFrame + 1) / 30.0;
+    const double expectedAudioDuration = withAudio ? std::max(0.0, std::min(end, 1.5) - std::max(start, 1.0)) : 0.0;
+    if (expectedAudioDuration > 0) {
+        QVERIFY(!media.audioCodecs.isEmpty());
+        const double expectedStart = std::max(0.0, 1.0 - start);
+        QVERIFY(std::abs(media.audioStartTime - media.videoStartTime - expectedStart) < .023);
+        QVERIFY(std::abs(media.audioDuration - expectedAudioDuration) < .023);
+        QProcess decoder;
+        decoder.start(ffmpeg, {"-v", "error", "-i", output, "-map", "0:a", "-ac", "1", "-f", "f32le", "pipe:1"});
+        QVERIFY(decoder.waitForFinished(30'000));
+        QCOMPARE(decoder.exitCode(), 0);
+        const auto samples = decoder.readAllStandardOutput();
+        QVERIFY(samples.size() >= 4800 * 4);
+        double power = 0;
+        for (int index = 0; index < 4800; ++index) {
+            const float value = std::bit_cast<float>(qFromLittleEndian<quint32>(samples.constData() + index * 4));
+            power += value * value;
+        }
+        QVERIFY(std::sqrt(power / 4800) > .03); // Audible tone starts with the delayed stream.
+    } else QVERIFY(media.audioCodecs.isEmpty());
 }
 
 void TelemetryTests::savesReopensAndRelinksRcz()

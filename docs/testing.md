@@ -153,3 +153,9 @@ Stage B retains original input timestamps with `-copyts` and absolute timestamp 
 Production argument/graph regressions encode frame identities into a positive-PTS MP4
 and check every decoded frame in full, early and seeked ranges.
 See [FFmpeg timestamp options](https://ffmpeg.org/ffmpeg.html#Advanced-options).
+
+Audio trims use original timestamps and subtract the selected video origin, preserving
+a track's real delay. Selection/validation use the intersection with the audio stream;
+ranges before/after that stream export without audio. Worker regressions cover positive
+video PTS, delayed short audio, and ranges before/within/after audio. They verify output
+frame counts, audio start/duration and decoded tone energy near the start of the stream.

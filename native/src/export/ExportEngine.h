@@ -140,6 +140,8 @@ public:
     [[nodiscard]] static std::optional<StageBSourceAccess> stageBSourceAccess(
         const MediaInfo &source, const ExportFrameRange &range,
         const MediaRational &frameRate, qint64 prerollSeconds = 5);
+    [[nodiscard]] static double audioStartForRange(const MediaInfo &source, double start, double end);
+    [[nodiscard]] static QString stageBAudioFilterGraph(const StageBSourceAccess &access);
     [[nodiscard]] static QStringList stageBInputArguments(const StageBSourceAccess &access, const QString &path);
     [[nodiscard]] static QString stageBVideoFilterGraph(
         const StageBSourceAccess &sourceAccess,
