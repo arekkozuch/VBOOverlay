@@ -586,10 +586,14 @@ std::optional<StageBSourceAccess> ExportEngine::stageBSourceAccess(
     if (!start || !end || !preroll || secondsLessThan(*end, *start)) return std::nullopt;
     const ExactSeconds inputSeek = secondsLessThan(*start, *preroll)
         ? ExactSeconds{} : *subtractSeconds(*start, *preroll);
-    const auto localStart = subtractSeconds(*start, inputSeek);
-    const auto localEnd = subtractSeconds(*end, inputSeek);
-    if (!localStart || !localEnd) return std::nullopt;
-    return StageBSourceAccess{decimalSeconds(inputSeek), decimalSeconds(*localStart), decimalSeconds(*localEnd)};
+    return StageBSourceAccess{decimalSeconds(inputSeek), decimalSeconds(*start), decimalSeconds(*end)};
+}
+
+QStringList ExportEngine::stageBInputArguments(const StageBSourceAccess &access, const QString &path)
+{
+    // Retain original PTS, including across input seek. Both trim and seek now
+    // refer to the same source timestamp domain rather than implicit rebasing.
+    return {"-copyts", "-seek_timestamp", "1", "-ss", access.inputSeekTimestamp, "-i", path};
 }
 
 QString ExportEngine::stageBVideoFilterGraph(
@@ -615,7 +619,7 @@ QString ExportEngine::stageBVideoFilterGraph(
         "[1:v]setpts=PTS-STARTPTS,%5[temporaryOverlay];"
         "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=%6:format=%7[composited];"
         "[composited]format=pix_fmts=%8[video]")
-            .arg(sourceAccess.localTrimStartTimestamp)
+            .arg(sourceAccess.trimStartTimestamp)
             .arg(rateString(frameRate))
             .arg(expectedFrames)
             .arg(sourceSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
@@ -1288,8 +1292,10 @@ ExportResult ExportEngine::exportVideo(
             expectedFrames, result.mediaProfile);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
-            "-ss", sourceAccess->inputSeekTimestamp,
-            "-i", settings.inputPath, "-i", temporaryOverlayPath,
+        };
+        compositionArguments += stageBInputArguments(*sourceAccess, settings.inputPath);
+        compositionArguments += QStringList{
+            "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
             "-b:v", QString::number(settings.videoBitrate),
@@ -1330,8 +1336,8 @@ ExportResult ExportEngine::exportVideo(
         if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
             compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
                 ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
-                .arg(sourceAccess->localTrimStartTimestamp)
-                .arg(sourceAccess->localTrimEndTimestamp);
+                .arg(sourceAccess->trimStartTimestamp)
+                .arg(sourceAccess->trimEndTimestamp);
             compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", QString::number(settings.audioBitrate)});
         } else {
             compositionArguments.append("-an");
@@ -1347,8 +1353,8 @@ ExportResult ExportEngine::exportVideo(
                                              {"sourceRangeStart", sourceRangeStart},
                                              {"sourceRangeEnd", sourceRangeEnd},
                                              {"inputSeekTimestamp", sourceAccess->inputSeekTimestamp},
-                                             {"localTrimStartTimestamp", sourceAccess->localTrimStartTimestamp},
-                                             {"localTrimEndTimestamp", sourceAccess->localTrimEndTimestamp}});
+                                             {"trimStartTimestamp", sourceAccess->trimStartTimestamp},
+                                             {"trimEndTimestamp", sourceAccess->trimEndTimestamp}});
         compositor.setProcessChannelMode(QProcess::SeparateChannels);
         qInfo().noquote() << QStringLiteral("Stage B FFmpeg arguments: %1").arg(formatArgumentList(compositionArguments));
         if (!updateManifestState(settings, QStringLiteral("stageB"))) {
@@ -1378,7 +1384,7 @@ ExportResult ExportEngine::exportVideo(
                             .arg(stageBTimer.elapsed()), QStringLiteral("ffmpeg"),
                         {{"timeToFirstStageBOutputFrame", stageBTimer.elapsed()},
                          {"inputSeekTimestamp", sourceAccess->inputSeekTimestamp},
-                         {"localTrimStartTimestamp", sourceAccess->localTrimStartTimestamp},
+                         {"trimStartTimestamp", sourceAccess->trimStartTimestamp},
                          {"sourceRangeStart", sourceRangeStart},
                          {"sourceRangeEnd", sourceRangeEnd}});
             }

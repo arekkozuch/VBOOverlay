@@ -145,3 +145,11 @@ a source generation: path, fingerprint, mismatch-confirmation policy and dirty-s
 intent. Eight controller regressions cover both asset orders, import/relink and matching/
 mismatching project references. Replacing one asset must not strand the other or accept
 a mismatched reference without confirmation. Multi-session work remains deferred.
+
+## Original media timestamps
+
+Stage B retains original input timestamps with `-copyts` and absolute timestamp seeking
+(`-seek_timestamp 1`). Seek and trim share that domain; only filtered output is rebased.
+Production argument/graph regressions encode frame identities into a positive-PTS MP4
+and check every decoded frame in full, early and seeked ranges.
+See [FFmpeg timestamp options](https://ffmpeg.org/ffmpeg.html#Advanced-options).

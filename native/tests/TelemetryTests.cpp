@@ -172,6 +172,8 @@ private slots:
     void derivesStablePreviewViewportAndLastFrameAdapter();
     void exposesReactivePreviewMetadataToQml();
     void plansBoundedStageBSourceAccess();
+    void preservesFramesWithPositiveSourcePts_data();
+    void preservesFramesWithPositiveSourcePts();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
     void preservesAbsoluteExportTimestamps();
@@ -4557,6 +4559,63 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QCOMPARE(ExportEngine::audioDurationForRange(source, 8.0, 9.0), 0.0);
 }
 
+void TelemetryTests::preservesFramesWithPositiveSourcePts_data()
+{
+    QTest::addColumn<int>("first"); QTest::addColumn<int>("last");
+    QTest::newRow("full") << 0 << 299;
+    QTest::newRow("early-range") << 90 << 179;
+    QTest::newRow("seek-range") << 210 << 299;
+}
+
+void TelemetryTests::preservesFramesWithPositiveSourcePts()
+{
+    QFETCH(int, first); QFETCH(int, last);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto raw = directory.filePath("source.rgb");
+    const auto source = directory.filePath("source.mp4");
+    const auto overlayRaw = directory.filePath("overlay.rgba");
+    const auto overlay = directory.filePath("overlay.mkv");
+    const auto output = directory.filePath("output.rgba");
+    constexpr int width = 64, height = 16;
+    QByteArray pixels(300 * width * height * 3, '\0');
+    for (int frame = 0; frame < 300; ++frame) for (int y = 0; y < height; ++y)
+        for (int bit = 0; bit < 9; ++bit) for (int x = bit * 6; x < bit * 6 + 6; ++x)
+            for (int c = 0; c < 3; ++c) pixels[((frame * height + y) * width + x) * 3 + c] = (frame & (1 << bit)) ? char(255) : char(0);
+    QVERIFY(writeBytes(raw, pixels));
+    const int count = last - first + 1;
+    QVERIFY(writeBytes(overlayRaw, QByteArray(count * width * height * 4, '\0')));
+    const auto run = [&](const QStringList &args) {
+        QProcess process; process.start(FfmpegTools::ffmpegPath(), args);
+        if (!process.waitForFinished(30'000) || process.exitCode() != 0)
+            qWarning().noquote() << process.readAllStandardError();
+        return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    };
+    QVERIFY(run({"-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "64x16", "-framerate", "30", "-i", raw,
+        "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p", "-output_ts_offset", "2", source}));
+    QVERIFY(run({"-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "64x16", "-framerate", "30", "-i", overlayRaw,
+        "-c:v", "ffv1", "-pix_fmt", "bgra", overlay}));
+    const auto info = MediaProbe::probe(source);
+    QVERIFY(std::abs(info.videoStartTime - 2.0) < .001);
+    const auto access = ExportEngine::stageBSourceAccess(info, {first,last}, {30,1});
+    QVERIFY(access.has_value());
+    const auto profile = ExportMediaProfile::derive(info, {width,height}, {30,1}, 1'000'000, "libx265");
+    QStringList args{"-v", "error", "-y"};
+    args += ExportEngine::stageBInputArguments(*access, source);
+    args += QStringList{"-i", overlay, "-filter_complex", ExportEngine::stageBVideoFilterGraph(*access,
+        {width,height}, {width,height}, {30,1}, count, profile), "-map", "[video]", "-fps_mode", "cfr",
+        "-f", "rawvideo", "-pix_fmt", "rgba", output};
+    QVERIFY(run(args));
+    const auto decoded = readBytes(output);
+    QCOMPARE(decoded.size(), qsizetype(count * width * height * 4));
+    for (int frame = 0; frame < count; ++frame) {
+        int identity = 0;
+        for (int bit = 0; bit < 9; ++bit)
+            if (static_cast<unsigned char>(decoded[(frame * width * height + width * 8 + bit * 6 + 3) * 4]) > 127) identity |= 1 << bit;
+        QCOMPARE(identity, first + frame);
+    }
+}
+
 void TelemetryTests::plansBoundedStageBSourceAccess()
 {
     MediaInfo source;
@@ -4566,14 +4625,14 @@ void TelemetryTests::plansBoundedStageBSourceAccess()
     const auto access = ExportEngine::stageBSourceAccess(source, {60, 359}, rate);
     QVERIFY(access.has_value());
     QCOMPARE(access->inputSeekTimestamp, QStringLiteral("0"));
-    QCOMPARE(access->localTrimStartTimestamp, QStringLiteral("3.001"));
-    QCOMPARE(access->localTrimEndTimestamp, QStringLiteral("8.006"));
+    QCOMPARE(access->trimStartTimestamp, QStringLiteral("3.001"));
+    QCOMPARE(access->trimEndTimestamp, QStringLiteral("8.006"));
 
     const auto late = ExportEngine::stageBSourceAccess(source, {14'388, 16'186}, rate);
     QVERIFY(late.has_value());
     QCOMPARE(late->inputSeekTimestamp, QStringLiteral("237.0398"));
-    QCOMPARE(late->localTrimStartTimestamp, QStringLiteral("5"));
-    QCOMPARE(late->localTrimEndTimestamp, QStringLiteral("35.013316666666"));
+    QCOMPARE(late->trimStartTimestamp, QStringLiteral("242.0398"));
+    QCOMPARE(late->trimEndTimestamp, QStringLiteral("272.053116666666"));
 }
 
 void TelemetryTests::resolvesExplicitExportFormats()
