@@ -484,7 +484,7 @@ ApplicationWindow {
                 onTriggered: videoDialog.open()
             }
             Action {
-                text: qsTr("Open VBO…")
+                text: qsTr("Open telemetry…")
                 shortcut: "Ctrl+Shift+T"
                 onTriggered: vboDialog.open()
             }
@@ -770,8 +770,8 @@ ApplicationWindow {
     }
     FileDialog {
         id: vboDialog
-        title: qsTr("Open VBOX telemetry")
-        nameFilters: [qsTr("VBOX telemetry (*.vbo)")]
+        title: qsTr("Open telemetry")
+        nameFilters: [qsTr("Telemetry (*.vbo *.rcz)")]
         onAccepted: appController.loadVbo(selectedFile)
     }
     FileDialog {
@@ -783,7 +783,7 @@ ApplicationWindow {
     FileDialog {
         id: vboRelinkDialog
         title: qsTr("Locate project telemetry")
-        nameFilters: [qsTr("VBOX telemetry (*.vbo)")]
+        nameFilters: [qsTr("Telemetry (*.vbo *.rcz)")]
         onAccepted: appController.relinkVbo(selectedFile)
     }
     FileDialog {
@@ -1738,7 +1738,7 @@ ApplicationWindow {
                 }
                 FeButton {
                     compact: true
-                    text: qsTr("Open VBO")
+                    text: qsTr("Open telemetry")
                     onClicked: vboDialog.open()
                 }
                 FeButton {
@@ -2535,7 +2535,7 @@ ApplicationWindow {
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: appController.telemetryName || qsTr("Optional VBOX session")
+                            text: appController.telemetryName || qsTr("Optional telemetry session")
                             color: appController.telemetryName ? "#55e6a5" : "#718092"
                             elide: Text.ElideMiddle
                             font.pixelSize: 10
@@ -2545,7 +2545,7 @@ ApplicationWindow {
                         }
                         FeButton {
                             Layout.fillWidth: true
-                            text: appController.telemetryName ? qsTr("Change VBO") : qsTr("Choose VBO")
+                            text: appController.telemetryName ? qsTr("Change telemetry") : qsTr("Choose telemetry")
                             onClicked: vboDialog.open()
                         }
                     }

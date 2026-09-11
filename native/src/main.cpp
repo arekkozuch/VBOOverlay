@@ -9,6 +9,7 @@
 #include "export/ExportOutputTransaction.h"
 #include "export/ExportArtifactManifest.h"
 #include "telemetry/VboParser.h"
+#include "telemetry/TelemetrySource.h"
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/LapTiming.h"
 #include "widgets/WidgetModel.h"
@@ -357,7 +358,7 @@ int exportWorker(const QString &configPath)
         currentOperation = QStringLiteral("parseTelemetry");
         currentMessage = QStringLiteral("Reading telemetry data");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
-        const FlappedEar::TelemetrySession session = FlappedEar::VboParser::parseFile(
+        const FlappedEar::TelemetrySession session = FlappedEar::TelemetrySource::load(
             config.value("vboPath").toString(), cancelled);
         FlappedEar::WidgetModel widgets;
         if (!widgets.fromJson(config.value("widgets").toArray())) {
@@ -404,6 +405,7 @@ int exportWorker(const QString &configPath)
         FlappedEar::ExportSettings settings;
         settings.inputPath = config.value("inputPath").toString();
         settings.outputPath = config.value("outputPath").toString();
+        settings.encoder = config.value("encoder").toString();
         settings.outputSize = outputSize;
         settings.frameRate = {config.value("frameRateNumerator").toInteger(), config.value("frameRateDenominator").toInteger(1)};
         if (!settings.frameRate.isValid()) settings.frameRate = FlappedEar::ExportEngine::effectiveFrameRate(input);

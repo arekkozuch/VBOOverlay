@@ -16,6 +16,19 @@ function(flappedear_enable_warnings target)
     endif()
 endfunction()
 
+# Bounded streaming ZIP inflation for native RCZ input. Pin source and integrity.
+include(FetchContent)
+set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(flappedear_zlib
+    URL https://zlib.net/fossils/zlib-1.3.2.tar.gz
+    URL_HASH SHA256=bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(flappedear_zlib)
+
 qt_add_library(flappedear_core STATIC
     src/app/GuiSessionLock.cpp
     src/app/GuiSessionLock.h
@@ -91,6 +104,10 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TelemetryRenderContext.h
     src/telemetry/TrackGeometry.cpp
     src/telemetry/TrackGeometry.h
+    src/telemetry/RczParser.cpp
+    src/telemetry/RczParser.h
+    src/telemetry/TelemetrySource.cpp
+    src/telemetry/TelemetrySource.h
     src/telemetry/VboParser.cpp
     src/telemetry/VboParser.h
     src/widgets/WidgetModel.cpp
@@ -101,7 +118,7 @@ target_include_directories(flappedear_core PUBLIC src)
 target_link_libraries(flappedear_core PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 # QRhi is a Qt Gui private API. Keep it implementation-only: no public headers
 # in flappedear_core expose QRhi types.
-target_link_libraries(flappedear_core PRIVATE Qt6::GuiPrivate)
+target_link_libraries(flappedear_core PRIVATE Qt6::GuiPrivate ZLIB::ZLIBSTATIC)
 flappedear_enable_warnings(flappedear_core)
 
 qt_add_resources(flappedear_core "flappedear_templates"

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(FlappedEarTelemetry LANGUAGES CXX)
+project(FlappedEarTelemetry LANGUAGES C CXX)
 
 if(WIN32)
     enable_language(RC)

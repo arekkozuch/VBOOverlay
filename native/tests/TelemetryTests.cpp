@@ -28,6 +28,7 @@
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/VboParser.h"
+#include "RczFixture.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
 #include "project/ProjectDocumentState.h"
@@ -69,6 +70,8 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     void parsesRealisticFixture();
+    void savesReopensAndRelinksRcz();
+    void exportsSyntheticRczThroughWorker();
     void toleratesMalformedRows();
     void preservesRepeatedDataSections();
     void rejectsMissingSections();
@@ -1419,7 +1422,7 @@ void TelemetryTests::publishesAndClearsLapStateWithController()
     controller.requestNewProject();
     QCOMPARE(controller.pendingDestructiveAction(), QStringLiteral("new"));
     controller.resolveDestructiveAction(QStringLiteral("discard"));
-    QCOMPARE(controller.lapTimingStatus(), QStringLiteral("Open a VBO file for lap timing"));
+    QCOMPARE(controller.lapTimingStatus(), QStringLiteral("Open telemetry for lap timing"));
     QVERIFY(controller.lapSummaries().isEmpty());
     QCOMPARE(controller.renderContext()->lapTiming().value(QStringLiteral("state")).toString(),
              QStringLiteral("unavailable"));
@@ -3286,6 +3289,89 @@ void TelemetryTests::surfacesAndRetriesRecoveryPersistenceFailure()
     controller.setSyncOffset(2.0);
     QTRY_VERIFY(!controller.recoveryDegraded());
     QVERIFY(QFileInfo(recoveryPath).isFile());
+}
+
+void TelemetryTests::exportsSyntheticRczThroughWorker()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString ffmpeg = FfmpegTools::ffmpegPath();
+    QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for the RCZ pipeline regression.");
+    const auto source = directory.filePath("synthetic.rcz");
+    const auto video = directory.filePath("input.mp4");
+    const auto output = directory.filePath("output.mp4");
+    const auto config = directory.filePath("worker.json");
+    QVERIFY(writeBytes(source, RczFixture::zip(RczFixture::members())));
+    QProcess encoder;
+    encoder.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=black:s=640x360:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video});
+    QVERIFY(encoder.waitForFinished(30'000));
+    QCOMPARE(encoder.exitCode(), 0);
+    ExportOutputTransaction transaction;
+    QCOMPARE(transaction.prepare(output, video, {source}, false).status,
+             ExportOutputTransaction::PreparationStatus::Ready);
+    const auto id = transaction.transactionId();
+    const auto overlay = QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv").arg(id));
+    const auto manifestPath = ExportArtifactManifest::manifestPathFor(id);
+    QString error;
+    QVERIFY2(ExportArtifactManifest::create({id, QDateTime::currentMSecsSinceEpoch(), overlay,
+        transaction.stagingPath(), output, QCoreApplication::applicationPid(), "preparing"}, &error), qPrintable(error));
+    const auto cleanup = qScopeGuard([&] { static_cast<void>(ExportArtifactManifest::cleanupOwned(manifestPath)); });
+    WidgetModel widgets;
+    const QJsonObject settings{{"vboPath", source}, {"inputPath", video}, {"outputPath", transaction.stagingPath()},
+        {"manifestPath", manifestPath}, {"temporaryOverlayPath", overlay},
+        {"widgets", widgets.toJson()}, {"sync", QJsonObject{{"offset", .1}, {"timeScale", 1.0}}},
+        {"firstFrame", 0}, {"lastFrame", 2}, {"audioEnabled", false}, {"encoder", "libx265"}};
+    QVERIFY(writeBytes(config, QJsonDocument(settings).toJson()));
+    QProcess worker;
+    worker.start(QStringLiteral(FLAPPEDEAR_NATIVE_PATH), {"--export-worker", config});
+    QVERIFY(worker.waitForStarted());
+    QVERIFY2(worker.waitForFinished(60'000), qPrintable(worker.errorString()));
+    const auto events = worker.readAllStandardOutput() + worker.readAllStandardError();
+    QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
+    QByteArray failures;
+    for (const auto &line : events.split('\n'))
+        if (line.contains("\"passed\":false") || line.contains("\"state\":\"failed\"")) failures += line + '\n';
+    // Qt Test truncates long assertion messages; preserve the terminal error.
+    QVERIFY2(worker.exitCode() == 0, (failures.isEmpty() ? events.right(4000) : failures.left(4000)).constData());
+    QVERIFY2(events.contains("initializeRenderer"), events.constData());
+    QVERIFY2(transaction.commit(&error), qPrintable(error));
+    const auto media = MediaProbe::probe(output, {}, true);
+    QVERIFY(QFileInfo(output).size() > 0);
+    QCOMPARE(media.videoFrameCount, 3);
+}
+
+void TelemetryTests::savesReopensAndRelinksRcz()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    const auto source = directory.filePath(QStringLiteral("synthetic.rcz"));
+    const auto project = directory.filePath(QStringLiteral("native.fetproject"));
+    QVERIFY(writeBytes(source, RczFixture::zip(RczFixture::members())));
+    AppController writer(nullptr, directory.filePath(QStringLiteral("writer.json")));
+    writer.loadVbo(QUrl::fromLocalFile(source));
+    QTRY_COMPARE(writer.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(writer.telemetryName(), QStringLiteral("synthetic.rcz"));
+    QVERIFY(writer.saveProject(QUrl::fromLocalFile(project)));
+    settings.clear();
+    settings.sync();
+    AppController reader(nullptr, directory.filePath(QStringLiteral("reader.json")));
+    reader.requestOpenProject(QUrl::fromLocalFile(project));
+    QTRY_COMPARE(reader.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(reader.telemetryName(), QStringLiteral("synthetic.rcz"));
+    QVERIFY(!reader.dirty());
+    const auto replacement = directory.filePath(QStringLiteral("relinked.RCZ"));
+    QVERIFY(QFile::rename(source, replacement));
+    reader.relinkVbo(QUrl::fromLocalFile(replacement));
+    QTRY_COMPARE(reader.telemetryName(), QStringLiteral("relinked.RCZ"));
+    QCOMPARE(reader.vboLoadState(), QStringLiteral("ready"));
+    QVERIFY(reader.saveCurrentProject());
+    const auto telemetry = QJsonDocument::fromJson(readBytes(project)).object()
+        .value(QStringLiteral("sources")).toObject().value(QStringLiteral("telemetry")).toObject();
+    QCOMPARE(telemetry.value(QStringLiteral("relativePath")).toString(), QStringLiteral("relinked.RCZ"));
 }
 
 void TelemetryTests::serializesPortableProjectSourcesAndMovesFolder()

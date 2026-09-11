@@ -13,6 +13,7 @@
 #include "project/ProjectLimits.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/VboParser.h"
+#include "telemetry/TelemetrySource.h"
 
 #include <QFileInfo>
 #include <QClipboard>
@@ -249,20 +250,20 @@ AppController::AppController(QObject *parent, QString recoveryPath,
     connect(&m_vboLoadWatcher, &QFutureWatcher<VboLoadResult>::finished, this, [this] {
         const VboLoadResult result = m_vboLoadWatcher.result();
         if (result.generation != m_sourceGeneration) {
-            AppLog::warn(QStringLiteral("Stale VBO load result rejected: %1").arg(result.path));
+            AppLog::warn(QStringLiteral("Stale Telemetry load result rejected: %1").arg(result.path));
             return;
         }
         if (!result.success) {
             if (result.cancelled) {
-                AppLog::warn(QStringLiteral("VBO load cancelled: %1").arg(result.path));
+                AppLog::warn(QStringLiteral("Telemetry load cancelled: %1").arg(result.path));
                 m_vboLoadState = QStringLiteral("idle");
                 emit sourceLoadStateChanged();
                 return;
             }
-            AppLog::error(QStringLiteral("VBO load failed: %1: %2").arg(result.path, result.error));
+            AppLog::error(QStringLiteral("Telemetry load failed: %1: %2").arg(result.path, result.error));
             m_vboLoadState = m_session ? QStringLiteral("ready") : QStringLiteral("error");
             emit sourceLoadStateChanged();
-            setStatus(QStringLiteral("Could not parse VBO: %1\n%2").arg(result.path, result.error));
+            setStatus(QStringLiteral("Could not parse telemetry: %1\n%2").arg(result.path, result.error));
             return;
         }
         if (ProjectSourceReferenceCodec::compareFingerprints(
@@ -540,7 +541,7 @@ QVariantMap AppController::currentTrackPoint() const
 }
 QString AppController::lapTimingStatus() const
 {
-    if (!m_session) return QStringLiteral("Open a VBO file for lap timing");
+    if (!m_session) return QStringLiteral("Open telemetry for lap timing");
     switch (m_lapSession.status) {
     case LapSessionStatus::Available:
         return QStringLiteral("%1 complete lap%2")
@@ -853,7 +854,7 @@ void AppController::startVboLoad(
     const QString &path, const quint64 generation, const bool markDocumentDirty,
     QJsonObject expectedFingerprint, const bool relink)
 {
-    AppLog::info(QStringLiteral("VBO load started: %1").arg(path));
+    AppLog::info(QStringLiteral("Telemetry load started: %1").arg(path));
     m_vboLoadCancellation = std::make_shared<std::atomic_bool>(false);
     const std::shared_ptr<std::atomic_bool> cancellation = m_vboLoadCancellation;
     m_vboLoadMarksDocumentDirty = markDocumentDirty;
@@ -867,7 +868,7 @@ void AppController::startVboLoad(
         result.expectedFingerprint = expectedFingerprint;
         result.relink = relink;
         try {
-            result.session = VboParser::parseFile(
+            result.session = TelemetrySource::load(
                 path, [cancellation] { return cancellation->load(); });
             if (cancellation->load()) {
                 result.cancelled = true;
@@ -921,7 +922,7 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
 {
     const QScopedValueRollback suppressDirty(
         m_suppressDirtyTracking, m_suppressDirtyTracking || !markDocumentDirty);
-    AppLog::info(QStringLiteral("VBO load succeeded: %1").arg(result.path));
+    AppLog::info(QStringLiteral("Telemetry load succeeded: %1").arg(result.path));
     m_session = std::make_unique<TelemetrySession>(result.session);
     m_trackGeometry = result.geometry;
     m_lapSession = result.lapSession;
@@ -944,9 +945,11 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     if (markDocumentDirty) {
         markPersistentChange();
     }
-    setStatus(QStringLiteral("VBO opened: %1 samples, %2 numeric channels.")
-                  .arg(m_session->sampleCount)
-                  .arg(m_session->channels.size()));
+    QString message = QStringLiteral("Telemetry opened: %1 samples, %2 numeric channels.")
+        .arg(m_session->sampleCount).arg(m_session->channels.size());
+    for (const auto &warning : m_session->warnings) AppLog::warn(warning);
+    if (!m_session->warnings.isEmpty()) message += "\n" + m_session->warnings.mid(0, 3).join("\n");
+    setStatus(message);
 }
 
 void AppController::loadVideo(const QUrl &url)
@@ -978,8 +981,8 @@ void AppController::loadVbo(const QUrl &url)
     const QString path = url.toLocalFile();
     const QFileInfo info(path);
     const QString absolutePath = normalizedSourcePath(path);
-    if (!info.isFile() || info.suffix().compare("vbo", Qt::CaseInsensitive) != 0) {
-        setStatus("Choose an existing VBOX .vbo telemetry file.");
+    if (!info.isFile() || !TelemetrySource::supportsPath(path)) {
+        setStatus("Choose an existing VBO or RaceChrono RCZ telemetry file.");
         return;
     }
     if (!m_telemetryPath.isEmpty()
@@ -1016,8 +1019,8 @@ void AppController::relinkVideo(const QUrl &url)
 void AppController::relinkVbo(const QUrl &url)
 {
     const QFileInfo info(url.toLocalFile());
-    if (!info.isFile() || info.suffix().compare(QStringLiteral("vbo"), Qt::CaseInsensitive) != 0) {
-        setStatus(QStringLiteral("Choose an existing VBOX .vbo telemetry file."));
+    if (!info.isFile() || !TelemetrySource::supportsPath(info.filePath())) {
+        setStatus(QStringLiteral("Choose an existing VBO or RaceChrono RCZ telemetry file."));
         return;
     }
     const quint64 generation = beginSourceGeneration();
@@ -1634,7 +1637,7 @@ void AppController::autoSync()
     }
     const QString videoPath = m_videoSource.toLocalFile();
     if (videoPath.isEmpty() || !m_session) {
-        setStatus("Open both a GoPro video and VBO telemetry before auto sync.");
+        setStatus("Open both a GoPro video and telemetry before auto sync.");
         return;
     }
     const TelemetrySession telemetry = *m_session;
@@ -1735,7 +1738,7 @@ bool AppController::startExport(
     const QString inputPath = m_videoSource.toLocalFile();
     const QString outputPath = output.toLocalFile();
     if (!m_session || inputPath.isEmpty() || m_telemetryPath.isEmpty() || outputPath.isEmpty()) {
-        m_exportError = QStringLiteral("Open a video and VBO telemetry, then choose an output file.");
+        m_exportError = QStringLiteral("Open a video and telemetry, then choose an output file.");
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
         emit exportChanged();

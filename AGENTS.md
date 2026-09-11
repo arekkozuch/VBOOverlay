@@ -11,7 +11,7 @@
 - Keep telemetry parsing independent from QML and widget rendering.
 - Keep video and media code independent from widget UI.
 - Keep synchronization in one central telemetry module.
-- Heart Rate comes from VBO; do not add a separate HR source.
+- Heart Rate comes from the imported VBO/RCZ session; do not add a separate HR source.
 - Never invent brake telemetry or substitute another channel silently.
 - Never couple telemetry to FPS. All synchronization is time based.
 - Preview and export should share scene definitions and rendering logic.

@@ -9,7 +9,7 @@ The application is a Qt 6, C++20, and QML native application in alpha and active
 ## Current capabilities
 
 - MP4/MOV playback with timeline controls and preview overlays.
-- RaceChrono and VBOX VBO telemetry import.
+- RaceChrono and VBOX VBO telemetry import, plus native single-session RaceChrono RCZ import ([supported format](docs/rcz-format.md)).
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates. Both editor sidebars remain fully scrollable at the supported 1180×720 minimum size.
 - Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.
@@ -64,7 +64,7 @@ Templates have two explicit operations. **Save current** updates the custom temp
 
 Lap and speed comparison tiles use the same compact translucent panel family. Each Best, Current, and Delta tile is an independent widget with its own position, scale, rotation, visibility, and appearance. Scaling a comparison tile scales its typography, margins, gauge strokes, border, and corner radius together. Editor interaction geometry follows widget rotation, and normalized size/scale changes keep the unrotated widget rectangle inside the canvas.
 
-A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup only when their logical document state is newer than the saved authority. Before Quit, New, or Open can discard current edits, the editor presents a branded Save / Discard / Cancel confirmation. A leftover snapshot after successful Save is cleanup debt, not degraded recovery protection or a user warning. QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
+A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO/RCZ assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup only when their logical document state is newer than the saved authority. Before Quit, New, or Open can discard current edits, the editor presents a branded Save / Discard / Cancel confirmation. A leftover snapshot after successful Save is cleanup debt, not degraded recovery protection or a user warning. QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
 
 External JSON documents are size- and structure-bounded before they can create editor models. FFprobe payloads, FFmpeg diagnostics, progress lines, and export-worker messages are bounded as well; diagnostic tails retain the newest useful output. If automatic recovery storage fails, the editor shows a persistent manual-save warning and retries safely after a backoff. A requested recovery discard is durable before cleanup: a matching residual snapshot is suppressed at the next startup, while newer or different-document recovery remains available.
 
