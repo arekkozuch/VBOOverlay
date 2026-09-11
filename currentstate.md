@@ -7,6 +7,8 @@
 **Application version in CMake:** `0.2.0`  
 **Status:** alpha / active development
 
+**CI policy update (2026-09-11):** the Cloud CI-disabled statements below describe this historical checkpoint. The current [Native CI workflow](.github/workflows/build.yml) enables macOS/Windows builds and synthetic tests; [docs/testing.md](docs/testing.md#cloud-ci) is authoritative for its scope, explicit hardware skip, and required local acceptance. Other checkpoint claims retain their original date and baseline.
+
 > This document is a development checkpoint and handoff packet. It intentionally captures the project **before any Widget Runtime v2 / `.fewidget` refactor is implemented**. The later widget-system discussion is preserved near the end only as **deferred design context**, not as current behavior.
 >
 > The file combines three sources of truth: the repository at the baseline above, Git history from the initial commit through that baseline, and project-specific decisions/results retained from the development conversations. Where a conversation decision is not yet implemented, it is explicitly marked **context/deferred**, not presented as code reality.

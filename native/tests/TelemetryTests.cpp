@@ -4520,6 +4520,9 @@ void TelemetryTests::preservesTenBitSdrThroughComposition()
 
 void TelemetryTests::preservesTenBitFullRangeColorThroughVideoToolboxExport()
 {
+    if (qEnvironmentVariableIntValue("FLAPPEDEAR_SKIP_HARDWARE_TESTS") == 1) {
+        QSKIP("Hardware encoder validation is explicitly excluded from this cloud/synthetic run; validate VideoToolbox locally.");
+    }
     const QString ffmpeg = FfmpegTools::ffmpegPath();
     if (ffmpeg.isEmpty()) QSKIP("FFmpeg is unavailable for the Main10 color-fidelity test.");
     QProcess encoderQuery;

@@ -1,0 +1,153 @@
+name: Native CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }} / Qt 6.8.3
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+            qt-arch: clang_64
+            graphics-api: metal
+            software-renderer: '0'
+          - name: Windows x64
+            os: windows-2022
+            qt-arch: win64_msvc2022_64
+            graphics-api: d3d11
+            software-renderer: '1'
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_CONTROLS_STYLE: Basic
+      QSG_RENDER_LOOP: basic
+      QSG_RHI_BACKEND: ${{ matrix.graphics-api }}
+      # Windows uses D3D11 WARP. The Qt Quick software/null backends cannot
+      # exercise our QRhi readback and pixel assertions.
+      QSG_RHI_PREFER_SOFTWARE_RENDERER: ${{ matrix.software-renderer }}
+      QSG_INFO: '1'
+      QT_SCALE_FACTOR: '1'
+      FLAPPEDEAR_SKIP_HARDWARE_TESTS: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up MSVC 2022 x64
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+          vsversion: '2022'
+
+      - name: Install Qt 6.8.3 and modules
+        # Call the pinned implementation directly; the composite wrapper uses
+        # mutable action refs internally. Python is installed explicitly above.
+        uses: jurplel/install-qt-action/action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
+        with:
+          version: '6.8.3'
+          target: desktop
+          arch: ${{ matrix.qt-arch }}
+          modules: qtmultimedia qtshadertools qtsvg
+          cache: true
+          cache-key-prefix: native-ci-qt-6.8.3-v1
+
+      - name: Install FFmpeg on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: brew install ffmpeg
+
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify toolchain and software codecs
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          cmake --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ninja --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:QT_ROOT_DIR/bin/qmake" -query QT_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ffmpeg -version | Tee-Object ci-logs/ffmpeg-version.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ffprobe -version | Tee-Object ci-logs/ffprobe-version.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $encoders = ffmpeg -hide_banner -encoders 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $encoders | Set-Content ci-logs/ffmpeg-encoders.txt
+          foreach ($codec in @('libx264', 'libx265', 'ffv1', 'aac')) {
+            if ($encoders -notmatch "\b$codec\b") { throw "FFmpeg is missing required encoder: $codec" }
+          }
+          $main10 = ffmpeg -hide_banner -h encoder=libx265 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($main10 -notmatch '\byuv420p10le\b') { throw 'libx265 Main10 is required for synthetic integration tests.' }
+          $main10 | Set-Content ci-logs/libx265-capabilities.txt
+
+      - name: Configure Debug build
+        run: |
+          cmake -S . -B build-native -G Ninja -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" 2>&1 | Tee-Object ci-logs/configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build application and tests
+        run: |
+          cmake --build build-native --parallel 2 2>&1 | Tee-Object ci-logs/build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run Qt Test and startup smoke
+        timeout-minutes: 20
+        run: |
+          ctest --test-dir build-native --build-config Debug --verbose --output-on-failure --no-tests=error --timeout 900 --output-junit "$env:GITHUB_WORKSPACE/ci-logs/ctest.xml" 2>&1 | Tee-Object ci-logs/ctest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Record validation scope
+        if: always()
+        run: |
+          @'
+          Cloud gate: Debug application build, Qt Test suite, production QML startup smoke, QRhi pixel regressions, and synthetic FFmpeg integrations.
+          The VideoToolbox hardware test is explicitly skipped; private VBO/GoPro fixtures are not supplied. Platform-specific tests report their own skip reasons in ctest.log.
+          A green run does not establish real-media, hardware-encoder, packaging/signing, or interactive-editor release acceptance.
+          '@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-ci-${{ matrix.os }}-qt-6.8.3
+          path: |
+            ci-logs/
+            build-native/Testing/Temporary/
+            build-native/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+          retention-days: 14
