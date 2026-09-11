@@ -320,6 +320,13 @@ private:
 
     [[nodiscard]] QVariant semanticValue(const QString &alias) const;
     void setStatus(QString status);
+    struct SourceLoadRequest {
+        QString path;
+        bool markDocumentDirty = false;
+        QJsonObject expectedFingerprint;
+        bool relink = false;
+    };
+    [[nodiscard]] quint64 beginSourceReplacement(bool replacingVideo);
     [[nodiscard]] quint64 beginSourceGeneration();
     void cancelSourceJobs();
     void startVideoProbe(const QString &path, quint64 generation, bool markDocumentDirty,
@@ -399,6 +406,8 @@ private:
     bool m_vboLoadMarksDocumentDirty = true;
     QString m_videoLoadState = QStringLiteral("idle");
     QString m_vboLoadState = QStringLiteral("idle");
+    SourceLoadRequest m_videoLoadRequest;
+    SourceLoadRequest m_vboLoadRequest;
     QString m_pendingVideoPath;
     QString m_pendingVboPath;
     VideoProbeResult m_pendingMismatchVideo;

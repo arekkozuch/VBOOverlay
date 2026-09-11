@@ -103,11 +103,11 @@ struct ExportResult {
 
 // Stage B uses FFmpeg input seeking to avoid decoding an entire source prefix.
 // The requested range is expressed on the source's original FFmpeg timeline;
-// trim arguments are expressed on FFmpeg's zero-based, post-seek timeline.
+// -copyts and -seek_timestamp keep seek and trim in that same original domain.
 struct StageBSourceAccess {
     QString inputSeekTimestamp;
-    QString localTrimStartTimestamp;
-    QString localTrimEndTimestamp;
+    QString trimStartTimestamp;
+    QString trimEndTimestamp;
 };
 
 class ExportEngine final {
@@ -140,6 +140,12 @@ public:
     [[nodiscard]] static std::optional<StageBSourceAccess> stageBSourceAccess(
         const MediaInfo &source, const ExportFrameRange &range,
         const MediaRational &frameRate, qint64 prerollSeconds = 5);
+    [[nodiscard]] static double audioStartForRange(const MediaInfo &source, double start, double end);
+    [[nodiscard]] static QString stageBAudioFilterGraph(const StageBSourceAccess &access);
+    [[nodiscard]] static QStringList stageBInputArguments(const StageBSourceAccess &access, const QString &path);
+    // Empty on success; runs the actual composition graph before rendering telemetry.
+    [[nodiscard]] static QString verifyCompositionFilters(
+        const QString &program, const QString &graph, const std::function<bool()> &cancelled = {});
     [[nodiscard]] static QString stageBVideoFilterGraph(
         const StageBSourceAccess &sourceAccess,
         const QSize &sourceSize,

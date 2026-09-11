@@ -137,3 +137,34 @@ and failure when the directory is unavailable. Startup smoke also loads the guar
 error window. Older app versions do not participate in this lock and must be closed
 before running this build. On Windows, Qt documents a stale-lock detection limitation
 for non-ASCII hostnames; failure remains closed rather than risking recovery data.
+
+## Source-loading interleavings
+
+Ordinary import and explicit relink preserve the entire other pending request across
+a source generation: path, fingerprint, mismatch-confirmation policy and dirty-state
+intent. Eight controller regressions cover both asset orders, import/relink and matching/
+mismatching project references. Replacing one asset must not strand the other or accept
+a mismatched reference without confirmation. Multi-session work remains deferred.
+
+## Original media timestamps
+
+Stage B retains original input timestamps with `-copyts` and absolute timestamp seeking
+(`-seek_timestamp 1`). Seek and trim share that domain; only filtered output is rebased.
+Production argument/graph regressions encode frame identities into a positive-PTS MP4
+and check every decoded frame in full, early and seeked ranges.
+See [FFmpeg timestamp options](https://ffmpeg.org/ffmpeg.html#Advanced-options).
+
+Audio trims use original timestamps and subtract the selected video origin, preserving
+a track's real delay. Selection/validation use the intersection with the audio stream;
+ranges before/after that stream export without audio. Worker regressions cover positive
+video PTS, delayed short audio, and ranges before/within/after audio. They verify output
+frame counts, audio start/duration and decoded tone energy near the start of the stream.
+
+### Composition capability preflight (R8)
+
+Before rendering any representative or full telemetry overlay, export executes three
+64×64 frames through the production Stage B graph for the selected bit depth. This
+checks explicit alpha-mode support rather than inferring compatibility from an
+FFmpeg version or encoder listing. Failure is actionable, diagnostic output is bounded,
+and the probe supports cancellation and a 20-second execution deadline. Synthetic
+tests exercise both 8-bit and 10-bit graphs, missing filters, and cancellation.

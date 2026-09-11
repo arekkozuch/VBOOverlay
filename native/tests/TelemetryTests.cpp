@@ -57,6 +57,7 @@
 #include <cmath>
 #include <atomic>
 #include <array>
+#include <bit>
 #include <limits>
 #include <numbers>
 #include <thread>
@@ -71,6 +72,7 @@ private slots:
     void cleanupTestCase();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
+    void exportsSyntheticRczThroughWorker_data();
     void exportsSyntheticRczThroughWorker();
     void toleratesMalformedRows();
     void preservesRepeatedDataSections();
@@ -172,6 +174,9 @@ private slots:
     void derivesStablePreviewViewportAndLastFrameAdapter();
     void exposesReactivePreviewMetadataToQml();
     void plansBoundedStageBSourceAccess();
+    void checksCompositionFiltersBeforeRendering();
+    void preservesFramesWithPositiveSourcePts_data();
+    void preservesFramesWithPositiveSourcePts();
     void preservesCfrCadenceForCommonRates();
     void validatesQuantizedTemporaryOverlayCadence();
     void preservesAbsoluteExportTimestamps();
@@ -219,6 +224,8 @@ private slots:
     void opensProjectsWithMissingSources();
     void fingerprintsSourcesDeterministically();
     void relinksTelemetryWithMismatchPolicy();
+    void preservesInterleavedSourceRequests_data();
+    void preservesInterleavedSourceRequests();
     void rejectsStaleRelinkResults();
     void restoresSavedProjectsAndPreservesUnknownFields();
     void recoversAndDiscardsSavedChanges();
@@ -3291,20 +3298,38 @@ void TelemetryTests::surfacesAndRetriesRecoveryPersistenceFailure()
     QVERIFY(QFileInfo(recoveryPath).isFile());
 }
 
+void TelemetryTests::exportsSyntheticRczThroughWorker_data()
+{
+    QTest::addColumn<int>("sourcePts"); QTest::addColumn<bool>("withAudio");
+    QTest::addColumn<int>("firstFrame"); QTest::addColumn<int>("lastFrame");
+    QTest::newRow("rcz") << 0 << false << 0 << 2;
+    QTest::newRow("positive-pts") << 2 << false << 0 << 29;
+    QTest::newRow("delayed-short-audio") << 2 << true << 0 << 89;
+    QTest::newRow("range-after-audio") << 2 << true << 60 << 89;
+    QTest::newRow("range-within-audio") << 2 << true << 36 << 41;
+    QTest::newRow("range-before-audio") << 2 << true << 0 << 14;
+}
+
 void TelemetryTests::exportsSyntheticRczThroughWorker()
 {
+    QFETCH(int, sourcePts); QFETCH(bool, withAudio);
+    QFETCH(int, firstFrame); QFETCH(int, lastFrame);
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString ffmpeg = FfmpegTools::ffmpegPath();
     QVERIFY2(!ffmpeg.isEmpty(), "FFmpeg is required for the RCZ pipeline regression.");
     const auto source = directory.filePath("synthetic.rcz");
-    const auto video = directory.filePath("input.mp4");
+    const auto video = directory.filePath("input.mov");
     const auto output = directory.filePath("output.mp4");
     const auto config = directory.filePath("worker.json");
     QVERIFY(writeBytes(source, RczFixture::zip(RczFixture::members())));
     QProcess encoder;
-    encoder.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-        "color=c=black:s=640x360:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video});
+    QStringList inputArgs{"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=black:s=640x360:r=30:d=4"};
+    if (withAudio) inputArgs += QStringList{"-itsoffset", "1", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.5",
+        "-map", "0:v", "-map", "1:a", "-c:a", "pcm_s16le"};
+    inputArgs += QStringList{"-c:v", "libx264", "-pix_fmt", "yuv420p", "-output_ts_offset", QString::number(sourcePts), video};
+    encoder.start(ffmpeg, inputArgs);
     QVERIFY(encoder.waitForFinished(30'000));
     QCOMPARE(encoder.exitCode(), 0);
     ExportOutputTransaction transaction;
@@ -3321,7 +3346,7 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     const QJsonObject settings{{"vboPath", source}, {"inputPath", video}, {"outputPath", transaction.stagingPath()},
         {"manifestPath", manifestPath}, {"temporaryOverlayPath", overlay},
         {"widgets", widgets.toJson()}, {"sync", QJsonObject{{"offset", .1}, {"timeScale", 1.0}}},
-        {"firstFrame", 0}, {"lastFrame", 2}, {"audioEnabled", false}, {"encoder", "libx265"}};
+        {"firstFrame", firstFrame}, {"lastFrame", lastFrame}, {"audioEnabled", withAudio}, {"encoder", "libx265"}};
     QVERIFY(writeBytes(config, QJsonDocument(settings).toJson()));
     QProcess worker;
     worker.start(QStringLiteral(FLAPPEDEAR_NATIVE_PATH), {"--export-worker", config});
@@ -3338,7 +3363,27 @@ void TelemetryTests::exportsSyntheticRczThroughWorker()
     QVERIFY2(transaction.commit(&error), qPrintable(error));
     const auto media = MediaProbe::probe(output, {}, true);
     QVERIFY(QFileInfo(output).size() > 0);
-    QCOMPARE(media.videoFrameCount, 3);
+    QCOMPARE(media.videoFrameCount, lastFrame - firstFrame + 1);
+    const double start = firstFrame / 30.0, end = (lastFrame + 1) / 30.0;
+    const double expectedAudioDuration = withAudio ? std::max(0.0, std::min(end, 1.5) - std::max(start, 1.0)) : 0.0;
+    if (expectedAudioDuration > 0) {
+        QVERIFY(!media.audioCodecs.isEmpty());
+        const double expectedStart = std::max(0.0, 1.0 - start);
+        QVERIFY(std::abs(media.audioStartTime - media.videoStartTime - expectedStart) < .023);
+        QVERIFY(std::abs(media.audioDuration - expectedAudioDuration) < .023);
+        QProcess decoder;
+        decoder.start(ffmpeg, {"-v", "error", "-i", output, "-map", "0:a", "-ac", "1", "-f", "f32le", "pipe:1"});
+        QVERIFY(decoder.waitForFinished(30'000));
+        QCOMPARE(decoder.exitCode(), 0);
+        const auto samples = decoder.readAllStandardOutput();
+        QVERIFY(samples.size() >= 4800 * 4);
+        double power = 0;
+        for (int index = 0; index < 4800; ++index) {
+            const float value = std::bit_cast<float>(qFromLittleEndian<quint32>(samples.constData() + index * 4));
+            power += value * value;
+        }
+        QVERIFY(std::sqrt(power / 4800) > .03); // Audible tone starts with the delayed stream.
+    } else QVERIFY(media.audioCodecs.isEmpty());
 }
 
 void TelemetryTests::savesReopensAndRelinksRcz()
@@ -3531,6 +3576,59 @@ void TelemetryTests::fingerprintsSourcesDeterministically()
     QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
                  telemetryA, ProjectSourceReferenceCodec::telemetryFingerprint(first, sessionB)),
              SourceFingerprintMatch::Mismatch);
+}
+
+void TelemetryTests::preservesInterleavedSourceRequests_data()
+{
+    QTest::addColumn<bool>("videoFirst");
+    QTest::addColumn<bool>("secondRelink");
+    QTest::addColumn<bool>("mismatch");
+    for (bool video : {false, true}) for (bool relink : {false, true}) for (bool mismatch : {false, true})
+        QTest::newRow(qPrintable(QStringLiteral("video%1-relink%2-mismatch%3").arg(video).arg(relink).arg(mismatch)))
+            << video << relink << mismatch;
+}
+
+void TelemetryTests::preservesInterleavedSourceRequests()
+{
+    QFETCH(bool, videoFirst); QFETCH(bool, secondRelink); QFETCH(bool, mismatch);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto video = directory.filePath("clip.mp4");
+    QProcess encoder;
+    encoder.start(FfmpegTools::ffmpegPath(), {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=black:s=64x64:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video});
+    QVERIFY(encoder.waitForFinished(30'000));
+    QCOMPARE(encoder.exitCode(), 0);
+    auto project = testProject(0.0);
+    QJsonObject videoReference{{"relativePath", "missing.mp4"}};
+    QJsonObject telemetryReference{{"relativePath", "missing.vbo"}};
+    if (mismatch) (videoFirst ? videoReference : telemetryReference).insert("fingerprint",
+        QJsonObject{{"kind", videoFirst ? "video-v1" : "telemetry-v1"}, {"size", 1}});
+    project.insert("sources", QJsonObject{{"video", videoReference}, {"telemetry", telemetryReference}});
+    const auto path = directory.filePath("project.fetproject");
+    QVERIFY(writeBytes(path, QJsonDocument(project).toJson()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.requestOpenProject(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(controller.videoLoadState(), QStringLiteral("missing"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    const auto vbo = QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH));
+    if (videoFirst) {
+        controller.relinkVideo(QUrl::fromLocalFile(video));
+        if (secondRelink) controller.relinkVbo(vbo); else controller.loadVbo(vbo);
+    } else {
+        controller.relinkVbo(vbo);
+        if (secondRelink) controller.relinkVideo(QUrl::fromLocalFile(video)); else controller.loadVideo(QUrl::fromLocalFile(video));
+    }
+    QTRY_COMPARE(videoFirst ? controller.vboLoadState() : controller.videoLoadState(), QStringLiteral("ready"));
+    QTRY_COMPARE(videoFirst ? controller.videoLoadState() : controller.vboLoadState(),
+                 mismatch ? QStringLiteral("mismatch") : QStringLiteral("ready"));
+    if (mismatch) {
+        QCOMPARE(controller.sourceMismatchType(), videoFirst ? QStringLiteral("video") : QStringLiteral("telemetry"));
+        controller.resolveSourceMismatch(true);
+    }
+    QCOMPARE(controller.videoLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("ready"));
 }
 
 void TelemetryTests::relinksTelemetryWithMismatchPolicy()
@@ -4502,6 +4600,82 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
     QCOMPARE(ExportEngine::audioDurationForRange(source, 8.0, 9.0), 0.0);
 }
 
+void TelemetryTests::checksCompositionFiltersBeforeRendering()
+{
+    for (const int bits : {8, 10}) {
+        ExportMediaProfile profile;
+        profile.outputBitDepth = bits;
+        profile.outputPixelFormat = bits == 10 ? "yuv420p10le" : "yuv420p";
+        const QString graph = ExportEngine::stageBVideoFilterGraph(
+            {"0", "0", "0.1"}, QSize(64, 64), QSize(64, 64), {30, 1}, 3, profile);
+        const QString error = ExportEngine::verifyCompositionFilters(FfmpegTools::ffmpegPath(), graph);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+    }
+    const QString error = ExportEngine::verifyCompositionFilters(
+        FfmpegTools::ffmpegPath(), "[0:v]this_filter_does_not_exist[video]");
+    QVERIFY(error.contains("required overlay filters"));
+    QVERIFY(error.contains("this_filter_does_not_exist"));
+    QVERIFY_EXCEPTION_THROWN(ExportEngine::verifyCompositionFilters(
+        FfmpegTools::ffmpegPath(), {}, [] { return true; }), OperationCancelled);
+}
+
+void TelemetryTests::preservesFramesWithPositiveSourcePts_data()
+{
+    QTest::addColumn<int>("first"); QTest::addColumn<int>("last");
+    QTest::newRow("full") << 0 << 299;
+    QTest::newRow("early-range") << 90 << 179;
+    QTest::newRow("seek-range") << 210 << 299;
+}
+
+void TelemetryTests::preservesFramesWithPositiveSourcePts()
+{
+    QFETCH(int, first); QFETCH(int, last);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto raw = directory.filePath("source.rgb");
+    const auto source = directory.filePath("source.mp4");
+    const auto overlayRaw = directory.filePath("overlay.rgba");
+    const auto overlay = directory.filePath("overlay.mkv");
+    const auto output = directory.filePath("output.rgba");
+    constexpr int width = 64, height = 16;
+    QByteArray pixels(300 * width * height * 3, '\0');
+    for (int frame = 0; frame < 300; ++frame) for (int y = 0; y < height; ++y)
+        for (int bit = 0; bit < 9; ++bit) for (int x = bit * 6; x < bit * 6 + 6; ++x)
+            for (int c = 0; c < 3; ++c) pixels[((frame * height + y) * width + x) * 3 + c] = (frame & (1 << bit)) ? char(255) : char(0);
+    QVERIFY(writeBytes(raw, pixels));
+    const int count = last - first + 1;
+    QVERIFY(writeBytes(overlayRaw, QByteArray(count * width * height * 4, '\0')));
+    const auto run = [&](const QStringList &args) {
+        QProcess process; process.start(FfmpegTools::ffmpegPath(), args);
+        if (!process.waitForFinished(30'000) || process.exitCode() != 0)
+            qWarning().noquote() << process.readAllStandardError();
+        return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    };
+    QVERIFY(run({"-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "64x16", "-framerate", "30", "-i", raw,
+        "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p", "-output_ts_offset", "2", source}));
+    QVERIFY(run({"-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "64x16", "-framerate", "30", "-i", overlayRaw,
+        "-c:v", "ffv1", "-pix_fmt", "bgra", overlay}));
+    const auto info = MediaProbe::probe(source);
+    QVERIFY(std::abs(info.videoStartTime - 2.0) < .001);
+    const auto access = ExportEngine::stageBSourceAccess(info, {first,last}, {30,1});
+    QVERIFY(access.has_value());
+    const auto profile = ExportMediaProfile::derive(info, {width,height}, {30,1}, 1'000'000, "libx265");
+    QStringList args{"-v", "error", "-y"};
+    args += ExportEngine::stageBInputArguments(*access, source);
+    args += QStringList{"-i", overlay, "-filter_complex", ExportEngine::stageBVideoFilterGraph(*access,
+        {width,height}, {width,height}, {30,1}, count, profile), "-map", "[video]", "-fps_mode", "cfr",
+        "-f", "rawvideo", "-pix_fmt", "rgba", output};
+    QVERIFY(run(args));
+    const auto decoded = readBytes(output);
+    QCOMPARE(decoded.size(), qsizetype(count * width * height * 4));
+    for (int frame = 0; frame < count; ++frame) {
+        int identity = 0;
+        for (int bit = 0; bit < 9; ++bit)
+            if (static_cast<unsigned char>(decoded[(frame * width * height + width * 8 + bit * 6 + 3) * 4]) > 127) identity |= 1 << bit;
+        QCOMPARE(identity, first + frame);
+    }
+}
+
 void TelemetryTests::plansBoundedStageBSourceAccess()
 {
     MediaInfo source;
@@ -4511,14 +4685,14 @@ void TelemetryTests::plansBoundedStageBSourceAccess()
     const auto access = ExportEngine::stageBSourceAccess(source, {60, 359}, rate);
     QVERIFY(access.has_value());
     QCOMPARE(access->inputSeekTimestamp, QStringLiteral("0"));
-    QCOMPARE(access->localTrimStartTimestamp, QStringLiteral("3.001"));
-    QCOMPARE(access->localTrimEndTimestamp, QStringLiteral("8.006"));
+    QCOMPARE(access->trimStartTimestamp, QStringLiteral("3.001"));
+    QCOMPARE(access->trimEndTimestamp, QStringLiteral("8.006"));
 
     const auto late = ExportEngine::stageBSourceAccess(source, {14'388, 16'186}, rate);
     QVERIFY(late.has_value());
     QCOMPARE(late->inputSeekTimestamp, QStringLiteral("237.0398"));
-    QCOMPARE(late->localTrimStartTimestamp, QStringLiteral("5"));
-    QCOMPARE(late->localTrimEndTimestamp, QStringLiteral("35.013316666666"));
+    QCOMPARE(late->trimStartTimestamp, QStringLiteral("242.0398"));
+    QCOMPARE(late->trimEndTimestamp, QStringLiteral("272.053116666666"));
 }
 
 void TelemetryTests::resolvesExplicitExportFormats()

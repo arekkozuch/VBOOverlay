@@ -779,6 +779,20 @@ QVariantList AppController::trackPointsFor(const TrackGeometry &geometry)
     return points;
 }
 
+quint64 AppController::beginSourceReplacement(const bool replacingVideo)
+{
+    const bool restartOther = (replacingVideo ? m_vboLoadState : m_videoLoadState) == QStringLiteral("loading");
+    const auto request = replacingVideo ? m_vboLoadRequest : m_videoLoadRequest;
+    const quint64 generation = beginSourceGeneration();
+    if (restartOther && !request.path.isEmpty()) {
+        if (replacingVideo) startVboLoad(request.path, generation, request.markDocumentDirty,
+                                        request.expectedFingerprint, request.relink);
+        else startVideoProbe(request.path, generation, request.markDocumentDirty,
+                             request.expectedFingerprint, request.relink);
+    }
+    return generation;
+}
+
 quint64 AppController::beginSourceGeneration()
 {
     ++m_sourceGeneration;
@@ -820,6 +834,8 @@ void AppController::startVideoProbe(
     AppLog::info(QStringLiteral("Video load/probe started: %1").arg(path));
     m_videoProbeCancellation = std::make_shared<std::atomic_bool>(false);
     const std::shared_ptr<std::atomic_bool> cancellation = m_videoProbeCancellation;
+    m_videoLoadRequest = {path, markDocumentDirty, expectedFingerprint, relink};
+    m_pendingVideoPath = path;
     m_videoLoadMarksDocumentDirty = markDocumentDirty;
     m_videoLoadState = QStringLiteral("loading");
     emit sourceLoadStateChanged();
@@ -857,6 +873,8 @@ void AppController::startVboLoad(
     AppLog::info(QStringLiteral("Telemetry load started: %1").arg(path));
     m_vboLoadCancellation = std::make_shared<std::atomic_bool>(false);
     const std::shared_ptr<std::atomic_bool> cancellation = m_vboLoadCancellation;
+    m_vboLoadRequest = {path, markDocumentDirty, expectedFingerprint, relink};
+    m_pendingVboPath = path;
     m_vboLoadMarksDocumentDirty = markDocumentDirty;
     m_vboLoadState = QStringLiteral("loading");
     emit sourceLoadStateChanged();
@@ -965,14 +983,9 @@ void AppController::loadVideo(const QUrl &url)
     if (normalizedPath == normalizedSourcePath(m_videoSource.toLocalFile())) {
         return;
     }
-    const bool restartVbo = m_vboLoadState == QStringLiteral("loading") && !m_pendingVboPath.isEmpty();
-    const QString pendingVboPath = m_pendingVboPath;
-    const quint64 generation = beginSourceGeneration();
+    const quint64 generation = beginSourceReplacement(true);
     m_pendingVideoPath = normalizedPath;
     startVideoProbe(normalizedPath, generation, true);
-    if (restartVbo) {
-        startVboLoad(pendingVboPath, generation, true);
-    }
     setStatus(QStringLiteral("Loading video metadata: %1").arg(info.fileName()));
 }
 
@@ -990,14 +1003,9 @@ void AppController::loadVbo(const QUrl &url)
             == ExportOutputTransaction::normalizedComparisonPath(m_telemetryPath)) {
         return;
     }
-    const bool restartVideo = m_videoLoadState == QStringLiteral("loading") && !m_pendingVideoPath.isEmpty();
-    const QString pendingVideoPath = m_pendingVideoPath;
-    const quint64 generation = beginSourceGeneration();
+    const quint64 generation = beginSourceReplacement(false);
     m_pendingVboPath = absolutePath;
     startVboLoad(absolutePath, generation, true);
-    if (restartVideo) {
-        startVideoProbe(pendingVideoPath, generation, true);
-    }
     setStatus(QStringLiteral("Loading telemetry: %1").arg(info.fileName()));
 }
 
@@ -1010,7 +1018,7 @@ void AppController::relinkVideo(const QUrl &url)
         setStatus(QStringLiteral("Choose an existing MP4 or MOV video."));
         return;
     }
-    const quint64 generation = beginSourceGeneration();
+    const quint64 generation = beginSourceReplacement(true);
     const QString path = normalizedSourcePath(info.absoluteFilePath());
     m_pendingVideoPath = path;
     startVideoProbe(path, generation, true, m_videoReference.fingerprint, true);
@@ -1023,7 +1031,7 @@ void AppController::relinkVbo(const QUrl &url)
         setStatus(QStringLiteral("Choose an existing VBO or RaceChrono RCZ telemetry file."));
         return;
     }
-    const quint64 generation = beginSourceGeneration();
+    const quint64 generation = beginSourceReplacement(false);
     const QString path = normalizedSourcePath(info.absoluteFilePath());
     m_pendingVboPath = path;
     startVboLoad(path, generation, true, m_vboReference.fingerprint, true);

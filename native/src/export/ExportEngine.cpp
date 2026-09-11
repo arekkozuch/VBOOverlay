@@ -529,10 +529,26 @@ double ExportEngine::audioDurationForRange(
         || !std::isfinite(source.audioDuration) || source.audioDuration <= 0.0) {
         return 0.0;
     }
+    if (!std::isfinite(source.videoStartTime)) return 0.0;
+    const double rangeStart = source.videoStartTime + sourceRangeStart;
+    const double rangeEnd = source.videoStartTime + sourceRangeEnd;
     const double audioEnd = source.audioStartTime + source.audioDuration;
     if (!std::isfinite(audioEnd)) return 0.0;
-    return qMax(0.0, qMin(sourceRangeEnd, audioEnd)
-                     - qMax(sourceRangeStart, source.audioStartTime));
+    return qMax(0.0, qMin(rangeEnd, audioEnd)
+                     - qMax(rangeStart, source.audioStartTime));
+}
+
+double ExportEngine::audioStartForRange(const MediaInfo &source, const double start, const double end)
+{
+    return audioDurationForRange(source, start, end) > 0.0
+        ? std::max(0.0, source.audioStartTime - (source.videoStartTime + start)) : 0.0;
+}
+
+QString ExportEngine::stageBAudioFilterGraph(const StageBSourceAccess &access)
+{
+    // Subtract the selected VIDEO origin, retaining a real track-relative delay.
+    return QStringLiteral("[0:a]atrim=start=%1:end=%2,asetpts=PTS-(%1)/TB[audio]")
+        .arg(access.trimStartTimestamp, access.trimEndTimestamp);
 }
 
 double ExportEngine::framePresentationTime(
@@ -586,10 +602,14 @@ std::optional<StageBSourceAccess> ExportEngine::stageBSourceAccess(
     if (!start || !end || !preroll || secondsLessThan(*end, *start)) return std::nullopt;
     const ExactSeconds inputSeek = secondsLessThan(*start, *preroll)
         ? ExactSeconds{} : *subtractSeconds(*start, *preroll);
-    const auto localStart = subtractSeconds(*start, inputSeek);
-    const auto localEnd = subtractSeconds(*end, inputSeek);
-    if (!localStart || !localEnd) return std::nullopt;
-    return StageBSourceAccess{decimalSeconds(inputSeek), decimalSeconds(*localStart), decimalSeconds(*localEnd)};
+    return StageBSourceAccess{decimalSeconds(inputSeek), decimalSeconds(*start), decimalSeconds(*end)};
+}
+
+QStringList ExportEngine::stageBInputArguments(const StageBSourceAccess &access, const QString &path)
+{
+    // Retain original PTS, including across input seek. Both trim and seek now
+    // refer to the same source timestamp domain rather than implicit rebasing.
+    return {"-copyts", "-seek_timestamp", "1", "-ss", access.inputSeekTimestamp, "-i", path};
 }
 
 QString ExportEngine::stageBVideoFilterGraph(
@@ -615,7 +635,7 @@ QString ExportEngine::stageBVideoFilterGraph(
         "[1:v]setpts=PTS-STARTPTS,%5[temporaryOverlay];"
         "[sourceVideo][temporaryOverlay]overlay=0:0:shortest=1:repeatlast=0:eof_action=endall:alpha=%6:format=%7[composited];"
         "[composited]format=pix_fmts=%8[video]")
-            .arg(sourceAccess.localTrimStartTimestamp)
+            .arg(sourceAccess.trimStartTimestamp)
             .arg(rateString(frameRate))
             .arg(expectedFrames)
             .arg(sourceSize == outputSize ? QString() : QStringLiteral(",scale=%1:%2:flags=lanczos")
@@ -624,6 +644,47 @@ QString ExportEngine::stageBVideoFilterGraph(
             .arg(overlayAlpha)
             .arg(overlayFormat)
             .arg(mediaProfile.outputPixelFormat);
+}
+
+QString ExportEngine::verifyCompositionFilters(
+    const QString &program, const QString &graph, const std::function<bool()> &cancelled)
+{
+    throwIfCancelled(cancelled);
+    QProcess process;
+    ExportProcessSupervisor supervisor(process, false);
+    supervisor.start(program, {"-hide_banner", "-loglevel", "error", "-nostdin",
+        "-f", "lavfi", "-i", "color=black:s=64x64:r=30:d=0.1",
+        "-f", "lavfi", "-i", "color=black@0:s=64x64:r=30:d=0.1,format=rgba",
+        "-filter_complex", graph, "-map", "[video]", "-frames:v", "3",
+        "-c:v", "rawvideo", "-f", "null", "-"});
+    if (!supervisor.waitForStarted(5'000))
+        return QStringLiteral("Could not start FFmpeg composition preflight: %1").arg(process.errorString());
+    BoundedProcessOutput diagnostic(BoundedProcessOutput::Mode::DiagnosticTail,
+                                    ProcessOutputLimits::ffmpegDiagnosticTailBytes);
+    const auto drain = [&] {
+        diagnostic.append(process.readAllStandardError());
+        static_cast<void>(process.readAllStandardOutput());
+    };
+    QElapsedTimer timer;
+    timer.start();
+    while (process.state() != QProcess::NotRunning) {
+        if (cancelled && cancelled()) {
+            static_cast<void>(supervisor.stopAndWait());
+            throwIfCancelled(cancelled);
+        }
+        if (timer.elapsed() >= 20'000) {
+            static_cast<void>(supervisor.stopAndWait());
+            return QStringLiteral("FFmpeg composition preflight timed out before telemetry rendering.");
+        }
+        process.waitForFinished(100);
+        drain();
+    }
+    drain();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        return QStringLiteral("Installed FFmpeg cannot run the required overlay filters. "
+                              "Install a compatible FFmpeg build with explicit alpha-mode support. %1")
+            .arg(diagnostic.text());
+    return {};
 }
 
 ExportResult ExportEngine::exportVideo(
@@ -746,6 +807,18 @@ ExportResult ExportEngine::exportVideo(
                  {"capabilityCacheHit", encoderSupport.cacheHit}});
         if (!encoderSupport.supported) {
             result.error = encoderSupport.error;
+            return result;
+        }
+        observe(settings, QStringLiteral("status"), QStringLiteral("preparing"),
+                QStringLiteral("verifyCompositionFilters"),
+                QStringLiteral("Checking FFmpeg overlay filter compatibility"));
+        const QString compositionError = verifyCompositionFilters(
+            FfmpegTools::ffmpegPath(),
+            stageBVideoFilterGraph({"0", "0", "0.1"}, QSize(64, 64), QSize(64, 64),
+                                  {30, 1}, 3, result.mediaProfile),
+            [&settings] { return isCancelled(settings); });
+        if (!compositionError.isEmpty()) {
+            result.error = compositionError;
             return result;
         }
         const QString temporaryOverlayPath = settings.temporaryOverlayPath.isEmpty()
@@ -1288,8 +1361,10 @@ ExportResult ExportEngine::exportVideo(
             expectedFrames, result.mediaProfile);
         QStringList compositionArguments = {
             "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y",
-            "-ss", sourceAccess->inputSeekTimestamp,
-            "-i", settings.inputPath, "-i", temporaryOverlayPath,
+        };
+        compositionArguments += stageBInputArguments(*sourceAccess, settings.inputPath);
+        compositionArguments += QStringList{
+            "-i", temporaryOverlayPath,
             "-filter_complex", timeRangeFilter,
             "-map", "[video]", "-fps_mode:v", "cfr", "-c:v", encoder,
             "-b:v", QString::number(settings.videoBitrate),
@@ -1327,11 +1402,9 @@ ExportResult ExportEngine::exportVideo(
                     {QStringLiteral("-x265-params"), x265ColorParameters.join(':')});
             }
         }
-        if (settings.audioEnabled && !source.audioCodecs.isEmpty()) {
-            compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += QStringLiteral(
-                ";[0:a]atrim=start=%1:end=%2,asetpts=PTS-STARTPTS[audio]")
-                .arg(sourceAccess->localTrimStartTimestamp)
-                .arg(sourceAccess->localTrimEndTimestamp);
+        if (settings.audioEnabled && !source.audioCodecs.isEmpty()
+            && audioDurationForRange(source, sourceRangeStart, sourceRangeEnd) > 0.0) {
+            compositionArguments[compositionArguments.indexOf("-filter_complex") + 1] += ";" + stageBAudioFilterGraph(*sourceAccess);
             compositionArguments.append({"-map", "[audio]", "-c:a", "aac", "-b:a", QString::number(settings.audioBitrate)});
         } else {
             compositionArguments.append("-an");
@@ -1347,8 +1420,8 @@ ExportResult ExportEngine::exportVideo(
                                              {"sourceRangeStart", sourceRangeStart},
                                              {"sourceRangeEnd", sourceRangeEnd},
                                              {"inputSeekTimestamp", sourceAccess->inputSeekTimestamp},
-                                             {"localTrimStartTimestamp", sourceAccess->localTrimStartTimestamp},
-                                             {"localTrimEndTimestamp", sourceAccess->localTrimEndTimestamp}});
+                                             {"trimStartTimestamp", sourceAccess->trimStartTimestamp},
+                                             {"trimEndTimestamp", sourceAccess->trimEndTimestamp}});
         compositor.setProcessChannelMode(QProcess::SeparateChannels);
         qInfo().noquote() << QStringLiteral("Stage B FFmpeg arguments: %1").arg(formatArgumentList(compositionArguments));
         if (!updateManifestState(settings, QStringLiteral("stageB"))) {
@@ -1378,7 +1451,7 @@ ExportResult ExportEngine::exportVideo(
                             .arg(stageBTimer.elapsed()), QStringLiteral("ffmpeg"),
                         {{"timeToFirstStageBOutputFrame", stageBTimer.elapsed()},
                          {"inputSeekTimestamp", sourceAccess->inputSeekTimestamp},
-                         {"localTrimStartTimestamp", sourceAccess->localTrimStartTimestamp},
+                         {"trimStartTimestamp", sourceAccess->trimStartTimestamp},
                          {"sourceRangeStart", sourceRangeStart},
                          {"sourceRangeEnd", sourceRangeEnd}});
             }
@@ -1505,7 +1578,8 @@ ExportResult ExportEngine::exportVideo(
         const qint64 expectedFrameCount = static_cast<qint64>(expectedFrames);
         const double videoDuration = result.mediaInfo.videoDuration > 0.0
             ? result.mediaInfo.videoDuration : result.mediaInfo.duration;
-        const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty();
+        const bool audioExpected = settings.audioEnabled && !source.audioCodecs.isEmpty()
+            && audioDurationForRange(source, sourceRangeStart, sourceRangeEnd) > 0.0;
         // Audio can legitimately end before the video stream (as on real action-camera
         // recordings). Validate against the selected audio-timeline intersection.
         const double expectedAudioDuration = audioDurationForRange(
@@ -1516,11 +1590,12 @@ ExportResult ExportEngine::exportVideo(
             result.mediaInfo.audioTimeBase.isValid() ? result.mediaInfo.audioTimeBase.value() : 0.0,
             audioFrameDuration);
         const bool audioPresent = !result.mediaInfo.audioCodecs.isEmpty();
+        const double expectedAudioStart = audioStartForRange(source, sourceRangeStart, sourceRangeEnd);
         const bool audioStartOk = !audioExpected
-            || qAbs(result.mediaInfo.audioStartTime - result.mediaInfo.videoStartTime)
-                <= audioTimingTolerance;
+            || qAbs(result.mediaInfo.audioStartTime - result.mediaInfo.videoStartTime - expectedAudioStart)
+                <= audioTimingTolerance + 1e-6;
         const bool audioDurationOk = !audioExpected
-            || qAbs(result.mediaInfo.audioDuration - expectedAudioDuration) <= audioTimingTolerance;
+            || qAbs(result.mediaInfo.audioDuration - expectedAudioDuration) <= audioTimingTolerance + 1e-6;
         const bool audioOk = !audioExpected || (audioPresent && audioStartOk && audioDurationOk);
         const bool otherValidationPassed = codecOk && dimensionsOk && averageRateOk && nominalRateOk
             && pixelFormatOk && bitDepthOk && encoderProfileOk && colorRangeOk && colorSpaceOk
@@ -1607,7 +1682,7 @@ ExportResult ExportEngine::exportVideo(
                                ? QStringLiteral("none") : result.mediaInfo.audioCodecs.join(','), audioOk);
         if (audioExpected) {
             finalValidationLog(QStringLiteral("checkAudioStart"), QStringLiteral("A/V start delta"),
-                               QStringLiteral("≤ %1 s").arg(audioTimingTolerance, 0, 'f', 6),
+                               QStringLiteral("%1 ± %2 s").arg(expectedAudioStart, 0, 'f', 6).arg(audioTimingTolerance, 0, 'f', 6),
                                QString::number(qAbs(result.mediaInfo.audioStartTime
                                                     - result.mediaInfo.videoStartTime), 'f', 9),
                                audioStartOk);
