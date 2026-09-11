@@ -38,7 +38,8 @@ def main():
         env.pop(key, None)
     env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep)
                                   if not Path(p).resolve().is_relative_to(sdk))
-    env.update(QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_FORCE_STDERR_LOGGING="1")
+    env.update(QT_QPA_PLATFORM="cocoa" if system == "Darwin" else "windows",
+               QT_QUICK_BACKEND="software", QT_FORCE_STDERR_LOGGING="1")
     hidden_sdk = sdk.with_name(sdk.name + "-candidate-smoke-hidden")
     if hidden_sdk.exists():
         raise RuntimeError("SDK isolation destination already exists")
