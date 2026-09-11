@@ -9,6 +9,8 @@ ctest --test-dir build-native --output-on-failure
 
 Run the local gate appropriate to the change before claiming a behavior works. Cloud CI supplements this gate as described below.
 
+The native suite assigns a unique test application identity and checks a default `QSettings` round trip before controller tests run. It retains the platform's native settings backend, including the Windows registry, and clears that test namespace afterward. Recovery cleanup failures use the existing injected deletion operation so stale-snapshot and Save As assertions run on every platform; these checks do not replace native Windows ACL-denial coverage. File-content checks close their read handles before attempting atomic replacement.
+
 ## Cloud CI
 
 [Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Both jobs configure a Debug Ninja build with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the Qt Test suite and production QML startup smoke.

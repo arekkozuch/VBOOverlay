@@ -44,6 +44,7 @@
 #include <QProcess>
 #include <QSettings>
 #include <QScopeGuard>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUuid>
@@ -64,6 +65,8 @@ class TelemetryTests final : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+    void cleanupTestCase();
     void parsesRealisticFixture();
     void toleratesMalformedRows();
     void preservesRepeatedDataSections();
@@ -223,6 +226,42 @@ private slots:
     void preservesEditsAfterDocumentFirstProjectOpen();
     void syncsOptionalRealRecording();
 };
+
+void TelemetryTests::initTestCase()
+{
+    // Default QSettings needs an application identity on every native backend,
+    // particularly the Windows registry. Keep tests outside the user's app data
+    // without changing the backend exercised by AppController.
+    QCoreApplication::setOrganizationName(QStringLiteral("FlappedEarTests"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("tests.flappedear.invalid"));
+    QCoreApplication::setApplicationName(QStringLiteral("TelemetryTests-%1").arg(
+        QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QStandardPaths::setTestModeEnabled(true);
+
+    const QString key = QStringLiteral("testHarness/roundTrip");
+    const QString value = QStringLiteral("native-settings-ready");
+    {
+        QSettings settings;
+        QCOMPARE(settings.status(), QSettings::NoError);
+        QVERIFY(settings.isWritable());
+        settings.setValue(key, value);
+        settings.sync();
+        QCOMPARE(settings.status(), QSettings::NoError);
+    }
+    QSettings restored;
+    QCOMPARE(restored.value(key).toString(), value);
+    restored.clear();
+    restored.sync();
+    QCOMPARE(restored.status(), QSettings::NoError);
+}
+
+void TelemetryTests::cleanupTestCase()
+{
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QCOMPARE(settings.status(), QSettings::NoError);
+}
 
 namespace {
 
@@ -3634,6 +3673,7 @@ void TelemetryTests::preservesRecoveryAcrossFailedSave()
     QFile unchanged(projectPath);
     QVERIFY(unchanged.open(QIODevice::ReadOnly));
     QCOMPARE(unchanged.readAll(), original);
+    unchanged.close(); // Do not hold the target open across Windows atomic replacement.
     QVERIFY(controller.saveCurrentProject());
     QVERIFY(!controller.dirty());
     QVERIFY(!QFileInfo(recoveryPath).exists());
@@ -3651,21 +3691,23 @@ void TelemetryTests::doesNotOfferStaleRecoveryAfterSuccessfulSaveCleanupFailure(
     const QString recoveryPath = QDir(recoveryDirectory).filePath(QStringLiteral("recovery.json"));
     QVERIFY(QDir().mkpath(recoveryDirectory));
     QVERIFY(writeBytes(projectPath, QJsonDocument(testProject(1.0)).toJson()));
+    ProjectRecoveryStore::Operations operations;
+    operations.clearSnapshot = [](QString *error) {
+        if (error) *error = QStringLiteral("injected recovery deletion failure");
+        return false;
+    };
 
     {
-        AppController controller(nullptr, recoveryPath);
+        AppController controller(nullptr, recoveryPath, operations);
         controller.requestOpenProject(QUrl::fromLocalFile(projectPath));
         QTRY_VERIFY(!controller.projectLoading());
         controller.setSyncOffset(8.0);
         QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
 
-        QVERIFY(QFile::setPermissions(recoveryDirectory, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
         QVERIFY(controller.saveCurrentProject());
         QVERIFY(!controller.dirty());
         QVERIFY(!controller.recoveryDegraded());
         QVERIFY(QFileInfo(recoveryPath).isFile());
-        QVERIFY(QFile::setPermissions(recoveryDirectory,
-                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
     }
 
     AppController restarted(nullptr, recoveryPath);
@@ -3741,16 +3783,18 @@ void TelemetryTests::keepsSaveAsRecoveryIdentityWithNewAndExistingProjects()
     const QString recoveryPath = QDir(recoveryDirectory).filePath(QStringLiteral("recovery.json"));
     QVERIFY(QDir().mkpath(recoveryDirectory));
     QVERIFY(writeBytes(projectA, QJsonDocument(testProject(1.0)).toJson()));
+    ProjectRecoveryStore::Operations operations;
+    operations.clearSnapshot = [](QString *error) {
+        if (error) *error = QStringLiteral("injected recovery deletion failure");
+        return false;
+    };
 
     {
-        AppController controller(nullptr, recoveryPath);
+        AppController controller(nullptr, recoveryPath, operations);
         controller.setSyncOffset(2.0); // New document -> Save As.
         QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
-        QVERIFY(QFile::setPermissions(recoveryDirectory, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
         QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectB)));
         QVERIFY(QFileInfo(recoveryPath).isFile());
-        QVERIFY(QFile::setPermissions(recoveryDirectory,
-                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
     }
     {
         AppController restarted(nullptr, recoveryPath);
@@ -3760,15 +3804,13 @@ void TelemetryTests::keepsSaveAsRecoveryIdentityWithNewAndExistingProjects()
     }
 
     {
-        AppController controller(nullptr, recoveryPath);
+        AppController controller(nullptr, recoveryPath, operations);
         controller.requestOpenProject(QUrl::fromLocalFile(projectA));
         QTRY_VERIFY(!controller.projectLoading());
         controller.setSyncOffset(3.0); // Existing A -> Save As B.
         QTRY_VERIFY(QFileInfo(recoveryPath).isFile());
-        QVERIFY(QFile::setPermissions(recoveryDirectory, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
         QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectB)));
-        QVERIFY(QFile::setPermissions(recoveryDirectory,
-                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        QVERIFY(QFileInfo(recoveryPath).isFile());
     }
     AppController restarted(nullptr, recoveryPath);
     QVERIFY(!restarted.recoveryPending());
