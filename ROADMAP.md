@@ -47,6 +47,28 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 
 ## Product work
 
+### Native RaceChrono RCZ import
+
+Requested 11 September 2026. Queue after the current release-correctness fixes;
+RCZ support is not implemented yet.
+
+- [ ] Inspect a representative RCZ session and matching VBO export from the same
+  RaceChrono version; record archive/schema variants and verified channel/unit mappings.
+- [ ] Import RCZ directly into the existing `TelemetrySession` model alongside VBO,
+  preserving per-channel timestamps, missing values, GPS, recorded OBD channels and heart rate.
+  Never infer an unavailable channel or couple telemetry time to video FPS.
+- [ ] Define supported single-session, resumed-session and multi-session archive behavior;
+  require explicit selection or reject unsupported variants rather than silently choosing data.
+- [ ] Bound archive/member counts and compressed/expanded bytes, validate paths and metadata,
+  reject malformed/truncated/unsupported inputs, and keep loading cooperatively cancellable.
+- [ ] Preserve source timing-gate metadata where supported and verify lap results against
+  the corresponding recording; do not invent gates from undocumented fields.
+- [ ] Support RCZ in file dialogs, asynchronous import, project save/reopen/relink/recovery,
+  and the export worker. Preview and export must resolve the same telemetry and transform.
+- [ ] Add synthetic native regression fixtures to both CI platforms and separate private
+  RCZ/VBO equivalence acceptance for timestamps, units, overlapping channels, gaps and laps,
+  allowing documented precision/sampling differences between the formats.
+
 ### Lap timing and session analysis
 
 - [x] Parse bounded source-defined RaceChrono timing gates without making malformed timing metadata fatal to otherwise valid telemetry.
