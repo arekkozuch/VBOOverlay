@@ -64,11 +64,15 @@ are ignored with a warning; invalid optional gate metadata does not discard othe
 valid telemetry. Archive integrity and resource-limit failures remain fatal. Laps are
 derived through the existing native GPS/gate implementation, not copied from metadata.
 
-The supplied RaceChrono VBO's timing row instead joins that centre to a point 20 m back
-along the travel bearing. The existing VBO parser treats those as gate endpoints, leading
-to near-parallel rejection and only three complete laps on this fixture. Native RCZ uses
-its own verified trap geometry and recovers all five. Correcting that VBO interpretation
-across exporter variants remains separate work; VBO lap counts are not an RCZ oracle.
+The matching RaceChrono Pro 10.2.4 VBO exporter uses centre plus a point backward
+along travel, with vector length equal to the full gate width. The VBO parser identifies
+that exact producer in `[comments]`, rotates the metric vector perpendicular to travel,
+and uses half the width on either side of the centre. Generic VBO files retain endpoint
+geometry. Other explicitly identified RaceChrono versions keep telemetry but omit gates
+with a warning until their representation is verified. This is fixture-verified behavior,
+not a universal VBO specification. Both native RCZ and corrected VBO derive five complete
+laps from the supplied recording; maximum duration errors against stored RaceChrono
+lap metadata are 0.0076 s and 0.0104 s respectively.
 
 ## Resource and integrity limits
 
@@ -109,7 +113,7 @@ times, not row indices: native channels have different rates and coverage. Media
 absolute error thresholds are 0.2 km/h for speed, 5 rpm, 0.2 bpm and 0.2 percentage points
 for brake, with at least half the reference samples covered. Complete lap counts and passage times are checked against the original RCZ
 `session.json`; start times and each lap duration must differ by less than 0.1 s. This optional test expects
-a recording with complete laps and those recorded channels; CI reports it as skipped. The private local Qt 6.8.3 run passed 27 tests, including
+a recording with complete laps and those recorded channels; CI reports it as skipped. The private local Qt 6.8.3 run passed 30 tests, including
 this recording comparison (34 native channels; 138,551 samples in the fastest channel).
 
 ## Dependency and interpretation provenance

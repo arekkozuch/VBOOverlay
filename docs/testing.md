@@ -175,3 +175,11 @@ Controller regressions deliver a controlled asynchronous result after offset/sca
 edits and an edit-then-restore sequence. Timing edits cancel work, invalidate review
 candidates, and advance a revision so an already-completed result cannot overwrite
 them. An unedited result still applies; explicit candidate application retains scale.
+
+## RaceChrono VBO gate conversion
+
+The RCZ suite verifies the identified Pro 10.2.4 centre/direction representation,
+unchanged generic VBO endpoints, invalid geometry, and warning-only gate omission for
+unverified RaceChrono exporters. The private pair test now checks both parsers against
+recorded lap metadata: five laps each, maximum VBO duration error 0.0104 s. The local
+Qt 6.8.3 run passed 30/30 tests including that private comparison.
