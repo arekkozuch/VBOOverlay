@@ -49,13 +49,13 @@ When a loaded source is in the project directory, or no more than two parent dir
 
 Fingerprints are deterministic identity metadata, not cryptographic proof of complete-file identity. Both source types store file size and a SHA-256 digest over at most three fixed 64 KiB regions: head, middle, and tail. Video additionally stores probed duration in microseconds, dimensions, exact rational frame rate, and codec. Newly modeled profile, pixel-format, bit-depth, orientation, bitrate, and color fields deliberately do not participate in the existing `video-v1` fingerprint, preserving compatibility with saved projects. Telemetry additionally stores parsed duration, sample count, and sorted channel name/unit/sample-count metadata.
 
-The bounded byte sampling reads at most 192 KiB per source and is cheap relative to video probing or VBO parsing. It detects common accidental substitutions, including size, media-metadata, telemetry-structure, and sampled-content changes. Changes confined to unsampled bytes can collide, so the value is deliberately called a source fingerprint rather than a content hash.
+The bounded byte sampling reads at most 192 KiB per source and is cheap relative to video probing or VBO/RCZ parsing. It detects common accidental substitutions, including size, media-metadata, telemetry-structure, and sampled-content changes. Changes confined to unsampled bytes can collide, so the value is deliberately called a source fingerprint rather than a content hash.
 
 ## Opening and relinking
 
 The project document is valid independently of external assets. After JSON, scene, and synchronization validation, the document commits first. Video and telemetry source jobs start only when applying the widget scene succeeds; a rejected document cannot launch jobs that later mutate the prior document. After a successful document commit, sources resolve and load independently with `loading`, `ready`, `missing`, `mismatch`, or `error` state. Missing one or both assets does not replace the widget layout, synchronization, analysis settings, or other project fields.
 
-Locate uses the ordinary bounded, cancellable, generation-guarded video probe or VBO parser. A matching fingerprint is accepted. A candidate that parses successfully but clearly differs is not committed until the user confirms intentional replacement. An invalid candidate remains an error and cannot replace the current source. Projects without a fingerprint accept a compatible candidate and acquire identity metadata in memory for the next save.
+Locate uses the ordinary bounded, cancellable, generation-guarded video probe or shared VBO/RCZ loader. A matching fingerprint is accepted. A candidate that parses successfully but clearly differs is not committed until the user confirms intentional replacement. An invalid candidate remains an error and cannot replace the current source. Projects without a fingerprint accept a compatible candidate and acquire identity metadata in memory for the next save.
 
 Successful relinking or intentional source replacement updates document source metadata and marks the project dirty. Resolving the same persisted relative reference after moving the complete folder does not mark it dirty. Recovery snapshots serialize the same complete source objects and remain unsaved document state; they never replace the saved project as authoritative clean state.
 
@@ -66,3 +66,7 @@ Successful relinking or intentional source replacement updates document source m
 ## Legacy v2 compatibility
 
 When `sources.video` or `sources.telemetry` is absent, the loader reads the old absolute-only `videoPath` or `vboPath` field. Available sources load normally and acquire fingerprints in memory. Missing legacy sources become independently relinkable rather than failing project open. The next save writes the canonical `sources` form, removes the known legacy path fields, and preserves unrelated unknown fields.
+
+## Current source and timing behavior
+
+The telemetry reference may point directly to a supported `.rcz`; no project schema migration is needed. The historical `vboPath` worker setting remains a compatibility key. Simultaneous import/relink requests retain expected fingerprints and relink intent when restarted. Manual timing edits invalidate pending auto-sync results; these runtime revisions are not project schema fields.

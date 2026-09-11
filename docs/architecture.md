@@ -2,23 +2,16 @@
 
 FlappedEar Telemetry is a native Qt 6 application. C++ owns telemetry, media, project, synchronization, and export behavior; QML presents the editor and the reusable telemetry scene.
 
-```text
-video + VBO/project
-        |
-        v
- AppController -- async probe/parse --> MediaProbe / VboParser
-        |                                             |
-        |                                      TelemetrySession
-        |                                         /       \
-        |                              TrackGeometry     LapTiming
-        v
- WidgetModel + SyncTransform ---> TelemetryRenderContext ---> TelemetryScene.qml
-                                                    |                 |
-                                             preview QML          offscreen export
-                                                                      |
-                                                           QQuickRenderControl / QRhi
-                                                                      |
-                                              FFV1/BGRA staged overlay --> FFmpeg HEVC/AAC MP4
+```mermaid
+flowchart TD
+  A["Video + VBO/RCZ + project"] --> B[AppController]
+  B --> C["MediaProbe + TelemetrySource"]
+  C --> D["TelemetrySession + TrackGeometry + LapTiming"]
+  D --> E["TelemetryRenderContext + WidgetModel"]
+  B --> E
+  E --> F[TelemetryScene.qml]
+  F --> G[Preview]
+  F --> H["QRhi → FFV1 overlay → HEVC/AAC export"]
 ```
 
 ## Application
@@ -47,9 +40,9 @@ Project open first performs bounded file reading, JSON parsing, and structural v
 
 ## Source loading
 
-Video metadata probing uses `MediaProbe`/`ffprobe`; VBO loading parses telemetry and builds `TrackGeometry`. Standalone loads, resolved project sources, and relink candidates run asynchronously. Their independent states are `idle`, `loading`, `ready`, `missing`, `mismatch`, or `error`. A relink candidate is probed/parsed before commit; a fingerprint mismatch is held outside committed state until the user explicitly accepts replacement.
+Video metadata probing uses `MediaProbe`/`ffprobe`; `TelemetrySource::load` dispatches VBO/RCZ and parses telemetry and builds `TrackGeometry`. Standalone loads, resolved project sources, and relink candidates run asynchronously. Their independent states are `idle`, `loading`, `ready`, `missing`, `mismatch`, or `error`. A relink candidate is probed/parsed before commit; a fingerprint mismatch is held outside committed state until the user explicitly accepts replacement.
 
-Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. All long-running source work receives the same lightweight `CancellationCheck` callback and throws `OperationCancelled` on cancellation. VBO reads/parsing, media probes, GoPro packet indexing/reads/decoding, and both coarse and fine synchronization check it in bounded batches. Starting a replacement generation signals every previous source and sync token; destruction does the same before a bounded two-second convergence wait. Generation checks prevent stale commits while cancellation stops wasted work, so neither replaces the other. At startup, sources are restored only as part of loading the authoritative saved project or an explicitly accepted recovery snapshot.
+Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. All long-running source work receives the same lightweight `CancellationCheck` callback and throws `OperationCancelled` on cancellation. VBO/RCZ reads/parsing, media probes, GoPro packet indexing/reads/decoding, and both coarse and fine synchronization check it in bounded batches. Starting a replacement generation signals every previous source and sync token; destruction does the same before a bounded two-second convergence wait. Generation checks prevent stale commits while cancellation stops wasted work, so neither replaces the other. At startup, sources are restored only as part of loading the authoritative saved project or an explicitly accepted recovery snapshot.
 
 ## Telemetry
 
@@ -64,6 +57,11 @@ Each source operation begins a new source generation and uses normalized source 
 `GoProTelemetrySource` discovers the MP4 `gpmd` data stream with the authoritative `FfmpegTools::ffprobePath()`, indexes packets, and decodes supported GPS5/GPS9 records into a telemetry session. Its process runner polls without busy-waiting, enforces a 120-second timeout and 64 MiB stdout bound, and terminates/reaps ffprobe on cancellation or limit failure. Packet count is capped at 100,000, aggregate GPMF bytes at 512 MiB, parsed KLV headers at 1,000,000, and container depth at 32. The header counter covers all sensor and structural/container records across the track; limit diagnostics report actual count, configured limit, packet, and parse context. These independent limits remain overflow-safe and cancellable. Packet position/size is checked with subtraction-based file extents before allocation. Final GPS samples are stable-sorted by timestamp and later equal timestamps are discarded, preserving the first sample for each time; channels are then verified finite and strictly increasing before publication.
 
 `TelemetrySyncEngine` compares GoPro GPS speed with VBO speed and returns an offset/time-scale candidate with diagnostics and confidence. Cancellation is checked between offsets and in sampling/correlation batches, without changing the existing numerical algorithm. Async sync results are also generation and path checked before they can affect the controller.
+
+
+Replacing one source restarts the other pending load with its complete request, including fingerprint, relink intent and dirty-state policy. Source generation and identity still guard completion.
+
+Manual offset/scale changes advance a synchronization revision, cancel the pending match and clear its candidate. A queued result must match that revision before it can apply; changing a value and restoring it also invalidates the older result.
 
 ## Widgets and QML
 
@@ -87,6 +85,10 @@ Classic G-Force, F1 G-Force Radar, and G-Force Bar renderers share a small prese
 
 ## Export
 
-`MediaProbe` reads explicit source and output raster, rate, codec/profile, bit-depth, orientation, and raw color metadata. `ExportMediaProfile` centrally derives the preservation format and encoder profile. `EncoderDetector` tests usable HEVC encoders and caches an exact raster/rate/pixel-format/profile probe; `TelemetryFrameRenderer` mounts `TelemetryScene.qml` offscreen through `QQuickRenderControl` and QRhi and checks the backend's reported texture limit. QRhi readback is canonical premultiplied RGBA and conditionally normalized from Y-up once before Stage A. Stage B keeps the 8-bit RGB composition contract, while the 10-bit YUV path explicitly unpremultiplies staged BGRA and uses straight-alpha blending before P010 conversion. `ExportEngine` runs the two-stage FFmpeg pipeline only after those checks. Raw-frame transport uses bounded byte-oriented backpressure; representative FFV1 sampling counts encoded bytes without retaining payload bytes. All subprocess channels are incrementally drained: ffprobe JSON has a 4 MiB complete-payload limit, stderr keeps a 128 KiB tail, progress lines cap at 16 KiB, and worker messages cap at 128 KiB. `ExportOutputTransaction` creates and owns a same-directory staging output, rejects linked targets, snapshots an approved existing regular file's native identity and modification state, and commits only when that state still matches immediately before replacement. `AppController` consumes worker events and is the sole writer of the corresponding durable export diagnostic file, preserving the same formatted entries shown by Very Verbose without concurrent worker/UI file access. Color policy is documented in [media-color-policy.md](media-color-policy.md).
+`MediaProbe` reads explicit source and output raster, rate, codec/profile, bit-depth, orientation, and raw color metadata. `ExportMediaProfile` centrally derives the preservation format and encoder profile. `EncoderDetector` tests usable HEVC encoders and caches an exact raster/rate/pixel-format/profile probe; `TelemetryFrameRenderer` mounts `TelemetryScene.qml` offscreen through `QQuickRenderControl` and QRhi and checks the backend's reported texture limit. QRhi readback is canonical premultiplied RGBA and conditionally normalized from Y-up once before Stage A. Stage B keeps the 8-bit RGB composition contract, while the 10-bit YUV path explicitly unpremultiplies staged BGRA and uses straight-alpha blending before P010 conversion. `ExportEngine` also probes the production composition graph before telemetry sampling. Stage B retains original PTS for seek/trim and preserves audio's delay relative to the selected video range. The two-stage FFmpeg pipeline runs only after capability checks. Raw-frame transport uses bounded byte-oriented backpressure; representative FFV1 sampling counts encoded bytes without retaining payload bytes. All subprocess channels are incrementally drained: ffprobe JSON has a 4 MiB complete-payload limit, stderr keeps a 128 KiB tail, progress lines cap at 16 KiB, and worker messages cap at 128 KiB. `ExportOutputTransaction` creates and owns a same-directory staging output, rejects linked targets, snapshots an approved existing regular file's native identity and modification state, and commits only when that state still matches immediately before replacement. `AppController` consumes worker events and is the sole writer of the corresponding durable export diagnostic file, preserving the same formatted entries shown by Very Verbose without concurrent worker/UI file access. Color policy is documented in [media-color-policy.md](media-color-policy.md).
 
 The detailed pipeline and timing contract are in [export-pipeline.md](export-pipeline.md). Target-file transaction guarantees are in [export-output-safety.md](export-output-safety.md).
+
+## Candidate deployment
+
+Release CI installs the executable, QML modules and Qt runtime via `qt_generate_deploy_qml_app_script`, then checks the installed application with the build SDK hidden. Debug CI remains a separate gate. Archive identity and manual release acceptance are documented in [beta-acceptance.md](beta-acceptance.md).

@@ -1,6 +1,6 @@
 # Telemetry semantics
 
-This document is the contract for VBO parsing and public telemetry lookup.
+This document is the contract for public telemetry lookup and VBO parsing. Native RCZ uses the same session model; its archive, channel and gap rules are specified in [rcz-format.md](rcz-format.md).
 
 ## VBO timestamps
 
@@ -68,7 +68,7 @@ RaceChrono coordinates supplied as signed total arc-minutes are converted to deg
 
 ## Lap timing and comparison values
 
-RaceChrono `[laptiming]` records are parsed as bounded source telemetry metadata. Malformed gates add a bounded warning but do not make otherwise valid channel data fail. Source order is retained, but the current derivation proceeds only when exactly one valid Start gate is available.
+VBO `[laptiming]` records are parsed as bounded source telemetry metadata. Identified RaceChrono Pro 10.2.4 exports encode centre plus a backward-travel vector whose length is the full width; the parser rotates that vector and uses half-width endpoints. Generic VBO files retain endpoint geometry. Other identified RaceChrono versions omit gates with a warning until validated. Malformed gates add a bounded warning but do not make otherwise valid channel data fail. Source order is retained, but the current derivation proceeds only when exactly one valid Start gate is available.
 
 `LapTiming` operates on aligned raw latitude/longitude samples and raw telemetry timestamps. It does not use video frames, export cadence, overlay smoothing, or QML interpolation. A finite-segment corridor groups nearby samples into one candidate passage; ground speed, motion normal to the gate, direction, source gaps, re-arming, cluster duration, and a refractory interval filter invalid or duplicate candidates. Complete laps exist only between consecutive accepted same-direction passages. Fastest-lap selection and deltas use unrounded durations, and lap-start seeking applies the central inverse synchronization transform in C++.
 
@@ -77,3 +77,5 @@ RaceChrono `[laptiming]` records are parsed as bounded source telemetry metadata
 Analysis navigation publishes only synchronized, video-overlapping fragments: Out lap is `[video frame 0, first measured-lap start]`, every measured lap spans its raw Start-passage pair, and In lap is `[last measured-lap end, last actual video frame]`. Clicking a fragment seeks its start through the primary player; QML does not invert synchronization itself.
 
 The Export dialog's **Single lap · hotlap** range is similarly C++ owned. It takes one completed lap and a selectable 5–8 second handle on each side, clamps to the source frame domain, then returns inclusive SMPTE IN/OUT timecodes for the existing frame-addressed exporter. Handles are presentation-time selection inputs only; the accepted export remains the exact inclusive integer frame range parsed from those C++ timecodes.
+
+Known audit limitation: best-lap reference traces still need explicit GPS-gap segment preservation; do not treat a displayed comparison across a recording gap as validated. Raw missing-data semantics above do not establish correctness of that derived comparison path.

@@ -52,7 +52,7 @@ other work between them, reducing exposure from the complete export duration to 
 commit interval. Eliminating it completely would require more invasive platform-specific directory-
 handle or conditional-rename mechanisms and is outside the current transaction design.
 
-Input video, VBO, and known transaction paths are compared using cleaned absolute paths and canonical
+Input video, VBO/RCZ telemetry, and known transaction paths are compared using cleaned absolute paths and canonical
 paths where Qt can resolve them, including canonicalized parent directories. This collision comparison
 is separate from the explicit rejection of a linked output target.
 
