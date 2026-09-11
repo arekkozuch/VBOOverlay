@@ -24,6 +24,8 @@ FFmpeg comes from Homebrew on macOS and Chocolatey on Windows. Each job fails ea
 
 The workflow sets `QT_QPA_PLATFORM=offscreen` and `QSG_RENDER_LOOP=basic`. Windows selects D3D11's software device through `QSG_RHI_PREFER_SOFTWARE_RENDERER=1`; this preserves the production QRhi path. Do not use Qt Quick's `software` or `null` backend to get pixel tests green. Renderer initialization or pixel mismatches are failures.
 
+The Qt 6.8 build also covers the `QImage::mirrored(false, true)` vertical-readback compatibility path; Qt 6.9 and newer retain `QImage::flipped(Qt::Vertical)`. Both represent the same vertical flip, without changing the readback orientation or alpha contract.
+
 `FLAPPEDEAR_SKIP_HARDWARE_TESTS=1` explicitly skips only `preservesTenBitFullRangeColorThroughVideoToolboxExport`. Private fixtures remain unset, and platform-specific cases retain their existing skip reasons. CTest runs verbosely so the full Qt Test pass/fail/skip output is retained even on success. Unset the hardware-skip variable for local VideoToolbox acceptance.
 
 The two jobs use read-only repository permissions, do not retain checkout credentials, pin action implementations to commit SHAs, cancel superseded runs, limit build parallelism to two, and retain only logs/JUnit results for 14 days. The pinned Qt installer implementation is called directly so its wrapper cannot introduce mutable nested action references. Build/job/test timeouts bound stalled runs. `qmllint` is deliberately excluded because its previous project invocation exhausted memory.
