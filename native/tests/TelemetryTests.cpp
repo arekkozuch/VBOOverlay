@@ -2726,7 +2726,7 @@ void TelemetryTests::stopsExportWorkerWhenCancellationMarkerCannotBeCreated()
 {
     QProcess process;
     ExportProcessSupervisor supervisor(process);
-    supervisor.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), QStringLiteral("sleep 30")});
+    supervisor.start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH), {QStringLiteral("stall")});
     QVERIFY2(supervisor.waitForStarted(), qPrintable(process.errorString()));
 
     const ExportCancellationResult result = ExportCancellation::request(
