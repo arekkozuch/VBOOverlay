@@ -137,3 +137,11 @@ and failure when the directory is unavailable. Startup smoke also loads the guar
 error window. Older app versions do not participate in this lock and must be closed
 before running this build. On Windows, Qt documents a stale-lock detection limitation
 for non-ASCII hostnames; failure remains closed rather than risking recovery data.
+
+## Source-loading interleavings
+
+Ordinary import and explicit relink preserve the entire other pending request across
+a source generation: path, fingerprint, mismatch-confirmation policy and dirty-state
+intent. Eight controller regressions cover both asset orders, import/relink and matching/
+mismatching project references. Replacing one asset must not strand the other or accept
+a mismatched reference without confirmation. Multi-session work remains deferred.

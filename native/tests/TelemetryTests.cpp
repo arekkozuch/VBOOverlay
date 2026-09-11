@@ -219,6 +219,8 @@ private slots:
     void opensProjectsWithMissingSources();
     void fingerprintsSourcesDeterministically();
     void relinksTelemetryWithMismatchPolicy();
+    void preservesInterleavedSourceRequests_data();
+    void preservesInterleavedSourceRequests();
     void rejectsStaleRelinkResults();
     void restoresSavedProjectsAndPreservesUnknownFields();
     void recoversAndDiscardsSavedChanges();
@@ -3531,6 +3533,59 @@ void TelemetryTests::fingerprintsSourcesDeterministically()
     QCOMPARE(ProjectSourceReferenceCodec::compareFingerprints(
                  telemetryA, ProjectSourceReferenceCodec::telemetryFingerprint(first, sessionB)),
              SourceFingerprintMatch::Mismatch);
+}
+
+void TelemetryTests::preservesInterleavedSourceRequests_data()
+{
+    QTest::addColumn<bool>("videoFirst");
+    QTest::addColumn<bool>("secondRelink");
+    QTest::addColumn<bool>("mismatch");
+    for (bool video : {false, true}) for (bool relink : {false, true}) for (bool mismatch : {false, true})
+        QTest::newRow(qPrintable(QStringLiteral("video%1-relink%2-mismatch%3").arg(video).arg(relink).arg(mismatch)))
+            << video << relink << mismatch;
+}
+
+void TelemetryTests::preservesInterleavedSourceRequests()
+{
+    QFETCH(bool, videoFirst); QFETCH(bool, secondRelink); QFETCH(bool, mismatch);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto video = directory.filePath("clip.mp4");
+    QProcess encoder;
+    encoder.start(FfmpegTools::ffmpegPath(), {"-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=black:s=64x64:r=30:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", video});
+    QVERIFY(encoder.waitForFinished(30'000));
+    QCOMPARE(encoder.exitCode(), 0);
+    auto project = testProject(0.0);
+    QJsonObject videoReference{{"relativePath", "missing.mp4"}};
+    QJsonObject telemetryReference{{"relativePath", "missing.vbo"}};
+    if (mismatch) (videoFirst ? videoReference : telemetryReference).insert("fingerprint",
+        QJsonObject{{"kind", videoFirst ? "video-v1" : "telemetry-v1"}, {"size", 1}});
+    project.insert("sources", QJsonObject{{"video", videoReference}, {"telemetry", telemetryReference}});
+    const auto path = directory.filePath("project.fetproject");
+    QVERIFY(writeBytes(path, QJsonDocument(project).toJson()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.requestOpenProject(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(controller.videoLoadState(), QStringLiteral("missing"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    const auto vbo = QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH));
+    if (videoFirst) {
+        controller.relinkVideo(QUrl::fromLocalFile(video));
+        if (secondRelink) controller.relinkVbo(vbo); else controller.loadVbo(vbo);
+    } else {
+        controller.relinkVbo(vbo);
+        if (secondRelink) controller.relinkVideo(QUrl::fromLocalFile(video)); else controller.loadVideo(QUrl::fromLocalFile(video));
+    }
+    QTRY_COMPARE(videoFirst ? controller.vboLoadState() : controller.videoLoadState(), QStringLiteral("ready"));
+    QTRY_COMPARE(videoFirst ? controller.videoLoadState() : controller.vboLoadState(),
+                 mismatch ? QStringLiteral("mismatch") : QStringLiteral("ready"));
+    if (mismatch) {
+        QCOMPARE(controller.sourceMismatchType(), videoFirst ? QStringLiteral("video") : QStringLiteral("telemetry"));
+        controller.resolveSourceMismatch(true);
+    }
+    QCOMPARE(controller.videoLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("ready"));
 }
 
 void TelemetryTests::relinksTelemetryWithMismatchPolicy()
