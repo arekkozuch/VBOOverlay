@@ -13,12 +13,12 @@ The native suite assigns a unique test application identity and checks a default
 
 ## Cloud CI
 
-[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Both jobs configure a Debug Ninja build with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the Qt Test suite and production QML startup smoke.
+[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Four jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application Qt Test suite, RCZ/parser suite and production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives.
 
 | Job | Renderer | Toolchain |
 | --- | --- | --- |
-| `macOS arm64 / Qt 6.8.3` | Metal, offscreen | `macos-15`, Apple Clang |
-| `Windows x64 / Qt 6.8.3` | D3D11 WARP, offscreen | `windows-2022`, MSVC 2022 x64 |
+| `macOS arm64 / Debug or Release / Qt 6.8.3` | Metal, offscreen | `macos-15`, Apple Clang |
+| `Windows x64 / Debug or Release / Qt 6.8.3` | D3D11 WARP, offscreen | `windows-2022`, MSVC 2022 x64 |
 
 Qt's private GUI headers are required by CMake and supplied by the matching SDK. CMake accepts the GuiPrivate target exported by Qt 6.8's Gui package and loads the separate matching GuiPrivate package on newer SDKs when needed. Qt Multimedia and Shader Tools are installed explicitly; SVG comes with the base Qt archives. The Qt version is pinned because QRhi/GuiPrivate APIs are version-sensitive; changing it still requires local render/export smoke validation. This baseline does not establish compatibility with every later Qt release.
 
@@ -77,7 +77,7 @@ Private VBO and GoPro media are ignored by Git and must remain local. A VBO-only
 - Portable storage resolution coverage for existing files/directories, future files, nested future paths, and unavailable inputs; injectable multi-volume preflight and measured-sample/fallback/margin/overflow regressions.
 - Portable raw-frame transport helper coverage for exact 1920×1080 and 3840×2160 RGBA frame transfers to a slow consumer, early consumer exit, sustained stall, prompt cancellation, and bounded queue size.
 - Malformed/owned/live/idempotent manifest recovery rules, injected cancellation-marker write failure with synchronous supervised worker shutdown, and a macOS/Unix helper child/grandchild process-tree shutdown integration test. Windows Job Object setup errors are explicit. Windows runtime/export is validated on one known Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; native Windows ACL-denied coverage remains pending because `QFile::setPermissions()` does not model Windows ACL denial reliably.
-- Deterministic bounded Stage B input-seek/local-trim mapping (including start-near-zero, short and late ranges) plus synthetic FFmpeg integrations for non-zero source stream PTS/audio, non-zero-range video/audio timelines, the exact `60000/1001` 30→90 boundary schedule (3,597 packets), VFR-to-CFR conversion, CFR packet/frame counts, completed-overlay frame identity, full decoded FFV1 staged-overlay frame counts, and premultiplied-alpha source-over samples including a translucent antialiased edge. The alpha fixture also decodes Stage A's FFV1/BGRA streams and requires byte-exact preservation before Stage B composition. The Main10 color test uses a fully transparent premultiplied overlay so any RGB divergence identifies the 10-bit overlay/encoder path rather than intended widget pixels.
+- Deterministic bounded Stage B input-seek/absolute-trim mapping (including start-near-zero, short and late ranges) plus synthetic FFmpeg integrations for non-zero source stream PTS/audio, non-zero-range video/audio timelines, the exact `60000/1001` 30→90 boundary schedule (3,597 packets), VFR-to-CFR conversion, CFR packet/frame counts, completed-overlay frame identity, full decoded FFV1 staged-overlay frame counts, and premultiplied-alpha source-over samples including a translucent antialiased edge. The alpha fixture also decodes Stage A's FFV1/BGRA streams and requires byte-exact preservation before Stage B composition. The Main10 color test uses a fully transparent premultiplied overlay so any RGB divergence identifies the 10-bit overlay/encoder path rather than intended widget pixels.
 - Frame-addressed export regressions cover the 78,272-frame `60000/1001` source domain and its exact `duration_ts` fallback, integer-derived bounded Stage-B timestamps, full/limited range counts, strict Stage-B-progress versus ffprobe agreement, and the 0/1..10/>10/surplus terminal-deficit matrix with exact contiguous-CFR timestamp evidence. A synthetic 30 fps controller integration additionally verifies Out lap/In lap navigation, C++-generated single-lap hotlap SMPTE IN/OUT, and exact parsed frame-range duration. Temporary-overlay validation separately retains the proven `60000/1001` Matroska 1 ms timestamp-quantization regression (`19001/317`) while rejecting a meaningful `30/1` mismatch.
 - The startup QML smoke rejects `ReferenceError`, `TypeError`, and binding-loop diagnostics and verifies one primary decoder while Analysis is closed, two while open, and release back to one after close.
 - Manual editor smoke at 1180×720 verifies both sidebar endpoints are reachable, full-screen transport is visible and scrubbed through the primary player, and Very Verbose detached log inspection does not move when diagnostics append.
@@ -88,7 +88,7 @@ Unit and synthetic integration tests do not replace manual real-media validation
 
 ## September 2026 lap-timing validation
 
-Deterministic tests cover malformed and ambiguous gates, directional passage derivation, telemetry-end-inside-gate finalization, first-pass Current state, controller publication/clearing, synchronized lap-to-video mapping, Out lap/In lap fragments, C++ hotlap range generation, and all six comparison widgets through the production QML scene. The optional private Jastrząb VBO/GoPro run derived four accepted passages and three complete laps, with the fastest lap at 111.245 s; GPS-speed synchronization measured offset 7.817 s, correlation 0.998, and confidence 0.970. This is a private single-machine fixture, not a broad compatibility claim.
+Deterministic tests cover malformed and ambiguous gates, directional passage derivation, telemetry-end-inside-gate finalization, first-pass Current state, controller publication/clearing, synchronized lap-to-video mapping, Out lap/In lap fragments, C++ hotlap range generation, and all six comparison widgets through the production QML scene. Historical endpoint interpretation: the optional private Jastrząb VBO/GoPro run derived four accepted passages and three complete laps, with the fastest lap at 111.245 s; GPS-speed synchronization measured offset 7.817 s, correlation 0.998, and confidence 0.970. The September 11 exporter-specific correction supersedes that lap count: the matching RCZ/VBO pair now derives five complete laps through both parsers. The old sync result remains historical; this is not fresh candidate-video acceptance.
 
 ## Before claiming a feature works
 
@@ -168,3 +168,26 @@ checks explicit alpha-mode support rather than inferring compatibility from an
 FFmpeg version or encoder listing. Failure is actionable, diagnostic output is bounded,
 and the probe supports cancellation and a 20-second execution deadline. Synthetic
 tests exercise both 8-bit and 10-bit graphs, missing filters, and cancellation.
+
+## Manual timing edits during auto-sync
+
+Controller regressions deliver a controlled asynchronous result after offset/scale
+edits and an edit-then-restore sequence. Timing edits cancel work, invalidate review
+candidates, and advance a revision so an already-completed result cannot overwrite
+them. An unedited result still applies; explicit candidate application retains scale.
+
+## RaceChrono VBO gate conversion
+
+The RCZ suite verifies the identified Pro 10.2.4 centre/direction representation,
+unchanged generic VBO endpoints, invalid geometry, and warning-only gate omission for
+unverified RaceChrono exporters. The private pair test now checks both parsers against
+recorded lap metadata: five laps each, maximum VBO duration error 0.0104 s. The local
+Qt 6.8.3 run passed 30/30 tests including that private comparison.
+
+The zlib 1.3.2 source has two upstream download locations (zlib.net and the official
+madler/zlib release asset), verified against the same pinned SHA-256. The fallback
+addresses intermittent invalid downloads without accepting changed dependency bytes.
+
+## Candidate acceptance
+
+See [beta-acceptance.md](beta-acceptance.md) for supported scope, archive identity, installation prerequisites, the real-media walkthrough and required evidence. Passing a hosted startup check with the build SDK hidden is useful deployment evidence; it does not replace testing on a clean physical machine or using the final hardware encoder.

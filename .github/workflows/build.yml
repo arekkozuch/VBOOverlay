@@ -15,19 +15,23 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: ${{ matrix.name }} / Qt 6.8.3
+    name: ${{ matrix.name }} / ${{ matrix.build-type }} / Qt 6.8.3
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
+        build-type: [Debug, Release]
+        platform: [macos, windows]
         include:
-          - name: macOS arm64
+          - platform: macos
+            name: macOS arm64
             os: macos-15
             qt-arch: clang_64
             graphics-api: metal
             software-renderer: '0'
-          - name: Windows x64
+          - platform: windows
+            name: Windows x64
             os: windows-2022
             qt-arch: win64_msvc2022_64
             graphics-api: d3d11
@@ -122,9 +126,9 @@ jobs:
           if ($main10 -notmatch '\byuv420p10le\b') { throw 'libx265 Main10 is required for synthetic integration tests.' }
           $main10 | Set-Content ci-logs/libx265-capabilities.txt
 
-      - name: Configure Debug build
+      - name: Configure ${{ matrix.build-type }} build
         run: |
-          cmake -S . -B build-native -G Ninja -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" 2>&1 | Tee-Object ci-logs/configure.log
+          cmake -S . -B build-native -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DFLAPPEDEAR_DEPLOY_QT=${{ matrix.build-type == 'Release' && 'ON' || 'OFF' }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" 2>&1 | Tee-Object ci-logs/configure.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build application and tests
@@ -135,23 +139,40 @@ jobs:
       - name: Run Qt Test and startup smoke
         timeout-minutes: 20
         run: |
-          ctest --test-dir build-native --build-config Debug --verbose --output-on-failure --no-tests=error --timeout 900 --output-junit "$env:GITHUB_WORKSPACE/ci-logs/ctest.xml" 2>&1 | Tee-Object ci-logs/ctest.log
+          ctest --test-dir build-native --build-config ${{ matrix.build-type }} --verbose --output-on-failure --no-tests=error --timeout 900 --output-junit "$env:GITHUB_WORKSPACE/ci-logs/ctest.xml" 2>&1 | Tee-Object ci-logs/ctest.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage and smoke-test internal candidate
+        if: matrix.build-type == 'Release'
+        run: |
+          cmake --install build-native --prefix "$env:GITHUB_WORKSPACE/native-dist/stage" --config Release 2>&1 | Tee-Object ci-logs/deploy.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/package_candidate.py --stage native-dist/stage --qt-root "$env:QT_ROOT_DIR"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload internal candidate
+        if: success() && matrix.build-type == 'Release'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-${{ matrix.os }}-${{ github.sha }}
+          path: native-dist/artifacts/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Record validation scope
         if: always()
         run: |
           @'
-          Cloud gate: Debug application build, Qt Test suite, production QML startup smoke, QRhi pixel regressions, and synthetic FFmpeg integrations.
+          Cloud gate: Debug and Release application builds, Qt Test suite, production QML startup smoke, QRhi pixel regressions, and synthetic FFmpeg integrations.
           The VideoToolbox hardware test is explicitly skipped; private VBO/GoPro fixtures are not supplied. Platform-specific tests report their own skip reasons in ctest.log.
-          A green run does not establish real-media, hardware-encoder, packaging/signing, or interactive-editor release acceptance.
+          Release jobs deploy Qt, hide the build SDK for a relocated startup smoke, and attach an unsigned/internal candidate with file hashes and build metadata. A green run does not establish real-media, hardware-encoder, clean-machine, signing/notarization, or interactive-editor release acceptance.
           '@ | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: Upload diagnostic logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: native-ci-${{ matrix.os }}-qt-6.8.3
+          name: native-ci-${{ matrix.os }}-${{ matrix.build-type }}-qt-6.8.3
           path: |
             ci-logs/
             build-native/Testing/Temporary/

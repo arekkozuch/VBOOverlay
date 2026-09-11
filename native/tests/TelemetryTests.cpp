@@ -44,6 +44,7 @@
 #include <QJsonDocument>
 #include <QMediaPlayer>
 #include <QProcess>
+#include <QPromise>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QStandardPaths>
@@ -135,6 +136,8 @@ private slots:
     void retainsGlobalSyncAmbiguity();
     void rejectsAutomaticSyncWithShortOverlap();
     void gatesWeakSyncCandidates();
+    void preservesTimingEditsDuringAutoSync_data();
+    void preservesTimingEditsDuringAutoSync();
     void rendersTelemetryAtExplicitTime();
     void preservesPartialOverlapInAnalysisSeries();
     void probesMediaInfoJson();
@@ -2500,6 +2503,57 @@ void TelemetryTests::keepsStaticTrackIndependentFromTime()
     QVERIFY(!qml.contains("function onTimeChanged()"));
     QVERIFY(!qml.contains("requestPaint"));
     QVERIFY(!qml.contains("onRevisionChanged"));
+}
+
+void TelemetryTests::preservesTimingEditsDuringAutoSync_data()
+{
+    QTest::addColumn<int>("edit");
+    QTest::newRow("offset") << 1;
+    QTest::newRow("scale") << 2;
+    QTest::newRow("edit-and-restore") << 3;
+    QTest::newRow("unedited-result-applies") << 0;
+}
+
+void TelemetryTests::preservesTimingEditsDuringAutoSync()
+{
+    QFETCH(int, edit);
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.m_syncCancellation = std::make_shared<std::atomic_bool>(false);
+    AppController::AutoSyncResult result;
+    result.generation = controller.m_sourceGeneration;
+    result.syncRevision = controller.m_syncRevision;
+    result.success = true;
+    result.candidate.offset = 12.5;
+    result.candidate.timeScale = 1.002;
+    result.candidate.confidence = 1.0;
+    QPromise<AppController::AutoSyncResult> promise;
+    promise.start();
+    controller.m_syncWatcher.setFuture(promise.future());
+    QSignalSpy finished(&controller, &AppController::syncingChanged);
+    if (edit == 1) controller.setSyncOffset(7.0);
+    if (edit == 2) controller.setTimeScale(1.01);
+    if (edit == 3) { controller.setSyncOffset(7.0); controller.setSyncOffset(0.0); }
+    const bool cancelled = controller.m_syncCancellation->load();
+    promise.addResult(result); // A completed worker can still deliver an already-queued result.
+    promise.finish();
+    QTRY_VERIFY(!finished.isEmpty());
+    QCOMPARE(cancelled, edit != 0);
+    QCOMPARE(controller.syncOffset(), edit == 0 ? 12.5 : edit == 1 ? 7.0 : 0.0);
+    QCOMPARE(controller.timeScale(), edit == 0 ? 1.002 : edit == 2 ? 1.01 : 1.0);
+    if (edit != 0) QVERIFY(controller.syncCandidate().isEmpty());
+    else {
+        QCOMPARE(controller.syncCandidate().value("timeScale").toDouble(), 1.002);
+        controller.applySyncCandidate();
+        QCOMPARE(controller.timeScale(), 1.002);
+        controller.setSyncOffset(8.0);
+        QVERIFY(controller.syncCandidate().isEmpty());
+        controller.applySyncCandidate();
+        QCOMPARE(controller.syncOffset(), 8.0);
+    }
 }
 
 void TelemetryTests::gatesWeakSyncCandidates()

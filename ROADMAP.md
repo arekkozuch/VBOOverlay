@@ -1,6 +1,6 @@
 # FlappedEar Telemetry roadmap
 
-This roadmap tracks remaining work. It is not a record of completed implementation history.
+Updated 11 September 2026. This roadmap tracks completed foundations and remaining work. Current evidence is in [currentstate.md](currentstate.md); the invited-beta gate is [beta acceptance](docs/beta-acceptance.md). Multi-session implementation remains deferred.
 
 ## Completed foundation
 
@@ -11,8 +11,8 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Export output transactions, including explicit state-bound overwrite consent, changed-target refusal, and protected user targets.
 - [x] Atomic project saving and dirty-state safeguards for destructive project actions.
 - [x] Separate atomic unsaved-document recovery from authoritative saved projects, including explicit startup recovery/discard and unknown-field preservation.
-- [x] Portable project-relative video/VBO references, bounded source fingerprints, document-first opening with missing assets, explicit relinking, and mismatch confirmation.
-- [x] Asynchronous video/VBO loading, transactional document commit, and stale-result rejection.
+- [x] Portable project-relative video/VBO/RCZ references, bounded source fingerprints, document-first opening with missing assets, explicit relinking, and mismatch confirmation.
+- [x] Asynchronous video/VBO/RCZ loading, transactional document commit, and stale-result rejection.
 - [x] Cooperative cancellation and defensive resource bounds for VBO parsing, GoPro probing/GPMF decoding, auto-sync, source replacement, and shutdown.
 - [x] Resource-bound project/template/recovery/manifest JSON, FFmpeg/ffprobe diagnostics and progress, asynchronous project parsing, and retriable visible recovery-persistence degradation.
 - [x] Version recovery metadata so a snapshot left behind after a successful save but failed physical deletion is provably stale on the next launch.
@@ -24,6 +24,18 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [x] Windows runtime/export validation on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration.
 
 ## Correctness / release hardening
+
+- [x] Close shipping-review R1–R8: frame arithmetic, global sync confidence, bounded template persistence, GUI recovery ownership, complete interleaved source requests, positive PTS, delayed audio and FFmpeg composition preflight.
+- [x] Guard auto-sync results with a timing-edit revision and cancellation; invalidate stale review candidates.
+- [ ] Preserve GPS-gap segment boundaries in best-lap reference traces; cover numeric delta and nearby track crossings.
+- [ ] Bound VBO line splitting before bulk allocation; validate finite derived timestamps and synchronization work budgets.
+- [ ] Terminate Unix descendants when the process-group leader has already exited; verify application cleanup ownership in that case.
+- [ ] Correct export-log retention for hyphenated production UUIDs.
+- [ ] Validate coordinate-unit ambiguity near the equator/prime meridian across exporters.
+- [ ] Validate long final scans, slow destinations and a destination volume filling during Stage B.
+
+These additional audit findings remain open. Their effect on the advertised beta workflow must be resolved or explicitly bounded before approval; a passing CI run does not close them.
+
 
 - [x] Enforce final CFR at the effective rational export rate, including deterministic VFR-to-CFR, non-zero range, and audio-timeline coverage.
 - [ ] Expand final-media validation across a broader real-media matrix.
@@ -41,7 +53,10 @@ This roadmap tracks remaining work. It is not a record of completed implementati
 - [ ] Broaden Windows GPU/encoder and installed-dependency runtime coverage beyond the known configuration.
 - [ ] Validate heavy 4K export GUI responsiveness on Windows.
 - [ ] Add native Windows ACL-denied filesystem coverage and validate multi-instance export-log safety.
-- [ ] Define the packaging, signing, and release gate.
+- [x] Define single-session beta scope, reproducible candidate build procedure and exact-build acceptance record.
+- [x] Add Debug/Release platform CI and internal Qt deployment with SDK-isolated startup and archive hashes.
+- [ ] Complete clean-machine and real-video acceptance on an identified candidate archive.
+- [ ] Finalize distribution notices/source access, signing/notarization, retained artifacts and installation UX.
 
 Development validation includes a successful private 3840×2160, `60000/1001`, 30→90 HEVC/AAC export on macOS with 3,597 final packets; native and 3840×2160 exports of one 5312×2988 HERO11 Main10/BT.709 fixture (442 final packets each); a separate 5.855-second 3840×2160 Main10/full-range BT.709 color-fidelity export with the production nine-widget overlay (351 packets); plus restored real GoPro/VBO auto-sync at +90.217 s and 0.999575 correlation. It does not replace wider real-media or Windows runtime validation.
 
@@ -70,8 +85,8 @@ multiple-session selection remain unsupported and fail explicitly.
   RCZ/VBO equivalence acceptance for timestamps, units, overlapping channels, gaps and laps,
   allowing documented precision/sampling differences between the formats.
 
-- [ ] Correct RaceChrono VBO gate interpretation after checking exporter variants; the new
-  private pair exposed three detected VBO laps versus five recorded/native RCZ laps.
+- [x] Correct the verified RaceChrono Pro 10.2.4 VBO gate geometry; the private pair now derives five complete laps through VBO and RCZ.
+- [ ] Validate additional RaceChrono VBO exporter versions; identified unverified versions omit gates with a warning.
 
 ### Lap timing and session analysis
 

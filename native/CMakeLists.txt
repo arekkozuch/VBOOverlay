@@ -24,6 +24,7 @@ set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(flappedear_zlib
     URL https://zlib.net/fossils/zlib-1.3.2.tar.gz
+        https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz
     URL_HASH SHA256=bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
@@ -223,9 +224,38 @@ set_target_properties(flappedear_native PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+include(GNUInstallDirs)
 install(TARGETS flappedear_native
     BUNDLE DESTINATION .
-    RUNTIME DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+option(FLAPPEDEAR_DEPLOY_QT "Deploy Qt runtime into an internal candidate package" OFF)
+if(FLAPPEDEAR_DEPLOY_QT)
+    if(NOT APPLE AND NOT WIN32)
+        message(FATAL_ERROR "Candidate deployment currently supports macOS and Windows only")
+    endif()
+    # Qt 6.8's convenience generator emits an unquoted executable argument.
+    # Use the supported deployment API with explicit quoting for our display name.
+    if(APPLE)
+        set(flappedear_deploy_executable "$<TARGET_FILE_NAME:flappedear_native>.app")
+    else()
+        set(flappedear_deploy_executable "${CMAKE_INSTALL_BINDIR}/$<TARGET_FILE_NAME:flappedear_native>")
+    endif()
+    qt6_generate_deploy_script(
+        TARGET flappedear_native
+        OUTPUT_SCRIPT flappedear_deploy_script
+        CONTENT "
+qt_deploy_qml_imports(TARGET flappedear_native PLUGINS_FOUND flappedear_qml_plugins)
+if(NOT flappedear_qml_plugins)
+    message(FATAL_ERROR \"QML plugin deployment list is empty\")
+endif()
+qt_deploy_runtime_dependencies(
+    EXECUTABLE \"${flappedear_deploy_executable}\"
+    ADDITIONAL_MODULES \${flappedear_qml_plugins}
+    GENERATE_QT_CONF
+    NO_TRANSLATIONS
+)")
+    install(SCRIPT ${flappedear_deploy_script})
+endif()
 
 add_subdirectory(tests)

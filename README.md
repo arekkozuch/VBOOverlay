@@ -4,7 +4,7 @@ FlappedEar Telemetry is a native desktop editor for synchronizing motorsport tel
 
 ## Status
 
-The application is a Qt 6, C++20, and QML native application in alpha and active development. The established editor/export baseline and the September 2026 lap-timing additions have been locally validated on macOS, including deterministic controller/QML coverage and one private Jastrząb VBO/GoPro fixture. Windows runtime/export has been validated on one Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration; broader hardware and packaging validation remain pending.
+The Qt 6/C++20/QML application is preparing a single-session invited beta. It remains unapproved for beta distribution until the exact candidate completes [beta acceptance](docs/beta-acceptance.md). Native RCZ import and the eight numbered shipping-review fixes are implemented. Manual timing edits now invalidate pending auto-sync results; the verified RaceChrono Pro 10.2.4 VBO gate conversion recovers the supplied recording's five laps. See [current state](currentstate.md) for evidence and outstanding work.
 
 ## Current capabilities
 
@@ -31,9 +31,9 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 - CMake 3.24 or newer.
 - A C++20 compiler.
 - Qt 6.8 or newer with Concurrent, Core, Gui and matching GuiPrivate headers, Qml, Quick, Quick Controls 2, Multimedia, and Test; include the SVG and Shader Tools modules in binary SDK installations.
-- FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; neither is bundled.
+- FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; the command-line tools are not bundled. A small production-filter preflight also requires explicit alpha-mode support.
 
-The supported development targets are macOS and Windows. The repository currently has tested macOS/Homebrew commands below; it has no separate, validated Windows packaging procedure yet.
+Development targets are macOS and Windows. CI pins Qt 6.8.3 and produces internal Release candidates with deployed Qt runtimes. Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
 
 ## Build
 
@@ -50,7 +50,7 @@ open "build-native/native/FlappedEar Telemetry.app"
 
 ## Continuous integration
 
-[Native CI](.github/workflows/build.yml) builds the application and runs Qt Test, QML startup smoke, QRhi rendering regressions, and synthetic FFmpeg integrations on macOS arm64 and Windows x64 with Qt 6.8.3. It runs on pull requests, pushes to `main`, and manual dispatch. Hardware-encoder and private real-media acceptance remain separate local gates. Logs and JUnit results are attached to each run; see [testing guidance](docs/testing.md#cloud-ci) for scope and exclusions.
+[Native CI](.github/workflows/build.yml) builds Debug and Release configurations and runs Qt Test, QML startup smoke, QRhi rendering regressions, and synthetic FFmpeg integrations on macOS arm64 and Windows x64 with Qt 6.8.3. It runs on pull requests, pushes to `main`, and manual dispatch. Hardware-encoder and private real-media acceptance remain separate local gates. Successful Release jobs also deploy Qt and check installed startup with the build SDK hidden. Candidate archives carry file hashes and a checkout manifest; these are internal acceptance artifacts, not an approved release. Logs and JUnit results are attached to each run; see [testing guidance](docs/testing.md#cloud-ci) for scope and exclusions.
 
 ## Architecture
 
@@ -60,11 +60,11 @@ The application keeps telemetry parsing, synchronization, video/media handling, 
 
 G-Force widgets can invert lateral and longitudinal presentation axes independently, without changing imported telemetry. Alongside the classic target, the widget catalog includes an **F1 G-Force Radar** with a dark semi-transparent circular field, 1.5 g range, and six 0.25 g concentric-ring levels by default, plus a compact **G-Force Bar** that shows true combined magnitude while clamping only its fill. Speed, pedals, Heart Rate, Retro Custom, and G-Force Bar use the same translucent charcoal broadcast panel, typography, rounded border, and neutral bar-track treatment; throttle is green, brake is red only when it has fill, and G-Force is amber. The analog retro tachometer keeps its circular identity with a matching rounded dark RPM plate. `Retro Custom` accepts arbitrary channel, adjustment, formatting, unit, fallback, and palette settings. Text-bearing value widgets offer **Font size**: `Auto` retains their responsive legacy sizing, while a positive canonical size is scene-scaled consistently for preview and every export resolution.
 
-Templates have two explicit operations. **Save current** updates the custom template that was applied (or just created), preserving its ID, name, and description. Selecting a template alone does not make it editable, so Save current opens **Save as new** until that custom template is applied. Built-in templates are immutable and always use Save as new.
+Template writes validate structure, count and serialized size before atomic replacement; a rejected store remains protected until successfully reloaded. Templates have two explicit operations. **Save current** updates the custom template that was applied (or just created), preserving its ID, name, and description. Selecting a template alone does not make it editable, so Save current opens **Save as new** until that custom template is applied. Built-in templates are immutable and always use Save as new.
 
 Lap and speed comparison tiles use the same compact translucent panel family. Each Best, Current, and Delta tile is an independent widget with its own position, scale, rotation, visibility, and appearance. Scaling a comparison tile scales its typography, margins, gauge strokes, border, and corner radius together. Editor interaction geometry follows widget rotation, and normalized size/scale changes keep the unrotated widget rectangle inside the canvas.
 
-A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO/RCZ assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup only when their logical document state is newer than the saved authority. Before Quit, New, or Open can discard current edits, the editor presents a branded Save / Discard / Cancel confirmation. A leftover snapshot after successful Save is cleanup debt, not degraded recovery protection or a user warning. QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
+A single GUI editor owns the shared application-data directory through a process lock; export workers remain independent. A saved `.fetproject` is the authoritative clean document. It can open without its external video or VBO/RCZ assets; missing or mismatched sources remain independently relinkable without losing the scene or settings. Unsaved persistent edits are held separately in an atomic recovery snapshot and are recovered or discarded explicitly at startup only when their logical document state is newer than the saved authority. Before Quit, New, or Open can discard current edits, the editor presents a branded Save / Discard / Cancel confirmation. A leftover snapshot after successful Save is cleanup debt, not degraded recovery protection or a user warning. QSettings stores only application preferences and the last project path. The portable source format is documented in [docs/project-format.md](docs/project-format.md).
 
 External JSON documents are size- and structure-bounded before they can create editor models. FFprobe payloads, FFmpeg diagnostics, progress lines, and export-worker messages are bounded as well; diagnostic tails retain the newest useful output. If automatic recovery storage fails, the editor shows a persistent manual-save warning and retries safely after a backoff. A requested recovery discard is durable before cleanup: a matching residual snapshot is suppressed at the next startup, while newer or different-document recovery remains available.
 
@@ -93,9 +93,11 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 ## Current limitations
 
 - Windows runtime/export validation currently covers one known Windows 11 / Qt 6.11 / MSVC 2022 / Intel Iris Plus / Quick Sync configuration, not a broad hardware matrix.
-- Packaging and signing are pending.
+- Internal candidate packaging is automated; clean-machine acceptance, distribution notices and publisher signing/notarization remain pending.
 - A source currently contains one video file; multi-chapter timelines are not implemented.
-- Export requires external FFmpeg at runtime.
+- Export requires compatible external FFmpeg at runtime, including the production overlay filters; the application fails early when these are absent.
+- Identified RaceChrono VBO versions other than Pro 10.2.4 retain telemetry but omit unverified timing gates with a warning.
+- Additional audit hardening remains tracked in [ROADMAP.md](ROADMAP.md), including lap comparisons across GPS gaps.
 - Rotation and sample-aspect-ratio display-transform preservation, HDR/Log color-managed preservation, and production 8K validation remain pending. One real HERO11 5312×2988 10-bit SDR fixture has passed native and 3840×2160 macOS exports; this is not a broader hardware guarantee.
 - Real-media coverage remains limited.
 - Interactive map tiles are pending; the local GPS track view works without map tiles.
