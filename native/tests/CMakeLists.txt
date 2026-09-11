@@ -42,7 +42,9 @@ add_dependencies(flappedear_native_tests flappedear_native flappedear_raw_transp
 add_test(NAME flappedear_native_tests COMMAND flappedear_native_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    # Startup checks QML loading and controller/window lifecycle. Offscreen QPA
+    # cannot supply a native window swapchain; QRhi pixels are tested separately.
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
     PASS_REGULAR_EXPRESSION "Startup smoke passed"
     FAIL_REGULAR_EXPRESSION "ReferenceError;TypeError;Binding loop"
 )
