@@ -1,4 +1,10 @@
-find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui GuiPrivate Qml Quick QuickControls2 Multimedia Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent Core Gui Qml Quick QuickControls2 Multimedia Test)
+
+# Qt 6.8 exports GuiPrivate with Gui; newer SDKs provide a separate package.
+# In both layouts, require the private target from this exact Qt installation.
+if(NOT TARGET Qt6::GuiPrivate)
+    find_package(Qt6 ${Qt6_VERSION} EXACT REQUIRED COMPONENTS GuiPrivate)
+endif()
 
 qt_standard_project_setup(REQUIRES 6.8)
 

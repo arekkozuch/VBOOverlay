@@ -241,8 +241,14 @@ QImage TelemetryFrameRenderer::renderFrame(const double sourceVideoTime)
     // QRhi reports whether readback rows are bottom-to-top for the active
     // backend. Normalize that once at the renderer boundary; Stage A and B
     // always receive conventional top-to-bottom image rows.
-    return readbackRequiresVerticalFlip(m_impl->renderControl->rhi()->isYUpInFramebuffer())
-        ? image.flipped(Qt::Vertical) : image;
+    if (readbackRequiresVerticalFlip(m_impl->renderControl->rhi()->isYUpInFramebuffer())) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+        return image.flipped(Qt::Vertical);
+#else
+        return image.mirrored(false, true);
+#endif
+    }
+    return image;
 }
 
 QString TelemetryFrameRenderer::errorString() const { return m_error; }

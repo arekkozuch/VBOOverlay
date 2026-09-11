@@ -30,7 +30,7 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 
 - CMake 3.24 or newer.
 - A C++20 compiler.
-- Qt 6.8 or newer with Concurrent, Core, Gui, Quick, Quick Controls 2, Multimedia, and Test.
+- Qt 6.8 or newer with Concurrent, Core, Gui and matching GuiPrivate headers, Qml, Quick, Quick Controls 2, Multimedia, and Test; include the SVG and Shader Tools modules in binary SDK installations.
 - FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; neither is bundled.
 
 The supported development targets are macOS and Windows. The repository currently has tested macOS/Homebrew commands below; it has no separate, validated Windows packaging procedure yet.
@@ -47,6 +47,10 @@ cmake --build build-native --parallel
 ctest --test-dir build-native --output-on-failure
 open "build-native/native/FlappedEar Telemetry.app"
 ```
+
+## Continuous integration
+
+[Native CI](.github/workflows/build.yml) builds the application and runs Qt Test, QML startup smoke, QRhi rendering regressions, and synthetic FFmpeg integrations on macOS arm64 and Windows x64 with Qt 6.8.3. It runs on pull requests, pushes to `main`, and manual dispatch. Hardware-encoder and private real-media acceptance remain separate local gates. Logs and JUnit results are attached to each run; see [testing guidance](docs/testing.md#cloud-ci) for scope and exclusions.
 
 ## Architecture
 

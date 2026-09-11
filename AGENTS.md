@@ -83,8 +83,9 @@
 - Preview widget geometry is derived from loaded media display geometry, never from transient
   `VideoOutput` decoded-frame state. User-accessible playback end is the last actual video frame,
   not the media-duration boundary after it.
-- Cloud CI is intentionally disabled. Local build/tests are the current required gate, and real-media
-  validation must be reported separately from synthetic tests.
+- Cloud CI builds and runs synthetic tests on macOS and Windows. Keep both CI jobs green, run the
+  applicable local gate, and report real-media and hardware-encoder validation separately. An explicit
+  cloud hardware-test skip must not disable QRhi rendering assertions or software FFmpeg integrations.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke
   validation.
 - Source raster, bit depth, and color characteristics are data, not presets. Never impose a product-level
