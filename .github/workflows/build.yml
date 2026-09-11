@@ -145,7 +145,7 @@ jobs:
       - name: Stage and smoke-test internal candidate
         if: matrix.build-type == 'Release'
         run: |
-          cmake --install build-native --prefix native-dist/stage --config Release 2>&1 | Tee-Object ci-logs/deploy.log
+          cmake --install build-native --prefix "$env:GITHUB_WORKSPACE/native-dist/stage" --config Release 2>&1 | Tee-Object ci-logs/deploy.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/package_candidate.py --stage native-dist/stage --qt-root "$env:QT_ROOT_DIR"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

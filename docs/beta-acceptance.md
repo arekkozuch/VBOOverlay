@@ -43,7 +43,7 @@ To reproduce the candidate build with the same platform/compiler and Qt 6.8.3 SD
 cmake -S . -B build-native -G Ninja -DCMAKE_BUILD_TYPE=Release -DFLAPPEDEAR_DEPLOY_QT=ON -DCMAKE_PREFIX_PATH=<qt-sdk>
 cmake --build build-native --parallel
 ctest --test-dir build-native --build-config Release --output-on-failure
-cmake --install build-native --prefix native-dist/stage --config Release
+cmake --install build-native --prefix <absolute-staging-directory> --config Release
 ```
 
 The build process records dependency versions. FFmpeg is currently resolved through
