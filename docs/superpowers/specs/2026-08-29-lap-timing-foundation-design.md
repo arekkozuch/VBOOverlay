@@ -1,5 +1,8 @@
 # Lap Timing Foundation Design
 
+> Historical design/implementation plan. Status and validation statements below describe the original planning checkpoint. For current implementation, verified exporter geometry and remaining release gates, use [current state](../../../currentstate.md), [testing](../../testing.md) and [beta acceptance](../../beta-acceptance.md).
+
+
 ## Status / baseline
 
 This document records the original architecture specification for the first Lap Timing & Session Analysis product slice. The production implementation now exists on `main`: source gates, raw-GPS passage/lap derivation, `LapSession` publication, Analysis lap list/seek, live best-lap comparison, and six independent lap/speed tiles are present. The deterministic/macOS/private-fixture validation pass remains deferred, so implementation presence must not be read as runtime acceptance.

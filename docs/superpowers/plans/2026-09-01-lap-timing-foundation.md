@@ -1,5 +1,8 @@
 # Lap Timing Foundation Implementation Plan
 
+> Historical design/implementation plan. Status and validation statements below describe the original planning checkpoint. For current implementation, verified exporter geometry and remaining release gates, use [current state](../../../currentstate.md), [testing](../../testing.md) and [beta acceptance](../../beta-acceptance.md).
+
+
 > **Status:** Production tasks 1–4 are implemented on `main`. This is a historical execution record, not an instruction to invoke Superpowers. Automated/macOS/private-fixture validation remains deferred.
 
 **Goal:** Turn RaceChrono Start metadata and raw GPS samples into a usable lap list in the existing Analysis workspace, without requiring video, changing projects, or touching export.

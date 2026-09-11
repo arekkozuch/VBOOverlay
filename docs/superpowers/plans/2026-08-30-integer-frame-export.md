@@ -1,5 +1,8 @@
 # Integer Frame Export Implementation Plan
 
+> Historical design/implementation plan. Status and validation statements below describe the original planning checkpoint. For current implementation, verified exporter geometry and remaining release gates, use [current state](../../../currentstate.md), [testing](../../testing.md) and [beta acceptance](../../beta-acceptance.md).
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make export scheduling and range selection frame-addressed so a source with N usable video frames schedules exactly N frames, and retain a valid completed export with a small terminal deficit.
