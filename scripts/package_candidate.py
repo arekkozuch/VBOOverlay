@@ -55,11 +55,10 @@ def main():
             marker in log for marker in ("ReferenceError", "TypeError", "Binding loop")):
         raise RuntimeError("Installed candidate failed startup smoke:\n" + log[-8000:])
 
-    for name in ("README.md", "THIRD_PARTY_NOTICES.md"):
+    for name in ("README.md", "ROADMAP.md", "currentstate.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copyfile(repo / name, stage / name)
-    (stage / "docs").mkdir(exist_ok=True)
-    for name in ("beta-acceptance.md", "rcz-format.md"):
-        shutil.copyfile(repo / "docs" / name, stage / "docs" / name)
+    shutil.copytree(repo / "docs", stage / "docs", dirs_exist_ok=True)
+    shutil.copytree(repo / ".github/workflows", stage / ".github/workflows", dirs_exist_ok=True)
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     files = []
     for path in sorted(stage.rglob("*")):

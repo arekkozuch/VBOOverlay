@@ -234,11 +234,24 @@ if(FLAPPEDEAR_DEPLOY_QT)
     if(NOT APPLE AND NOT WIN32)
         message(FATAL_ERROR "Candidate deployment currently supports macOS and Windows only")
     endif()
-    qt_generate_deploy_qml_app_script(
+    # Qt 6.8's convenience generator emits an unquoted executable argument.
+    # Use the supported deployment API with explicit quoting for our display name.
+    if(APPLE)
+        set(flappedear_deploy_executable "$<TARGET_FILE_NAME:flappedear_native>.app")
+    else()
+        set(flappedear_deploy_executable "\${QT_DEPLOY_BIN_DIR}/$<TARGET_FILE_NAME:flappedear_native>")
+    endif()
+    qt_generate_deploy_script(
         TARGET flappedear_native
         OUTPUT_SCRIPT flappedear_deploy_script
-        NO_TRANSLATIONS
-    )
+        CONTENT "
+qt_deploy_qml_imports(TARGET flappedear_native PLUGINS_FOUND flappedear_qml_plugins)
+qt_deploy_runtime_dependencies(
+    EXECUTABLE \"${flappedear_deploy_executable}\"
+    ADDITIONAL_MODULES \${flappedear_qml_plugins}
+    GENERATE_QT_CONF
+    NO_TRANSLATIONS
+)")
     install(SCRIPT ${flappedear_deploy_script})
 endif()
 
