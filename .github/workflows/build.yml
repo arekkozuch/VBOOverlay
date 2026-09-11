@@ -73,7 +73,8 @@ jobs:
           version: '6.8.3'
           target: desktop
           arch: ${{ matrix.qt-arch }}
-          modules: qtmultimedia qtshadertools qtsvg
+          # SVG ships in the default Qt base archives, not as an aqt add-on.
+          modules: qtmultimedia qtshadertools
           cache: true
           cache-key-prefix: native-ci-qt-6.8.3-v1
 
