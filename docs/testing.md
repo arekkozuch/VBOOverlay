@@ -113,3 +113,14 @@ application also requires twenty seconds of usable resampled overlap in both
 search passes. Regressions cover equal peaks separated by 20 seconds and a short
 overlap with strong correlation; the existing distinctive 3.2-second fixture must
 still auto-apply. Constant-speed and cooperative-cancellation checks remain.
+
+## September 11 shipping fixes: template persistence
+
+Template writes validate the same count, structure and byte limits as reads before
+opening the destination, require a complete atomic write, and roll back the
+in-memory mutation on failure. A rejected store stays untouched and blocks writes
+until a successful reload; errors appear in the template sidebar/save popup.
+Live add/duplicate/cue operations enforce the corresponding document count limits.
+Regressions cover the 128-template boundary, writer byte growth, malformed and
+oversized stores across reload/restart, recovery after restoring a valid store,
+and widget/per-widget/total cue boundaries.

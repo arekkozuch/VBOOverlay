@@ -145,6 +145,9 @@ AppController::AppController(QObject *parent, QString recoveryPath,
     connect(&m_widgetModel, &WidgetModel::revisionChanged, this, [this] {
         markPersistentChange();
     });
+    connect(&m_widgetModel, &WidgetModel::lastErrorChanged, this, [this] {
+        if (!m_widgetModel.lastError().isEmpty()) setStatus(m_widgetModel.lastError());
+    });
     m_selectedTemplateId = m_settings.value(QStringLiteral("ui/selectedTemplateId")).toString();
     connect(&m_widgetModel, &WidgetModel::templatesChanged, this, [this] {
         reconcileTemplateSelection();
