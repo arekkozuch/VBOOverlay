@@ -161,6 +161,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
         const AutoSyncResult result = m_syncWatcher.result();
         emit syncingChanged();
         if (result.generation != m_sourceGeneration
+            || result.syncRevision != m_syncRevision
             || result.videoPath != normalizedSourcePath(m_videoSource.toLocalFile())
             || result.vboPath != normalizedSourcePath(m_telemetryPath)) {
             AppLog::warn(QStringLiteral("Stale auto-sync result rejected"));
@@ -185,6 +186,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
         }
         m_syncCandidate = {
             {"offset", result.candidate.offset},
+            {"timeScale", result.candidate.timeScale},
             {"confidence", result.candidate.confidence},
             {"correlation", result.candidate.diagnostics.correlation},
             {"peakUniqueness", result.candidate.diagnostics.peakUniqueness},
@@ -1650,6 +1652,7 @@ void AppController::autoSync()
     }
     const TelemetrySession telemetry = *m_session;
     const quint64 generation = m_sourceGeneration;
+    const quint64 syncRevision = m_syncRevision;
     const QString normalizedVideoPath = normalizedSourcePath(videoPath);
     const QString normalizedVboPath = normalizedSourcePath(m_telemetryPath);
     m_syncCancellation = std::make_shared<std::atomic_bool>(false);
@@ -1658,9 +1661,10 @@ void AppController::autoSync()
     emit syncCandidateChanged();
     setStatus("Indexing GoPro telemetry and matching GPS speed…");
     m_syncWatcher.setFuture(QtConcurrent::run(
-        [normalizedVideoPath, normalizedVboPath, telemetry, generation, cancellation] {
+        [normalizedVideoPath, normalizedVboPath, telemetry, generation, syncRevision, cancellation] {
         AutoSyncResult result;
         result.generation = generation;
+        result.syncRevision = syncRevision;
         result.videoPath = normalizedVideoPath;
         result.vboPath = normalizedVboPath;
         try {
@@ -1701,7 +1705,8 @@ void AppController::applySyncCandidate()
     if (m_syncCandidate.isEmpty()) {
         return;
     }
-    const double offset = m_syncCandidate.value("offset").toDouble();
+    const QVariantMap candidate = m_syncCandidate;
+    const double offset = candidate.value("offset").toDouble();
     const double scale = m_syncCandidate.value("timeScale", 1.0).toDouble();
     if (!std::isfinite(offset) || !std::isfinite(scale) || scale <= 0.0) {
         setStatus("Synchronization candidate is invalid and cannot be applied.");
@@ -1711,6 +1716,7 @@ void AppController::applySyncCandidate()
     setTimeScale(scale);
     AppLog::info(QStringLiteral("Auto-sync candidate applied: offset=%1 s, scale=%2")
                      .arg(offset, 0, 'f', 3).arg(scale, 0, 'g', 12));
+    m_syncCandidate = candidate;
     m_syncCandidate.insert("automaticallyApplied", true);
     m_syncCandidate.insert("appliedManually", true);
     emit syncCandidateChanged();
@@ -2503,11 +2509,22 @@ void AppController::setPlaybackTime(const double seconds)
     emit liveValuesChanged();
 }
 
+void AppController::invalidateSyncForTimingEdit()
+{
+    ++m_syncRevision;
+    if (m_syncCancellation) m_syncCancellation->store(true);
+    if (!m_syncCandidate.isEmpty()) {
+        m_syncCandidate.clear();
+        emit syncCandidateChanged();
+    }
+}
+
 void AppController::setSyncOffset(const double seconds)
 {
     if (!std::isfinite(seconds) || qFuzzyCompare(m_sync.offset, seconds)) {
         return;
     }
+    invalidateSyncForTimingEdit();
     m_sync.offset = seconds;
     m_previewRenderContext.setSyncTransform(m_sync);
     emit syncChanged();
@@ -2521,6 +2538,7 @@ void AppController::setTimeScale(const double scale)
     if (!std::isfinite(scale) || scale <= 0.0 || qFuzzyCompare(m_sync.timeScale, scale)) {
         return;
     }
+    invalidateSyncForTimingEdit();
     m_sync.timeScale = scale;
     m_previewRenderContext.setSyncTransform(m_sync);
     emit syncChanged();

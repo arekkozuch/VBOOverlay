@@ -30,6 +30,8 @@
 #include <memory>
 #include <optional>
 
+class TelemetryTests;
+
 namespace FlappedEar {
 
 class AppController final : public QObject {
@@ -258,6 +260,8 @@ signals:
     void quitApproved();
 
 private:
+    friend class ::TelemetryTests; // Controlled asynchronous completion in regression tests.
+    void invalidateSyncForTimingEdit();
     struct AutoSyncResult {
         bool success = false;
         bool cancelled = false;
@@ -267,6 +271,7 @@ private:
         qsizetype gpsSampleCount = 0;
         QString gpsStream;
         quint64 generation = 0;
+        quint64 syncRevision = 0;
         QString videoPath;
         QString vboPath;
     };
@@ -398,6 +403,7 @@ private:
     QFutureWatcher<VboLoadResult> m_vboLoadWatcher;
     QFutureWatcher<ProjectLoadResult> m_projectLoadWatcher;
     quint64 m_sourceGeneration = 0;
+    quint64 m_syncRevision = 0;
     std::shared_ptr<std::atomic_bool> m_videoProbeCancellation;
     std::shared_ptr<std::atomic_bool> m_vboLoadCancellation;
     std::shared_ptr<std::atomic_bool> m_projectLoadCancellation;

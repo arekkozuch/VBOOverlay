@@ -168,3 +168,10 @@ checks explicit alpha-mode support rather than inferring compatibility from an
 FFmpeg version or encoder listing. Failure is actionable, diagnostic output is bounded,
 and the probe supports cancellation and a 20-second execution deadline. Synthetic
 tests exercise both 8-bit and 10-bit graphs, missing filters, and cancellation.
+
+## Manual timing edits during auto-sync
+
+Controller regressions deliver a controlled asynchronous result after offset/scale
+edits and an edit-then-restore sequence. Timing edits cancel work, invalidate review
+candidates, and advance a revision so an already-completed result cannot overwrite
+them. An unedited result still applies; explicit candidate application retains scale.
