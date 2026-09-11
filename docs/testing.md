@@ -183,3 +183,7 @@ unchanged generic VBO endpoints, invalid geometry, and warning-only gate omissio
 unverified RaceChrono exporters. The private pair test now checks both parsers against
 recorded lap metadata: five laps each, maximum VBO duration error 0.0104 s. The local
 Qt 6.8.3 run passed 30/30 tests including that private comparison.
+
+The zlib 1.3.2 source has two upstream download locations (zlib.net and the official
+madler/zlib release asset), verified against the same pinned SHA-256. The fallback
+addresses intermittent invalid downloads without accepting changed dependency bytes.
