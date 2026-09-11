@@ -159,3 +159,12 @@ a track's real delay. Selection/validation use the intersection with the audio s
 ranges before/after that stream export without audio. Worker regressions cover positive
 video PTS, delayed short audio, and ranges before/within/after audio. They verify output
 frame counts, audio start/duration and decoded tone energy near the start of the stream.
+
+### Composition capability preflight (R8)
+
+Before rendering any representative or full telemetry overlay, export executes three
+64×64 frames through the production Stage B graph for the selected bit depth. This
+checks explicit alpha-mode support rather than inferring compatibility from an
+FFmpeg version or encoder listing. Failure is actionable, diagnostic output is bounded,
+and the probe supports cancellation and a 20-second execution deadline. Synthetic
+tests exercise both 8-bit and 10-bit graphs, missing filters, and cancellation.

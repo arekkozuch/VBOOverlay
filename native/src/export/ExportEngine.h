@@ -143,6 +143,9 @@ public:
     [[nodiscard]] static double audioStartForRange(const MediaInfo &source, double start, double end);
     [[nodiscard]] static QString stageBAudioFilterGraph(const StageBSourceAccess &access);
     [[nodiscard]] static QStringList stageBInputArguments(const StageBSourceAccess &access, const QString &path);
+    // Empty on success; runs the actual composition graph before rendering telemetry.
+    [[nodiscard]] static QString verifyCompositionFilters(
+        const QString &program, const QString &graph, const std::function<bool()> &cancelled = {});
     [[nodiscard]] static QString stageBVideoFilterGraph(
         const StageBSourceAccess &sourceAccess,
         const QSize &sourceSize,

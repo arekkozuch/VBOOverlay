@@ -646,6 +646,47 @@ QString ExportEngine::stageBVideoFilterGraph(
             .arg(mediaProfile.outputPixelFormat);
 }
 
+QString ExportEngine::verifyCompositionFilters(
+    const QString &program, const QString &graph, const std::function<bool()> &cancelled)
+{
+    throwIfCancelled(cancelled);
+    QProcess process;
+    ExportProcessSupervisor supervisor(process, false);
+    supervisor.start(program, {"-hide_banner", "-loglevel", "error", "-nostdin",
+        "-f", "lavfi", "-i", "color=black:s=64x64:r=30:d=0.1",
+        "-f", "lavfi", "-i", "color=black@0:s=64x64:r=30:d=0.1,format=rgba",
+        "-filter_complex", graph, "-map", "[video]", "-frames:v", "3",
+        "-c:v", "rawvideo", "-f", "null", "-"});
+    if (!supervisor.waitForStarted(5'000))
+        return QStringLiteral("Could not start FFmpeg composition preflight: %1").arg(process.errorString());
+    BoundedProcessOutput diagnostic(BoundedProcessOutput::Mode::DiagnosticTail,
+                                    ProcessOutputLimits::ffmpegDiagnosticTailBytes);
+    const auto drain = [&] {
+        diagnostic.append(process.readAllStandardError());
+        static_cast<void>(process.readAllStandardOutput());
+    };
+    QElapsedTimer timer;
+    timer.start();
+    while (process.state() != QProcess::NotRunning) {
+        if (cancelled && cancelled()) {
+            static_cast<void>(supervisor.stopAndWait());
+            throwIfCancelled(cancelled);
+        }
+        if (timer.elapsed() >= 20'000) {
+            static_cast<void>(supervisor.stopAndWait());
+            return QStringLiteral("FFmpeg composition preflight timed out before telemetry rendering.");
+        }
+        process.waitForFinished(100);
+        drain();
+    }
+    drain();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        return QStringLiteral("Installed FFmpeg cannot run the required overlay filters. "
+                              "Install a compatible FFmpeg build with explicit alpha-mode support. %1")
+            .arg(diagnostic.text());
+    return {};
+}
+
 ExportResult ExportEngine::exportVideo(
     const ExportSettings &settings, TelemetryFrameRenderer &renderer)
 {
@@ -766,6 +807,18 @@ ExportResult ExportEngine::exportVideo(
                  {"capabilityCacheHit", encoderSupport.cacheHit}});
         if (!encoderSupport.supported) {
             result.error = encoderSupport.error;
+            return result;
+        }
+        observe(settings, QStringLiteral("status"), QStringLiteral("preparing"),
+                QStringLiteral("verifyCompositionFilters"),
+                QStringLiteral("Checking FFmpeg overlay filter compatibility"));
+        const QString compositionError = verifyCompositionFilters(
+            FfmpegTools::ffmpegPath(),
+            stageBVideoFilterGraph({"0", "0", "0.1"}, QSize(64, 64), QSize(64, 64),
+                                  {30, 1}, 3, result.mediaProfile),
+            [&settings] { return isCancelled(settings); });
+        if (!compositionError.isEmpty()) {
+            result.error = compositionError;
             return result;
         }
         const QString temporaryOverlayPath = settings.temporaryOverlayPath.isEmpty()

@@ -174,6 +174,7 @@ private slots:
     void derivesStablePreviewViewportAndLastFrameAdapter();
     void exposesReactivePreviewMetadataToQml();
     void plansBoundedStageBSourceAccess();
+    void checksCompositionFiltersBeforeRendering();
     void preservesFramesWithPositiveSourcePts_data();
     void preservesFramesWithPositiveSourcePts();
     void preservesCfrCadenceForCommonRates();
@@ -4597,6 +4598,25 @@ void TelemetryTests::calculatesTimestampDrivenExportFrames()
                  - source.audioDuration) < 0.000001);
     QVERIFY(qAbs(ExportEngine::audioDurationForRange(source, 1.0, 8.0) - 6.317333) < 0.000001);
     QCOMPARE(ExportEngine::audioDurationForRange(source, 8.0, 9.0), 0.0);
+}
+
+void TelemetryTests::checksCompositionFiltersBeforeRendering()
+{
+    for (const int bits : {8, 10}) {
+        ExportMediaProfile profile;
+        profile.outputBitDepth = bits;
+        profile.outputPixelFormat = bits == 10 ? "yuv420p10le" : "yuv420p";
+        const QString graph = ExportEngine::stageBVideoFilterGraph(
+            {"0", "0", "0.1"}, QSize(64, 64), QSize(64, 64), {30, 1}, 3, profile);
+        const QString error = ExportEngine::verifyCompositionFilters(FfmpegTools::ffmpegPath(), graph);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+    }
+    const QString error = ExportEngine::verifyCompositionFilters(
+        FfmpegTools::ffmpegPath(), "[0:v]this_filter_does_not_exist[video]");
+    QVERIFY(error.contains("required overlay filters"));
+    QVERIFY(error.contains("this_filter_does_not_exist"));
+    QVERIFY_EXCEPTION_THROWN(ExportEngine::verifyCompositionFilters(
+        FfmpegTools::ffmpegPath(), {}, [] { return true; }), OperationCancelled);
 }
 
 void TelemetryTests::preservesFramesWithPositiveSourcePts_data()
