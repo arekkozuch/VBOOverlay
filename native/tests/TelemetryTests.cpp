@@ -673,7 +673,11 @@ void TelemetryTests::guardsGuiRecoveryAcrossProcesses()
     });
     QVERIFY2(owner.waitForStarted(5'000), qPrintable(owner.errorString()));
     QByteArray output;
-    QTRY_VERIFY_WITH_TIMEOUT((output += owner.readAllStandardOutput()).contains("locked\n"), 5'000);
+    // stdio can translate the helper's newline to CRLF on Windows.
+    QTRY_VERIFY2_WITH_TIMEOUT((output += owner.readAllStandardOutput()).trimmed() == "locked",
+        qPrintable(QStringLiteral("Helper output: %1; stderr: %2; state: %3; exit: %4")
+            .arg(QString::fromUtf8(output), QString::fromUtf8(owner.readAllStandardError()))
+            .arg(static_cast<int>(owner.state())).arg(owner.exitCode())), 5'000);
     const QString lockPath = directory.filePath("gui-session.lock");
     const QByteArray originalLock = readBytes(lockPath);
     QVERIFY(!originalLock.isEmpty());
