@@ -28,6 +28,8 @@ The Qt 6.8 build also covers the `QImage::mirrored(false, true)` vertical-readba
 
 `FLAPPEDEAR_SKIP_HARDWARE_TESTS=1` explicitly skips only `preservesTenBitFullRangeColorThroughVideoToolboxExport`. Private fixtures remain unset, and platform-specific cases retain their existing skip reasons. CTest runs verbosely so the full Qt Test pass/fail/skip output is retained even on success. Unset the hardware-skip variable for local VideoToolbox acceptance.
 
+`QT_FORCE_STDERR_LOGGING=1` makes Qt and Qt Test diagnostics visible to CTest on Windows, where GUI executables otherwise send these messages to the debugger. Startup's required success marker and failure patterns are therefore checked against captured output.
+
 The two jobs use read-only repository permissions, do not retain checkout credentials, pin action implementations to commit SHAs, cancel superseded runs, limit build parallelism to two, and retain only logs/JUnit results for 14 days. The pinned Qt installer implementation is called directly so its wrapper cannot introduce mutable nested action references. Build/job/test timeouts bound stalled runs. `qmllint` is deliberately excluded because its previous project invocation exhausted memory.
 
 A successful cloud run verifies this synthetic regression gate. It does not certify hardware encoders, private VBO/GoPro recordings, interactive UI behavior, installers, signing, or notarization. Branch protection is a separate repository setting; after both checks pass, require the job names above before merging. See each run's actual results before claiming CI passes.
