@@ -150,6 +150,19 @@ jobs:
           python scripts/package_candidate.py --stage native-dist/stage --qt-root "$env:QT_ROOT_DIR"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Build and validate Windows NSIS installer
+        if: runner.os == 'Windows' && matrix.build-type == 'Release'
+        run: |
+          choco upgrade nsis --version=3.12 --allow-downgrade --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nsis = "${env:ProgramFiles(x86)}/NSIS/makensis.exe"
+          & $nsis /VERSION | Tee-Object ci-logs/nsis-version.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/build_windows_installer.py --stage native-dist/stage --makensis "$nsis" 2>&1 | Tee-Object ci-logs/nsis-build.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/test_windows_installer.py --stage native-dist/stage --qt-root "$env:QT_ROOT_DIR"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload internal candidate
         if: success() && matrix.build-type == 'Release'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
