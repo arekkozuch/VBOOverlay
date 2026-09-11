@@ -91,4 +91,4 @@ The detailed pipeline and timing contract are in [export-pipeline.md](export-pip
 
 ## Candidate deployment
 
-Release CI installs the executable, QML modules and Qt runtime via a quoted `qt_generate_deploy_script` using `qt_deploy_qml_imports` and `qt_deploy_runtime_dependencies`, then checks the installed application with the build SDK hidden. Debug CI remains a separate gate. Archive identity and manual release acceptance are documented in [beta-acceptance.md](beta-acceptance.md).
+Release CI installs the executable, QML modules and Qt runtime via a quoted `qt6_generate_deploy_script` using `qt_deploy_qml_imports` and `qt_deploy_runtime_dependencies`, then checks the installed application with the build SDK hidden. Debug CI remains a separate gate. Archive identity and manual release acceptance are documented in [beta-acceptance.md](beta-acceptance.md).

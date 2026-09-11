@@ -239,13 +239,16 @@ if(FLAPPEDEAR_DEPLOY_QT)
     if(APPLE)
         set(flappedear_deploy_executable "$<TARGET_FILE_NAME:flappedear_native>.app")
     else()
-        set(flappedear_deploy_executable "\${QT_DEPLOY_BIN_DIR}/$<TARGET_FILE_NAME:flappedear_native>")
+        set(flappedear_deploy_executable "${CMAKE_INSTALL_BINDIR}/$<TARGET_FILE_NAME:flappedear_native>")
     endif()
-    qt_generate_deploy_script(
+    qt6_generate_deploy_script(
         TARGET flappedear_native
         OUTPUT_SCRIPT flappedear_deploy_script
         CONTENT "
 qt_deploy_qml_imports(TARGET flappedear_native PLUGINS_FOUND flappedear_qml_plugins)
+if(NOT flappedear_qml_plugins)
+    message(FATAL_ERROR \"QML plugin deployment list is empty\")
+endif()
 qt_deploy_runtime_dependencies(
     EXECUTABLE \"${flappedear_deploy_executable}\"
     ADDITIONAL_MODULES \${flappedear_qml_plugins}

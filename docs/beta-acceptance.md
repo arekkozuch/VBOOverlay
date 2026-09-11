@@ -24,7 +24,7 @@ sessions, sectors and theoretical best laps are outside this beta scope.
 Native CI runs Debug and Release tests on both platforms. Only successful Release
 jobs deploy Qt with CMake, run the installed application from a separate working
 directory using the packaged Cocoa/Windows platform plugin with the build Qt SDK hidden, then upload `candidate-<runner>-<commit>`.
-The deployment uses [Qt's script API](https://doc.qt.io/qt-6.8/qt-generate-deploy-script.html), QML import scanning and runtime dependency deployment. Executable paths are explicitly quoted because Qt 6.8's convenience generator splits names containing spaces.
+The deployment uses [Qt's script API](https://doc.qt.io/qt-6.8/qt-generate-deploy-script.html), QML import scanning and runtime dependency deployment. The explicit `qt6_generate_deploy_script` function retains install-time variables and plugin lists. Executable paths use the configured install directory and explicit quoting because Qt 6.8's convenience generator splits names containing spaces.
 The archive includes `candidate-manifest.json` with the checkout commit, architecture,
 build type and file hashes; a sidecar SHA-256 identifies the archive. On a PR run the
 checkout commit can be GitHub's test merge commit. Record the manifest value, not just
