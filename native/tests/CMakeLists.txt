@@ -1,3 +1,12 @@
+qt_add_executable(flappedear_gui_session_lock_helper
+    GuiSessionLockHelper.cpp
+    ../src/app/GuiSessionLock.cpp
+)
+target_compile_features(flappedear_gui_session_lock_helper PRIVATE cxx_std_20)
+target_include_directories(flappedear_gui_session_lock_helper PRIVATE ../src)
+target_link_libraries(flappedear_gui_session_lock_helper PRIVATE Qt6::Core)
+flappedear_enable_warnings(flappedear_gui_session_lock_helper)
+
 qt_add_executable(flappedear_raw_transport_consumer
     RawTransportConsumer.cpp
 )
@@ -32,13 +41,14 @@ qt_add_resources(flappedear_native_tests "flappedear_test_qml"
         ../qml/widgets/TelemetryPanel.qml
 )
 target_compile_definitions(flappedear_native_tests PRIVATE
+    GUI_SESSION_LOCK_HELPER_PATH="$<TARGET_FILE:flappedear_gui_session_lock_helper>"
     TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/basic.vbo"
     TRACK_WIDGET_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/widgets/TrackWidget.qml"
     RAW_TRANSPORT_CONSUMER_PATH="$<TARGET_FILE:flappedear_raw_transport_consumer>"
     PROBE_TEST_HELPER_PATH="$<TARGET_FILE:flappedear_probe_test_helper>"
     FLAPPEDEAR_NATIVE_PATH="$<TARGET_FILE:flappedear_native>"
 )
-add_dependencies(flappedear_native_tests flappedear_native flappedear_raw_transport_consumer flappedear_probe_test_helper)
+add_dependencies(flappedear_native_tests flappedear_gui_session_lock_helper flappedear_native flappedear_raw_transport_consumer flappedear_probe_test_helper)
 add_test(NAME flappedear_native_tests COMMAND flappedear_native_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES

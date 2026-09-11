@@ -1,5 +1,6 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "app/AppController.h"
+#include "app/GuiSessionLock.h"
 #include "app/PreviewPlayback.h"
 #include "export/EncoderDetector.h"
 #include "export/BoundedProcessOutput.h"
@@ -200,6 +201,9 @@ private slots:
     void commitsNewAndReplacementExports();
     void savesProjectsAtomically();
     void writesRecoverySnapshotsAtomically();
+    void guardsGuiRecoveryAcrossProcesses_data();
+    void guardsGuiRecoveryAcrossProcesses();
+    void failsClosedWhenGuiDataDirectoryIsUnavailable();
     void detectsPartialAndCommitWriteFailures();
     void gatesDirtyDestructiveActions_data();
     void gatesDirtyDestructiveActions();
@@ -642,6 +646,71 @@ void TelemetryTests::commitsNewAndReplacementExports()
         {QStringLiteral("*.part.*"), QStringLiteral("*.backup"), QStringLiteral("*.cancel")},
         QDir::Files | QDir::Hidden);
     QVERIFY2(artifacts.isEmpty(), qPrintable(artifacts.join(',')));
+}
+
+void TelemetryTests::guardsGuiRecoveryAcrossProcesses_data()
+{
+    QTest::addColumn<bool>("crash");
+    QTest::newRow("clean-exit") << false;
+    QTest::newRow("crashed-owner") << true;
+}
+
+void TelemetryTests::guardsGuiRecoveryAcrossProcesses()
+{
+    QFETCH(bool, crash);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString recoveryPath = directory.filePath("project-recovery.json");
+    const QByteArray snapshot("unsaved recovery must survive both contenders");
+    QVERIFY(writeBytes(recoveryPath, snapshot));
+    QProcess owner;
+    owner.start(QStringLiteral(GUI_SESSION_LOCK_HELPER_PATH), {directory.path()});
+    const auto stopOwner = qScopeGuard([&owner] {
+        if (owner.state() != QProcess::NotRunning) {
+            owner.kill();
+            owner.waitForFinished(5'000);
+        }
+    });
+    QVERIFY2(owner.waitForStarted(5'000), qPrintable(owner.errorString()));
+    QByteArray output;
+    QTRY_VERIFY_WITH_TIMEOUT((output += owner.readAllStandardOutput()).contains("locked\n"), 5'000);
+    const QString lockPath = directory.filePath("gui-session.lock");
+    const QByteArray originalLock = readBytes(lockPath);
+    QVERIFY(!originalLock.isEmpty());
+    {
+        GuiSessionLock contender(directory.path());
+        QString error;
+        QVERIFY(!contender.tryAcquire(&error));
+        QVERIFY(error.contains("already running"));
+        QCOMPARE(readBytes(recoveryPath), snapshot);
+    }
+    // Destroying an unsuccessful contender must not unlock the live owner.
+    QCOMPARE(readBytes(lockPath), originalLock);
+    GuiSessionLock next(directory.path());
+    QVERIFY(!next.tryAcquire());
+    if (crash) owner.kill();
+    else QCOMPARE(owner.write("\n"), qint64(1));
+    QVERIFY(owner.waitForFinished(5'000));
+    if (!crash) QCOMPARE(owner.exitCode(), 0);
+    QString error;
+    QVERIFY2(next.tryAcquire(&error), qPrintable(error));
+    QVERIFY(next.tryAcquire()); // Same guard is idempotent.
+    QCOMPARE(readBytes(recoveryPath), snapshot);
+    GuiSessionLock third(directory.path());
+    QVERIFY(!third.tryAcquire());
+}
+
+void TelemetryTests::failsClosedWhenGuiDataDirectoryIsUnavailable()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString file = directory.filePath("not-a-directory");
+    QVERIFY(writeBytes(file, "keep"));
+    GuiSessionLock guard(file);
+    QString error;
+    QVERIFY(!guard.tryAcquire(&error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(readBytes(file), QByteArray("keep"));
 }
 
 void TelemetryTests::savesProjectsAtomically()

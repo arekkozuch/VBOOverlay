@@ -102,3 +102,9 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 - Lap timing remains source-gate based: it requires exactly one valid RaceChrono Start gate and usable synchronized GPS. Manual Start/Finish overrides, sectors, and theoretical-best analysis are not implemented yet.
 
 For remaining work, see [ROADMAP.md](ROADMAP.md). Developer contribution rules are in [AGENTS.md](AGENTS.md), and local test guidance is in [docs/testing.md](docs/testing.md).
+
+### Editor instance and recovery
+
+Run one FlappedEar editor per user data directory. A second launch asks you to use
+or close the existing window, protecting unsaved recovery and custom templates.
+Export workers are unaffected. Close older builds before opening this version.

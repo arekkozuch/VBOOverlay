@@ -124,3 +124,16 @@ Live add/duplicate/cue operations enforce the corresponding document count limit
 Regressions cover the 128-template boundary, writer byte growth, malformed and
 oversized stores across reload/restart, recovery after restoring a valid store,
 and widget/per-widget/total cue boundaries.
+
+## September 11 shipping fixes: recovery ownership
+
+The editor takes a per-user application-data `GuiSessionLock` before shared
+settings, logs, export cleanup, or AppController initialization. Another editor
+shows a startup error and cannot access recovery; export workers remain separate.
+The lock disables age-based expiry and uses Qt process-identity stale-lock recovery
+([QLockFile](https://doc.qt.io/qt-6/qlockfile.html)). Two-process native tests verify
+exclusion, preservation of recovery bytes, clean release, killed-owner recovery,
+and failure when the directory is unavailable. Startup smoke also loads the guard
+error window. Older app versions do not participate in this lock and must be closed
+before running this build. On Windows, Qt documents a stale-lock detection limitation
+for non-ASCII hostnames; failure remains closed rather than risking recovery data.

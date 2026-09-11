@@ -17,6 +17,8 @@ function(flappedear_enable_warnings target)
 endfunction()
 
 qt_add_library(flappedear_core STATIC
+    src/app/GuiSessionLock.cpp
+    src/app/GuiSessionLock.h
     src/app/AppLog.cpp
     src/app/AppLog.h
     src/app/PreviewPlayback.cpp
@@ -158,6 +160,7 @@ qt_add_qml_module(flappedear_native
         qml/FeSpinBox.qml
         qml/FeTextField.qml
         qml/InspectorPanel.qml
+        qml/StartupError.qml
         qml/Main.qml
         qml/SectionTitle.qml
         qml/TrackMapPanel.qml
