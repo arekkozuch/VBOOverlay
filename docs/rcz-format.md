@@ -62,6 +62,10 @@ When a VBO contains `latacc-calc` / `longacc-calc`, these explicitly calculated
 channels supply the acceleration aliases ahead of generic `latacc` / `longacc`.
 The original columns remain independently selectable. Missing calculated samples
 remain missing; the aliases never fall back to a generic zero at those timestamps.
+G ball and radar use braking-up / acceleration-down presentation. Numeric data is
+unchanged (positive acceleration, negative braking). The manual longitudinal-axis
+inversion still reverses presentation; previously saved inversion settings are
+retained, so disable a previously enabled workaround to use the corrected direction.
 
 For the verified unidirectional type-3 Start trap, the stored coordinate is the centre,
 width is millimetres, and bearing is the travel direction in thousandths of a degree.

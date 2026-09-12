@@ -91,6 +91,7 @@ private slots:
     void reviewsBatchThroughProductionQml();
     void displaysTimedLapsWithoutVideo();
     void prefersRaceChronoCalculatedAcceleration();
+    void presentsBrakingUpInGForceWidgets();
     void rejectsBatchLinksWithDifferentPersistedFormats();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
@@ -803,6 +804,46 @@ void TelemetryTests::reviewsBatchThroughProductionQml()
     QVERIFY(QMetaObject::invokeMethod(dialog.get(), "submit"));
     QTRY_COMPARE(controller.eventName(), QStringLiteral("QML event"));
     QCOMPARE(controller.eventRuns().size(), 1);
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::presentsBrakingUpInGForceWidgets()
+{
+    QQmlEngine engine;
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData(R"QML(
+import QtQuick
+import "widgets"
+Item {
+    id: root
+    width: 240; height: 240
+    property real acceleration: -0.5
+    property bool inverted: false
+    QtObject {
+        id: frameData
+        property var widgetSettings: ({invertLongitudinal: root.inverted})
+        property real sceneScale: 1
+        property real labelScale: 1
+        property string family: "Helvetica Neue"
+        property color primary: "white"
+        property color accent: "orange"
+        function raw(source, alias) { return alias === "longitudinalAcceleration" ? root.acceleration : 0; }
+    }
+    GForceWidget { frame: frameData }
+    F1GForceRadarWidget { frame: frameData }
+}
+)QML", QUrl::fromLocalFile(QStringLiteral(BATCH_IMPORT_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    const auto dots = root->findChildren<QQuickItem *>(QStringLiteral("gForceDot"));
+    QCOMPARE(dots.size(), 2);
+    for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 < 120);
+    root->setProperty("acceleration", 0.5);
+    for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 > 120);
+    root->setProperty("inverted", true);
+    for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 < 120);
     QCOMPARE(warnings.size(), 0);
 }
 
