@@ -47,7 +47,7 @@ Dialog {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            text: qsTr("Import your runs into one track day. Each file becomes a separate run.")
+            text: qsTr("Import your runs into one track day. Each file becomes a separate run. For RaceChrono’s calculated lateral and longitudinal G, choose VBO. RCZ keeps the original recording rates.")
         }
         RowLayout {
             Layout.fillWidth: true

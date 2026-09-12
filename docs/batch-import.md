@@ -1,5 +1,22 @@
 # Flapped Ear Telemetry: multi-file import review
 
+## Which format should I export from RaceChrono?
+
+**Use VBO for analysis with RaceChrono's calculated lateral and longitudinal G.**
+Export the complete run with `latacc-calc` and `longacc-calc` enabled. Flapped Ear
+Telemetry uses these columns for automatic G-force channel selection when present.
+
+RCZ preserves the recorded GPS, OBD, heart-rate and device sensor channels at their
+original sampling rates. It is useful as the source archive, but the currently
+supported RCZ reader does not reconstruct RaceChrono's calculated acceleration.
+In the inspected RCZ/VBO pair, those calculated columns exist only in the VBO
+export; the VBO has a common 10 Hz timeline. That rate is specific to this export,
+not a limit imposed by Flapped Ear Telemetry.
+
+Importing both formats does not combine their channels. To keep both in one run,
+leave VBO as **Import as a run** and set the RCZ to **Same run as: [that VBO]**.
+Analysis then uses VBO; RCZ remains attached as an alternative source.
+
 ## macOS workflow
 
 1. Choose **File → Import telemetry runs…** and select multiple VBO/RCZ files
