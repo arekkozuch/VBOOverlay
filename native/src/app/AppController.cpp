@@ -11,6 +11,7 @@
 #include "export/PersistentExportLog.h"
 #include "project/BoundedJsonLoader.h"
 #include "project/ProjectLimits.h"
+#include "project/EventProjectCodec.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/VboParser.h"
 #include "telemetry/TelemetrySource.h"
@@ -572,6 +573,7 @@ QVariantList AppController::lapSummaries() const
     for (qsizetype index = 0; index < m_lapSession.timedLaps.size(); ++index) {
         const TimedLap &lap = m_lapSession.timedLaps[index];
         summaries.append(QVariantMap{
+            {QStringLiteral("runId"), activeRunId()},
             {QStringLiteral("number"), lap.number},
             {QStringLiteral("startTelemetryTime"), lap.startTelemetryTime},
             {QStringLiteral("durationSeconds"), lap.durationSeconds},
@@ -660,6 +662,45 @@ QUrl AppController::projectPath() const
 {
     return m_documentState.projectPath().isEmpty()
         ? QUrl() : QUrl::fromLocalFile(m_documentState.projectPath());
+}
+QString AppController::eventName() const
+{
+    return m_projectTemplate.value(QStringLiteral("event")).toObject().value(QStringLiteral("name")).toString();
+}
+QString AppController::activeRunId() const
+{
+    return m_projectTemplate.value(QStringLiteral("event")).toObject().value(QStringLiteral("activeRunId")).toString();
+}
+QVariantList AppController::eventRuns() const
+{
+    QVariantList result;
+    const QJsonObject event = m_projectTemplate.value(QStringLiteral("event")).toObject();
+    for (const QJsonValue &value : event.value(QStringLiteral("runs")).toArray()) {
+        const QJsonObject run = value.toObject();
+        result.append(QVariantMap{{QStringLiteral("id"), run.value(QStringLiteral("id")).toString()},
+                                  {QStringLiteral("name"), run.value(QStringLiteral("name")).toString()}});
+    }
+    return result;
+}
+
+bool AppController::selectEventRun(const QString &runId)
+{
+    if (!EventProjectCodec::isEvent(m_projectTemplate) || projectLoading() || exporting()
+        || recoveryPending() || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) return false;
+    if (runId == activeRunId()) return true;
+    if (m_documentState.revision() == std::numeric_limits<quint64>::max()) return false;
+    QJsonObject project = currentProjectObject();
+    QJsonObject event = project.value(QStringLiteral("event")).toObject();
+    bool found = false;
+    for (const QJsonValue &value : event.value(QStringLiteral("runs")).toArray()) {
+        found |= value.toObject().value(QStringLiteral("id")).toString() == runId;
+    }
+    if (!found) return false;
+    event.insert(QStringLiteral("activeRunId"), runId);
+    project.insert(QStringLiteral("event"), event);
+    // Commit the complete document only after validation; source-generation cancellation
+    // then prevents late results from the previous run from reaching preview/export.
+    return beginProjectLoad(m_documentState.projectPath(), project, false, 0, 0, {}, true);
 }
 bool AppController::dirty() const { return m_documentState.dirty(); }
 quint64 AppController::lastSavedRevision() const { return m_documentState.lastSavedRevision(); }
@@ -1334,7 +1375,8 @@ bool AppController::performOpenProject(const QUrl &url)
         QString validationError;
         if (!ProjectLimits::validateProject(project, &validationError)) { result.error = validationError; return result; }
         if (cancellation->load()) { result.cancelled = true; return result; }
-        const QJsonObject sync = project.value(QStringLiteral("sync")).toObject();
+        const QJsonObject editor = EventProjectCodec::editorProjection(project);
+        const QJsonObject sync = editor.value(QStringLiteral("sync")).toObject();
         const double offset = sync.value(QStringLiteral("offset")).toDouble();
         const double timeScale = sync.value(QStringLiteral("timeScale")).toDouble(1.0);
         if (!std::isfinite(offset) || !std::isfinite(timeScale) || timeScale <= 0.0) {
@@ -1351,8 +1393,8 @@ bool AppController::performOpenProject(const QUrl &url)
         result.project = project;
         result.widgets = project.value(QStringLiteral("scene")).toObject().value(QStringLiteral("widgets")).toArray();
         result.sync = {offset, timeScale};
-        result.videoReference = ProjectSourceReferenceCodec::fromProject(project, QStringLiteral("video"), QStringLiteral("videoPath"));
-        result.vboReference = ProjectSourceReferenceCodec::fromProject(project, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
+        result.videoReference = ProjectSourceReferenceCodec::fromProject(editor, QStringLiteral("video"), QStringLiteral("videoPath"));
+        result.vboReference = ProjectSourceReferenceCodec::fromProject(editor, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
         result.resolvedVideoPath = ProjectSourceReferenceCodec::resolve(result.videoReference, projectPath);
         result.resolvedVboPath = ProjectSourceReferenceCodec::resolve(result.vboReference, projectPath);
         return result;
@@ -1363,7 +1405,7 @@ bool AppController::performOpenProject(const QUrl &url)
 bool AppController::beginProjectLoad(
     QString projectPath, const QJsonObject &project, const bool recovered,
     const quint64 recoveredRevision, const quint64 recoveredLastSavedRevision,
-    QString recoveredDocumentId)
+    QString recoveredDocumentId, const bool runSelection)
 {
     QString validationError;
     if (!ProjectLimits::validateProject(project, &validationError)) {
@@ -1373,14 +1415,14 @@ bool AppController::beginProjectLoad(
     }
     const QJsonObject scene = project.value("scene").toObject();
     WidgetModel candidateWidgets;
-    if (project.value("version").toInt() != 2 || !scene.value("widgets").isArray()
-        || !candidateWidgets.fromJson(scene.value("widgets").toArray())) {
+    if (!candidateWidgets.fromJson(scene.value("widgets").toArray())) {
         AppLog::error(QStringLiteral("Project load failed: unsupported or invalid file: %1")
                           .arg(projectPath));
         setStatus("Project error: unsupported or invalid .fetproject file.");
         return false;
     }
-    const QJsonObject sync = project.value("sync").toObject();
+    const QJsonObject editor = EventProjectCodec::editorProjection(project);
+    const QJsonObject sync = editor.value("sync").toObject();
     const double offset = sync.value("offset").toDouble();
     const double timeScale = sync.value("timeScale").toDouble(1.0);
     if (!std::isfinite(offset) || !std::isfinite(timeScale) || timeScale <= 0.0) {
@@ -1406,13 +1448,14 @@ bool AppController::beginProjectLoad(
     result.sync = {offset, timeScale};
     result.generation = generation;
     result.recovered = recovered;
+    result.runSelection = runSelection;
     result.recoveredRevision = recoveredRevision;
     result.recoveredLastSavedRevision = recoveredLastSavedRevision;
     result.recoveredDocumentId = std::move(recoveredDocumentId);
     result.videoReference = ProjectSourceReferenceCodec::fromProject(
-        project, QStringLiteral("video"), QStringLiteral("videoPath"));
+        editor, QStringLiteral("video"), QStringLiteral("videoPath"));
     result.vboReference = ProjectSourceReferenceCodec::fromProject(
-        project, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
+        editor, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
     result.resolvedVideoPath = ProjectSourceReferenceCodec::resolve(
         result.videoReference, result.projectPath);
     result.resolvedVboPath = ProjectSourceReferenceCodec::resolve(
@@ -1488,15 +1531,18 @@ bool AppController::commitProjectLoad(const ProjectLoadResult &result)
     m_syncCandidate.clear();
     // A .fetproject stores a scene, not template provenance. Retain the picker preference,
     // but never let a newly opened scene overwrite a visible custom template in place.
-    clearActiveTemplate();
+    if (!result.runSelection) clearActiveTemplate();
     m_analysisChannels.clear();
     setAnalysisChannels(result.analysisChannels);
-    setAnalysisVisible(false);
+    if (!result.runSelection) setAnalysisVisible(false);
     reconcileAnalysisChannels();
     if (!result.projectPath.isEmpty()) {
         m_settings.setValue("project/path", result.projectPath);
     }
-    if (result.recovered) {
+    if (result.runSelection) {
+        // Selecting a run changes the same document, never its saved identity or clean revision.
+        m_documentState.markChanged();
+    } else if (result.recovered) {
         m_documentId = result.recoveredDocumentId.isEmpty()
             ? QUuid::createUuid().toString(QUuid::WithoutBraces)
             : result.recoveredDocumentId;
@@ -1524,7 +1570,10 @@ bool AppController::commitProjectLoad(const ProjectLoadResult &result)
     emit sourceLoadStateChanged();
     emit documentStateChanged();
     setProjectLoadState(false);
-    if (result.recovered) {
+    if (result.runSelection) {
+        scheduleRecoveryWrite();
+        setStatus(QStringLiteral("Run selected. Loading its available sources."));
+    } else if (result.recovered) {
         AppLog::info(QStringLiteral("Recovery accepted"));
         setStatus(QStringLiteral("Recovered unsaved changes. Save to keep them."));
     } else {
@@ -1538,17 +1587,20 @@ bool AppController::commitProjectLoad(const ProjectLoadResult &result)
 QJsonObject AppController::currentProjectObject(
     const QString &projectPath, const std::optional<quint64> savedRevision) const
 {
-    QJsonObject project = m_projectTemplate;
+    const bool eventProject = EventProjectCodec::isEvent(m_projectTemplate);
+    QJsonObject project = EventProjectCodec::editorProjection(m_projectTemplate);
     project.insert("version", 2);
     project.remove(QStringLiteral("videoPath"));
     project.remove(QStringLiteral("vboPath"));
     const QString targetProjectPath = projectPath.isEmpty()
         ? m_documentState.projectPath() : projectPath;
     QJsonObject sources = project.value(QStringLiteral("sources")).toObject();
-    const QJsonObject video = ProjectSourceReferenceCodec::toJson(
-        m_videoReference, targetProjectPath);
-    const QJsonObject telemetry = ProjectSourceReferenceCodec::toJson(
-        m_vboReference, targetProjectPath);
+    const QJsonObject video = eventProject
+        ? EventProjectCodec::referenceForSave(m_videoReference, m_documentState.projectPath(), targetProjectPath)
+        : ProjectSourceReferenceCodec::toJson(m_videoReference, targetProjectPath);
+    const QJsonObject telemetry = eventProject
+        ? EventProjectCodec::referenceForSave(m_vboReference, m_documentState.projectPath(), targetProjectPath)
+        : ProjectSourceReferenceCodec::toJson(m_vboReference, targetProjectPath);
     const auto overlaySource = [&sources](const QString &key, const QJsonObject &known) {
         QJsonObject source = sources.value(key).toObject();
         source.remove(QStringLiteral("relativePath"));
@@ -1583,7 +1635,9 @@ QJsonObject AppController::currentProjectObject(
     if (!project.contains("exportSettings")) {
         project.insert("exportSettings", QJsonObject{{"quality", "high"}});
     }
-    return project;
+    return eventProject
+        ? EventProjectCodec::withEditorState(m_projectTemplate, project, m_documentState.projectPath(), targetProjectPath)
+        : project;
 }
 
 bool AppController::saveProject(const QUrl &url)
@@ -1625,6 +1679,11 @@ bool AppController::saveProject(const QUrl &url)
         return false;
     }
     m_projectTemplate = project;
+    if (EventProjectCodec::isEvent(project)) {
+        const QJsonObject editor = EventProjectCodec::editorProjection(project);
+        m_videoReference = ProjectSourceReferenceCodec::fromProject(editor, QStringLiteral("video"), QStringLiteral("videoPath"));
+        m_vboReference = ProjectSourceReferenceCodec::fromProject(editor, QStringLiteral("telemetry"), QStringLiteral("vboPath"));
+    }
     m_settings.setValue("project/path", path);
     m_settings.sync();
     m_documentState.markSaved(path);
@@ -1817,8 +1876,13 @@ bool AppController::startExport(
         return false;
     }
     m_exportOutputTransaction = std::make_unique<ExportOutputTransaction>();
+    QStringList protectedPaths{m_telemetryPath};
+    if (EventProjectCodec::isEvent(m_projectTemplate)) {
+        protectedPaths.append(m_documentState.projectPath());
+        protectedPaths.append(EventProjectCodec::referencedPaths(currentProjectObject(), m_documentState.projectPath()));
+    }
     const auto preparation = m_exportOutputTransaction->prepare(
-        outputPath, inputPath, {m_telemetryPath}, overwriteAllowed);
+        outputPath, inputPath, protectedPaths, overwriteAllowed);
     if (preparation.status == ExportOutputTransaction::PreparationStatus::OverwriteConfirmationRequired) {
         m_exportState = QStringLiteral("overwriteConfirmationRequired");
         m_exportError.clear();

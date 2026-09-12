@@ -81,6 +81,9 @@ class AppController final : public QObject {
     Q_PROPERTY(int windowWidth READ windowWidth CONSTANT)
     Q_PROPERTY(int windowHeight READ windowHeight CONSTANT)
     Q_PROPERTY(QUrl projectPath READ projectPath NOTIFY documentStateChanged)
+    Q_PROPERTY(QString eventName READ eventName NOTIFY documentStateChanged)
+    Q_PROPERTY(QVariantList eventRuns READ eventRuns NOTIFY documentStateChanged)
+    Q_PROPERTY(QString activeRunId READ activeRunId NOTIFY documentStateChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY documentStateChanged)
     Q_PROPERTY(quint64 lastSavedRevision READ lastSavedRevision NOTIFY documentStateChanged)
     Q_PROPERTY(QString pendingDestructiveAction READ pendingDestructiveAction NOTIFY destructiveActionChanged)
@@ -149,6 +152,9 @@ public:
     [[nodiscard]] int windowWidth() const;
     [[nodiscard]] int windowHeight() const;
     [[nodiscard]] QUrl projectPath() const;
+    [[nodiscard]] QString eventName() const;
+    [[nodiscard]] QVariantList eventRuns() const;
+    [[nodiscard]] QString activeRunId() const;
     [[nodiscard]] bool dirty() const;
     [[nodiscard]] quint64 lastSavedRevision() const;
     [[nodiscard]] QString pendingDestructiveAction() const;
@@ -167,6 +173,7 @@ public:
 
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
+    Q_INVOKABLE bool selectEventRun(const QString &runId);
     Q_INVOKABLE void relinkVideo(const QUrl &url);
     Q_INVOKABLE void relinkVbo(const QUrl &url);
     Q_INVOKABLE void resolveSourceMismatch(bool acceptReplacement);
@@ -318,6 +325,7 @@ private:
         quint64 generation = 0;
         quint64 documentRevisionAtStart = 0;
         bool recovered = false;
+        bool runSelection = false;
         quint64 recoveredRevision = 0;
         quint64 recoveredLastSavedRevision = 0;
         QString recoveredDocumentId;
@@ -351,7 +359,7 @@ private:
     bool beginProjectLoad(QString projectPath, const QJsonObject &project,
                           bool recovered = false, quint64 recoveredRevision = 0,
                           quint64 recoveredLastSavedRevision = 0,
-                          QString recoveredDocumentId = {});
+                          QString recoveredDocumentId = {}, bool runSelection = false);
     void restoreStartupState();
     void scheduleRecoveryWrite();
     void writeRecoverySnapshot();

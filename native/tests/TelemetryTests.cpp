@@ -29,6 +29,8 @@
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/VboParser.h"
 #include "RczFixture.h"
+#include "EventProjectFixture.h"
+#include "project/EventProjectCodec.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
 #include "project/ProjectDocumentState.h"
@@ -45,6 +47,10 @@
 #include <QMediaPlayer>
 #include <QProcess>
 #include <QPromise>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickStyle>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QStandardPaths>
@@ -71,6 +77,11 @@ class TelemetryTests final : public QObject {
 private slots:
     void initTestCase();
     void cleanupTestCase();
+    void persistsEventSelectionAndRunLocalSync();
+    void recoversEventAndRelinksOnlyActiveSource();
+    void rejectsInvalidEventWithoutReplacingDocument();
+    void rejectsLateSourceResultsAfterRunSelection();
+    void selectsEventRunThroughAnalysisQml();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
     void exportsSyntheticRczThroughWorker_data();
@@ -254,6 +265,7 @@ private slots:
 
 void TelemetryTests::initTestCase()
 {
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
     // Default QSettings needs an application identity on every native backend,
     // particularly the Windows registry. Keep tests outside the user's app data
     // without changing the backend exercised by AppController.
@@ -393,6 +405,211 @@ private:
 };
 
 } // namespace
+
+void TelemetryTests::persistsEventSelectionAndRunLocalSync()
+{
+    namespace Fixture = EventProjectFixture;
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    QVERIFY(writeBytes(directory.filePath("run-a.vbo"), Fixture::lapsVbo()));
+    QVERIFY(QFile::copy(QStringLiteral(TEST_FIXTURE_PATH), directory.filePath("run-b.vbo")));
+    const QString path = directory.filePath("event.fetproject");
+    QVERIFY(writeBytes(path, QJsonDocument(Fixture::project()).toJson()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.requestOpenProject(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventName(), QStringLiteral("Development event"));
+    QCOMPARE(controller.eventRuns().size(), 2);
+    QCOMPARE(controller.activeRunId(), QStringLiteral("run-a"));
+    QCOMPARE(controller.lapSummaries().size(), 3);
+    QCOMPARE(controller.lapSummaries()[0].toMap().value("runId").toString(), QStringLiteral("run-a"));
+    QCOMPARE(controller.videoLoadState(), QStringLiteral("missing"));
+    QVERIFY(!controller.dirty());
+    QCOMPARE(controller.lastSavedRevision(), quint64(4));
+    const QString documentId = controller.m_documentId;
+    controller.setAnalysisVisible(true);
+    controller.m_activeTemplateId = QStringLiteral("test-template");
+    controller.setSyncOffset(9.0);
+    controller.setTimeScale(1.002);
+    QVERIFY(controller.selectEventRun("run-b"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.sampleCount(), 3);
+    QVERIFY(controller.lapSummaries().isEmpty());
+    QCOMPARE(controller.syncOffset(), -1.5);
+    QCOMPARE(controller.timeScale(), 1.0);
+    QCOMPARE(controller.videoLoadState(), QStringLiteral("idle"));
+    QVERIFY(controller.videoSource().isEmpty());
+    QVERIFY(controller.analysisVisible());
+    QCOMPARE(controller.activeTemplateId(), QStringLiteral("test-template"));
+    QVERIFY(controller.dirty());
+    QCOMPARE(controller.lastSavedRevision(), quint64(4));
+    QCOMPARE(controller.m_documentId, documentId);
+    const quint64 revision = controller.m_documentState.revision();
+    QVERIFY(controller.selectEventRun("run-b"));
+    QVERIFY(!controller.selectEventRun("not-a-run"));
+    QCOMPARE(controller.m_documentState.revision(), revision);
+    QVERIFY(QDir().mkpath(directory.filePath("saved")));
+    const QString savedPath = directory.filePath("saved/event.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+    QVERIFY(!controller.dirty());
+    const QJsonObject saved = QJsonDocument::fromJson(readBytes(savedPath)).object();
+    QCOMPARE(saved.value("version").toInt(), 3);
+    QVERIFY(!saved.contains("sources")); QVERIFY(!saved.contains("sync"));
+    const auto runs = Fixture::runs(saved);
+    QCOMPARE(runs[0].toObject().value("sync").toObject().value("offset").toDouble(), 9.0);
+    QCOMPARE(Fixture::reference(runs[0].toObject(), 1).value("relativePath").toString(), QStringLiteral("../run-a.rcz"));
+    QCOMPARE(runs[0].toObject().value("primaryTelemetrySourceId").toString(), QStringLiteral("run-a-source"));
+    QVERIFY(controller.selectEventRun("run-a"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.syncOffset(), 9.0);
+    QCOMPARE(controller.timeScale(), 1.002);
+    QCOMPARE(controller.lapSummaries().size(), 3);
+    QCOMPARE(controller.videoLoadState(), QStringLiteral("missing"));
+    QCOMPARE(controller.lastSavedRevision(), revision);
+}
+
+void TelemetryTests::recoversEventAndRelinksOnlyActiveSource()
+{
+    namespace Fixture = EventProjectFixture;
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const QString path = directory.filePath("event.fetproject");
+    const QString recovery = directory.filePath("recovery.json");
+    auto project = Fixture::project();
+    // A moved replacement must still pass explicit fingerprint review, even inside an event.
+    auto runs = Fixture::runs(project);
+    auto second = runs[1].toObject();
+    auto sources = second.value("sources").toObject();
+    auto telemetry = sources.value("telemetry").toArray();
+    auto source = telemetry[0].toObject();
+    auto reference = source.value("reference").toObject();
+    reference.insert("fingerprint", QJsonObject{{"kind", "telemetry-v1"}, {"size", 1}});
+    source.insert("reference", reference); telemetry[0] = source;
+    sources.insert("telemetry", telemetry); second.insert("sources", sources); runs[1] = second;
+    Fixture::setRuns(project, runs);
+    QVERIFY(writeBytes(path, QJsonDocument(project).toJson()));
+    {
+        AppController controller(nullptr, recovery);
+        QVERIFY(controller.beginProjectLoad(path, project));
+        QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+        controller.setSyncOffset(8.0);
+        QVERIFY(controller.selectEventRun("run-b"));
+        QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+        controller.writeRecoverySnapshot();
+        QVERIFY(QFileInfo::exists(recovery));
+    }
+    AppController restored(nullptr, recovery);
+    QVERIFY(restored.recoveryPending());
+    QVERIFY(!restored.selectEventRun("run-a"));
+    restored.resolveStartupRecovery("recover");
+    QCOMPARE(restored.activeRunId(), QStringLiteral("run-b"));
+    QCOMPARE(restored.lastSavedRevision(), quint64(4));
+    QVERIFY(restored.dirty());
+    QCOMPARE(restored.m_documentId, QStringLiteral("event-document"));
+    const auto beforeRelink = restored.currentProjectObject();
+    restored.relinkVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE(restored.vboLoadState(), QStringLiteral("mismatch"));
+    QVERIFY(restored.channelNames().isEmpty());
+    restored.resolveSourceMismatch(true);
+    QCOMPARE(restored.vboLoadState(), QStringLiteral("ready"));
+    QVERIFY(restored.saveCurrentProject());
+    const auto saved = QJsonDocument::fromJson(readBytes(path)).object();
+    QCOMPARE(Fixture::runs(saved)[0], Fixture::runs(beforeRelink)[0]);
+    QCOMPARE(Fixture::runs(saved)[1].toObject().value("primaryTelemetrySourceId").toString(), QStringLiteral("run-b-source"));
+    QVERIFY(!Fixture::reference(Fixture::runs(saved)[1].toObject()).value("fingerprint").toObject().isEmpty());
+    QVERIFY(!restored.dirty());
+    QVERIFY(!QFileInfo::exists(recovery));
+}
+
+void TelemetryTests::rejectsInvalidEventWithoutReplacingDocument()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.beginProjectLoad(directory.filePath("event.fetproject"), EventProjectFixture::project()));
+    controller.setSyncOffset(7.0);
+    const auto before = controller.currentProjectObject();
+    const quint64 generation = controller.m_sourceGeneration;
+    auto malformed = EventProjectFixture::project();
+    malformed.insert("sync", QJsonObject{{"offset", 999.0}});
+    QVERIFY(!controller.beginProjectLoad(directory.filePath("bad.fetproject"), malformed));
+    QCOMPARE(controller.currentProjectObject(), before);
+    QCOMPARE(controller.m_sourceGeneration, generation);
+    controller.requestNewProject();
+    QCOMPARE(controller.pendingDestructiveAction(), QStringLiteral("new"));
+    QVERIFY(!controller.selectEventRun("run-b"));
+    QCOMPARE(controller.currentProjectObject(), before);
+    controller.cancelPendingDestructiveAction();
+    controller.m_documentState.restoreUnsaved(controller.projectPath().toLocalFile(), std::numeric_limits<quint64>::max(), 4);
+    QVERIFY(!controller.selectEventRun("run-b"));
+}
+
+void TelemetryTests::rejectsLateSourceResultsAfterRunSelection()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.beginProjectLoad(directory.filePath("event.fetproject"), EventProjectFixture::project()));
+    QPromise<AppController::VboLoadResult> pending;
+    pending.start();
+    const auto finish = qScopeGuard([&] { pending.finish(); });
+    AppController::VboLoadResult late;
+    late.success = true;
+    late.path = QStringLiteral(TEST_FIXTURE_PATH);
+    late.generation = controller.m_sourceGeneration;
+    late.session = VboParser::parseFile(late.path);
+    controller.m_vboLoadCancellation = std::make_shared<std::atomic_bool>(false);
+    const auto cancellation = controller.m_vboLoadCancellation;
+    controller.m_vboLoadState = QStringLiteral("loading");
+    controller.m_vboLoadWatcher.setFuture(pending.future());
+    QSignalSpy finished(&controller.m_vboLoadWatcher, &QFutureWatcher<AppController::VboLoadResult>::finished);
+    QVERIFY(controller.selectEventRun("run-b"));
+    QVERIFY(cancellation->load());
+    pending.addResult(late);
+    pending.finish();
+    QTRY_COMPARE(finished.size(), 1);
+    QCOMPARE(controller.activeRunId(), QStringLiteral("run-b"));
+    QCOMPARE(controller.vboLoadState(), QStringLiteral("missing"));
+    QVERIFY(controller.channelNames().isEmpty());
+    QVERIFY(controller.lapSummaries().isEmpty());
+    QCOMPARE(controller.syncOffset(), -1.5);
+}
+
+void TelemetryTests::selectsEventRunThroughAnalysisQml()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.beginProjectLoad(directory.filePath("event.fetproject"), EventProjectFixture::project()));
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> panel(component.createWithInitialProperties({{"mediaDuration", 0}, {"width", 900}, {"height", 600}}));
+    QVERIFY2(panel, qPrintable(component.errorString()));
+    auto *picker = panel->findChild<QObject *>(QStringLiteral("eventRunPicker"));
+    QVERIFY(picker);
+    QCOMPARE(picker->property("count").toInt(), 2);
+    QCOMPARE(picker->property("currentIndex").toInt(), 0);
+    QCOMPARE(picker->property("currentText").toString(), QStringLiteral("run-a"));
+    QVERIFY(QMetaObject::invokeMethod(picker, "activated", Q_ARG(int, 1)));
+    QCOMPARE(controller.activeRunId(), QStringLiteral("run-b"));
+    QCOMPARE(picker->property("currentIndex").toInt(), 1);
+    QCOMPARE(picker->property("currentText").toString(), QStringLiteral("run-b"));
+    controller.requestNewProject();
+    QVERIFY(!picker->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(picker, "activated", Q_ARG(int, 0)));
+    QCOMPARE(controller.activeRunId(), QStringLiteral("run-b"));
+    QCOMPARE(picker->property("currentIndex").toInt(), 1);
+    QCOMPARE(warnings.size(), 0);
+    controller.cancelPendingDestructiveAction();
+}
 
 void TelemetryTests::rejectsUnsafeExportPaths()
 {
