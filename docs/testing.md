@@ -322,3 +322,24 @@ Native build/CTest commands were attempted in the coordinator workspace and fail
 because CMake/CTest are absent. Record exact-head CI results in the implementation
 PR; this paragraph is not a native-pass claim. Earlier five-registration results
 in this document are historical results for their stated snapshots.
+
+### KAN-5: preserve gate evidence in interior-defect fixtures
+
+PR #12 at `504fe26` compiled in all four Qt 6.8.3 CI jobs, but the new
+lap-eligibility suite failed seven cases. The sparse event fixture uses each GPS
+sample to arm, cross or finalize a timing-gate passage. Removing one of those
+samples therefore removed a passage instead of testing an interior lap defect.
+
+The corrected fixture interpolates the same synthetic path at 0.25-second
+intervals and injects defects away from the gate. A separate regression verifies
+that densification preserves the original start/end passage times and all three
+eligible laps before defects are introduced. The defect cases still require
+three measured laps, exclusion of invalid references, no numeric deltas from
+invalid GPS, and propagation into outing rows and the renderer. Production
+eligibility rules and CI rendering assertions are unchanged.
+
+Final CI and merge evidence for this task is recorded in
+[KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5) and
+[PR #12](https://github.com/arekkozuch/VBOOverlay/pull/12). Local CMake/CTest
+remain unavailable in this coordinator workspace; hosted checks do not establish
+new physical Mac or private-video acceptance.
