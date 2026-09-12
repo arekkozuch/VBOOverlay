@@ -90,6 +90,14 @@ private slots:
     void invalidatesBatchReviewAfterDocumentChanges();
     void reviewsBatchThroughProductionQml();
     void displaysTimedLapsWithoutVideo();
+    void importsAnalysisRunsAutomatically();
+    void guardsAutomaticAnalysisImport();
+    void startsOutingThroughAnalysisQml();
+    void opensOutingLapWithoutChangingEditor();
+    void derivesOutingLapSections();
+    void recordsVboUtcChronology();
+    void ordersWholeOutingAndReopensSources();
+    void groupsOnlyDatedUnambiguousAlternatives();
     void prefersRaceChronoCalculatedAcceleration();
     void presentsBrakingUpInGForceWidgets();
     void rejectsBatchLinksWithDifferentPersistedFormats();
@@ -805,6 +813,343 @@ void TelemetryTests::reviewsBatchThroughProductionQml()
     QTRY_COMPARE(controller.eventName(), QStringLiteral("QML event"));
     QCOMPARE(controller.eventRuns().size(), 1);
     QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::importsAnalysisRunsAutomatically()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto vbo = QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH));
+    const auto rcz = directory.filePath("second.rcz");
+    QVERIFY(writeBytes(rcz, RczFixture::zip(RczFixture::members())));
+    const auto bad = directory.filePath("broken.rcz"); QVERIFY(writeBytes(bad, "broken"));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QSignalSpy committed(&controller, &AppController::batchImportCommitted);
+    QVERIFY(controller.importAnalysisRuns("  Track Saturday  ", {vbo, QUrl::fromLocalFile(rcz), vbo, QUrl::fromLocalFile(bad)}));
+    QTRY_COMPARE(committed.size(), 1);
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventName(), QStringLiteral("Track Saturday"));
+    QCOMPARE(controller.eventRuns().size(), 2);
+    QCOMPARE(controller.analysisImportMessages().size(), 2);
+    QVERIFY(controller.batchImportError().isEmpty());
+    QVERIFY(controller.videoSource().isEmpty());
+    QVERIFY(controller.analysisVisible());
+    QVERIFY(controller.dirty());
+    const auto active = controller.activeRunId();
+    controller.setSyncOffset(4);
+    const auto laps = directory.filePath("third.vbo");
+    QVERIFY(writeBytes(laps, EventProjectFixture::lapsVbo()));
+    QVERIFY(controller.importAnalysisRuns({}, {vbo, QUrl::fromLocalFile(laps)}));
+    QTRY_COMPARE(committed.size(), 2);
+    QCOMPARE(controller.eventRuns().size(), 3);
+    QCOMPARE(controller.activeRunId(), active);
+    QCOMPARE(controller.syncOffset(), 4.0);
+    QCOMPARE(controller.analysisImportMessages().size(), 1);
+    const auto path = directory.filePath("outing.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(path)));
+    QVERIFY(controller.beginProjectLoad(path, QJsonDocument::fromJson(readBytes(path)).object()));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventRuns().size(), 3);
+    QCOMPARE(controller.eventName(), QStringLiteral("Track Saturday"));
+}
+
+void TelemetryTests::guardsAutomaticAnalysisImport()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    const QList<QUrl> urls{QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH))};
+    QVERIFY(!controller.importAnalysisRuns(" ", urls));
+    QVERIFY(controller.eventRuns().isEmpty());
+    QVERIFY(controller.importAnalysisRuns("Cancelled", urls));
+    controller.cancelBatchImport();
+    QTRY_VERIFY(!controller.m_batchPending);
+    QVERIFY(controller.eventRuns().isEmpty());
+    QVERIFY(!controller.dirty());
+    QVERIFY(controller.importAnalysisRuns("Stale", urls));
+    controller.setSyncOffset(2);
+    QTRY_VERIFY(!controller.m_batchPending);
+    QVERIFY(controller.eventRuns().isEmpty());
+    QCOMPARE(controller.syncOffset(), 2.0);
+    QVERIFY(!controller.importAnalysisRuns("Dirty", urls));
+    QVERIFY(controller.batchImportError().contains("Save"));
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("old.fetproject"))));
+    const auto bad = directory.filePath("bad.rcz"); QVERIFY(writeBytes(bad, "broken"));
+    const auto before = controller.currentProjectObject();
+    QVERIFY(controller.importAnalysisRuns("Broken", {QUrl::fromLocalFile(bad)}));
+    QTRY_VERIFY(!controller.m_batchPending);
+    QVERIFY(!controller.batchImportError().isEmpty());
+    QCOMPARE(controller.analysisImportMessages().size(), 1);
+    QCOMPARE(controller.currentProjectObject(), before);
+    QVERIFY(controller.eventRuns().isEmpty());
+}
+
+void TelemetryTests::startsOutingThroughAnalysisQml()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    const auto path = QFileInfo(QStringLiteral(ANALYSIS_PANEL_QML_PATH)).dir().filePath("AnalysisWindow.qml");
+    QQmlComponent component(&engine, QUrl::fromLocalFile(path));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> window(component.createWithInitialProperties({{"videoSource", QUrl{}},
+        {"playbackPosition", 0}, {"playbackRunning", false}, {"mediaDuration", 0}}));
+    QVERIFY2(window, qPrintable(component.errorString()));
+    auto *name = window->findChild<QObject *>("analysisOutingName");
+    auto *choose = window->findChild<QObject *>("analysisChooseFiles");
+    auto *runs = window->findChild<QObject *>("outingLapList");
+    QVERIFY(name); QVERIFY(choose); QVERIFY(runs);
+    QVERIFY(!window->property("hasWorkspace").toBool());
+    QVERIFY(!choose->property("enabled").toBool());
+    name->setProperty("text", "QML outing");
+    QVERIFY(choose->property("enabled").toBool());
+    const QVariant files = QVariant::fromValue(QList<QUrl>{QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH))});
+    QSignalSpy committed(&controller, &AppController::batchImportCommitted);
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "importFiles", Q_ARG(QVariant, files)));
+    QTRY_COMPARE(committed.size(), 1);
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventName(), QStringLiteral("QML outing"));
+    QVERIFY(window->property("hasWorkspace").toBool());
+    QTRY_COMPARE(runs->property("count").toInt(), 1);
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    QVERIFY(quickWindow);
+    quickWindow->show();
+    QVERIFY(QTest::qWaitForWindowExposed(quickWindow));
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(runs, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, 0)) && row);
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QVERIFY(window->property("showingLap").toBool());
+    auto *back = quickWindow->findChild<QQuickItem *>("backToOutingLaps");
+    QVERIFY(back); QVERIFY(back->isVisible());
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        back->mapToScene(QPointF(back->width() / 2, back->height() / 2)).toPoint());
+    QTRY_VERIFY(!window->property("showingLap").toBool());
+    QVERIFY(runs->property("visible").toBool());
+    row->forceActiveFocus();
+    QTest::keyClick(quickWindow, Qt::Key_Return);
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QTest::keyClick(quickWindow, Qt::Key_Escape);
+    QTRY_VERIFY(controller.selectedOutingLap().isEmpty());
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::opensOutingLapWithoutChangingEditor()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto recording = [](int base) {
+        auto text = EventProjectFixture::lapsVbo();
+        text.replace("time latitude longitude", "time latitude longitude velocity latacc-calc longacc-calc");
+        const auto at = text.indexOf("[data]\n") + 7;
+        auto lines = text.mid(at).split('\n');
+        QByteArray data;
+        for (const auto &line : lines) {
+            if (line.isEmpty()) continue;
+            const auto t = line.first(line.indexOf(' ')).toInt();
+            data += line + ' ' + QByteArray::number(base + t) + " 0.25 -0.5\n";
+        }
+        return text.first(at) + data;
+    };
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, recording(100))); QVERIFY(writeBytes(second, recording(200)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Clickable day", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.outingLaps().size(), 10);
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    controller.setSyncOffset(19); controller.setTimeScale(1.3); controller.setPlaybackTime(7);
+    const auto before = controller.currentProjectObject();
+    const auto active = controller.activeRunId();
+    const auto selected = controller.outingLaps()[6].toMap();
+    QVERIFY(controller.selectOutingLap(6));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QCOMPARE(controller.selectedOutingLap(), selected);
+    QCOMPARE(controller.outingLapChannels(), QStringList({"velocity", "latacc-calc", "longacc-calc"}));
+    QVERIFY(!controller.outingLapTrack().isEmpty());
+    const auto start = selected.value("startTime").toDouble();
+    const auto end = selected.value("endTime").toDouble();
+    controller.setOutingLapCursor((start + end) / 2);
+    QCOMPARE(controller.outingLapValueText("velocity"), QString::number(200 + (start + end) / 2, 'f', 2));
+    QCOMPARE(controller.outingLapValueText("longacc-calc"), QStringLiteral("-0.50"));
+    QVERIFY(!controller.outingLapTrackPoint().isEmpty());
+    const auto series = controller.outingLapSeries("velocity", 200);
+    QVERIFY(series.value("minimum").toDouble() >= 200 + start);
+    QVERIFY(series.value("maximum").toDouble() <= 200 + end);
+    const auto track = controller.outingLapTrack();
+    controller.setOutingLapCursor(-100); QCOMPARE(controller.outingLapCursor(), start);
+    controller.setOutingLapCursor(1000); QCOMPARE(controller.outingLapCursor(), end);
+    QCOMPARE(controller.outingLapTrack(), track);
+    QCOMPARE(controller.outingLapSeries("velocity", 200), series);
+    QCOMPARE(controller.currentProjectObject(), before);
+    QCOMPARE(controller.activeRunId(), active);
+    QCOMPARE(controller.playbackTime(), 7.0);
+    QVERIFY(!controller.selectOutingLap(-1));
+    QCOMPARE(controller.selectedOutingLap(), selected);
+    // Delay an old completion, choose a new row, then release the stale result.
+    AppController::OutingLapDetailResult stale;
+    stale.request = controller.m_outingLapDetailRequest;
+    stale.session = controller.m_outingLapDetailSession;
+    QPromise<AppController::OutingLapDetailResult> promise; promise.start();
+    controller.m_outingLapDetailPending = true;
+    controller.m_outingLapDetailWatcher.setFuture(promise.future());
+    QVERIFY(controller.selectOutingLap(0));
+    QVERIFY(controller.selectOutingLap(1));
+    promise.addResult(stale); promise.finish();
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QCOMPARE(controller.selectedOutingLap(), controller.outingLaps()[1].toMap());
+    QVERIFY(controller.outingLapSeries("velocity", 200).value("maximum").toDouble() < 200);
+    controller.closeOutingLap();
+    QVERIFY(controller.outingLapSeries("velocity", 200).isEmpty());
+    QVERIFY(QFile::remove(second));
+    QVERIFY(controller.selectOutingLap(6));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("error"));
+    QVERIFY(controller.outingLapDetailError().contains("missing"));
+    QVERIFY(controller.outingLapSeries("velocity", 200).isEmpty());
+    QVERIFY(writeBytes(second, recording(300)));
+    QVERIFY(controller.selectOutingLap(6));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("error"));
+    QVERIFY(controller.outingLapDetailError().contains("changed"));
+    QVERIFY(controller.selectOutingLap(1));
+    controller.closeOutingLap();
+    QTRY_VERIFY(!controller.m_outingLapDetailWatcher.isRunning());
+    QVERIFY(controller.selectedOutingLap().isEmpty());
+    QCOMPARE(controller.currentProjectObject(), before);
+}
+
+void TelemetryTests::derivesOutingLapSections()
+{
+    auto session = VboParser::parse(QString::fromUtf8(EventProjectFixture::lapsVbo()));
+    session.metadata.insert("firstTimestampMilliseconds", "1780000000000");
+    const auto laps = deriveSourceLapSession(session);
+    QCOMPARE(laps.timedLaps.size(), 3);
+    const auto rows = outingLapRows(session, laps, "run", "Morning", 0);
+    QCOMPARE(rows.size(), 5);
+    QCOMPARE(rows.first().type, LapSectionType::Out);
+    QCOMPARE(rows.first().start, 0.0);
+    QCOMPARE(rows.first().end, laps.acceptedPasses.first().telemetryTime);
+    for (int i = 1; i <= 3; ++i) {
+        QCOMPARE(rows[i].type, LapSectionType::Lap);
+        QCOMPARE(rows[i].lapNumber, i);
+        QCOMPARE(rows[i].start, laps.timedLaps[i - 1].startTelemetryTime);
+        QCOMPARE(rows[i].end, laps.timedLaps[i - 1].endTelemetryTime);
+    }
+    QCOMPARE(rows.last().type, LapSectionType::In);
+    QCOMPARE(rows.last().end, session.duration);
+    const auto unknown = outingLapRows(session, {}, "unknown", "Unknown", 1);
+    QCOMPARE(unknown.size(), 1); QCOMPARE(unknown[0].type, LapSectionType::Unknown);
+    auto one = laps; one.acceptedPasses.resize(1); one.timedLaps.clear();
+    const auto fragments = outingLapRows(session, one, "one", "One crossing", 2);
+    QCOMPARE(fragments.size(), 2);
+    QCOMPARE(fragments[0].type, LapSectionType::Out); QCOMPARE(fragments[1].type, LapSectionType::In);
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(outingLapRows(session, laps, {}, {}, 0, [] { return true; })));
+    auto tooMany = laps; tooMany.timedLaps.resize(maximumOutingLapRows);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(outingLapRows(session, tooMany, {}, {}, 0)));
+    auto mixed = rows;
+    auto withoutClock = session; withoutClock.metadata.clear();
+    mixed += outingLapRows(withoutClock, laps, "undated", "Undated", 1);
+    std::reverse(mixed.begin(), mixed.end());
+    sortOutingLaps(mixed);
+    QCOMPARE(mixed.first().type, LapSectionType::Out);
+    QVERIFY(mixed.first().timestampMilliseconds.has_value());
+    QVERIFY(!mixed.last().timestampMilliseconds.has_value());
+}
+
+void TelemetryTests::recordsVboUtcChronology()
+{
+    const QString header = "File created on 29/08/2026 at 14:06:49\n";
+    const QString body = "[comments]\nGenerated by RaceChrono Pro v10.2.4\n[column names]\ntime speed\n[data]\n140659.610 10\n140659.710 11\n";
+    const auto valid = VboParser::parse(header + body);
+    const auto expected = QDateTime::fromString("2026-08-29T14:06:59.610Z", Qt::ISODateWithMs).toMSecsSinceEpoch();
+    QCOMPARE(recordingTimestamp(valid).value(), expected);
+    QCOMPARE(valid.valueAt("speed", 0).value(), 10.0);
+    QVERIFY(!recordingTimestamp(VboParser::parse(body)));
+    QVERIFY(!recordingTimestamp(VboParser::parse(QString(header).replace("29/08", "31/02") + body)));
+    QVERIFY(!recordingTimestamp(VboParser::parse(QString(header).replace("14:06:49", "99:06:49") + body)));
+    QVERIFY(!recordingTimestamp(VboParser::parse(header + header + body)));
+    QVERIFY(!recordingTimestamp(VboParser::parse(header + QString(body).replace("Generated by RaceChrono Pro v10.2.4", "Other exporter"))));
+    QVERIFY(!recordingTimestamp(VboParser::parse(header + QString(body).replace("140659.610", "0").replace("140659.710", "1"))));
+    const auto midnight = VboParser::parse(QString(header).replace("29/08/2026 at 14:06:49", "31/12/2026 at 23:59:59")
+        + QString(body).replace("140659.610", "000000.100").replace("140659.710", "000000.200"));
+    QCOMPARE(recordingTimestamp(midnight).value(), QDateTime::fromString("2027-01-01T00:00:00.100Z", Qt::ISODateWithMs).toMSecsSinceEpoch());
+}
+
+void TelemetryTests::groupsOnlyDatedUnambiguousAlternatives()
+{
+    TelemetryImportPlan plan;
+    auto a = std::make_shared<TelemetrySession>(); a->duration = 600; a->metadata.insert("firstTimestampMilliseconds", "1780000000000");
+    auto b = std::make_shared<TelemetrySession>(*a);
+    TelemetryRunProposal vbo; vbo.id = "vbo"; vbo.format = "vbo"; vbo.telemetry = a;
+    TelemetryRunProposal rcz; rcz.id = "rcz"; rcz.format = "rcz"; rcz.telemetry = b;
+    plan.runs = {vbo, rcz}; plan.possibleSameRuns = {{"vbo", "rcz", 32, 1.0, 0.2, {}}};
+    QCOMPARE(automaticVboPrimaries(plan).value("rcz"), QStringLiteral("vbo"));
+    b->metadata.insert("firstTimestampMilliseconds", "1780086400000");
+    QCOMPARE(automaticVboPrimaries(plan).value("rcz"), QStringLiteral("rcz"));
+    b->metadata.clear();
+    QCOMPARE(automaticVboPrimaries(plan).value("rcz"), QStringLiteral("rcz"));
+    b->metadata = a->metadata;
+    auto alternative = vbo; alternative.id = "other"; plan.runs.append(alternative);
+    plan.possibleSameRuns.append({"other", "rcz", 32, 1.0, 0.2, {}});
+    QCOMPARE(automaticVboPrimaries(plan).value("rcz"), QStringLiteral("rcz"));
+}
+
+void TelemetryTests::ordersWholeOutingAndReopensSources()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto recording = [](int hour) {
+        auto text = QString::fromUtf8(EventProjectFixture::lapsVbo());
+        text.replace("Start 21.0000 52.0000 21.0000 52.0002 start", "Start 21.0000 52.0001 21.000325 52.0001 start");
+        const auto data = text.indexOf("[data]\n") + 7;
+        auto lines = text.mid(data).split('\n', Qt::SkipEmptyParts);
+        for (auto &line : lines) {
+            const auto space = line.indexOf(' ');
+            line = QTime(hour, 0).addMSecs(qRound(line.first(space).toDouble() * 1000)).toString("HHmmss.zzz") + line.mid(space);
+        }
+        return (QString("File created on 29/08/2026 at %1:00:00\n[comments]\nGenerated by RaceChrono Pro v10.2.4\n").arg(hour, 2, 10, QChar('0'))
+            + text.first(data) + lines.join('\n') + '\n').toUtf8();
+    };
+    const auto late = directory.filePath("late.vbo"); const auto early = directory.filePath("early.vbo");
+    QVERIFY(writeBytes(late, recording(15))); QVERIFY(writeBytes(early, recording(9)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Whole day", {QUrl::fromLocalFile(late), QUrl::fromLocalFile(early)}));
+    QTRY_COMPARE(controller.outingLaps().size(), 10);
+    QVERIFY(!controller.outingLapsLoading());
+    QVERIFY(controller.outingLapMessages().isEmpty());
+    const auto rows = controller.outingLaps();
+    QCOMPARE(rows[0].toMap().value("runName").toString(), QStringLiteral("early"));
+    QCOMPARE(rows[0].toMap().value("type").toString(), QStringLiteral("OUT"));
+    QCOMPARE(rows[4].toMap().value("type").toString(), QStringLiteral("IN"));
+    QCOMPARE(rows[5].toMap().value("runName").toString(), QStringLiteral("late"));
+    const auto path = directory.filePath("day.fetproject");
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(path)));
+    QVERIFY(controller.beginProjectLoad(path, QJsonDocument::fromJson(readBytes(path)).object()));
+    QTRY_COMPARE(controller.outingLaps(), rows);
+    QVERIFY(QFile::remove(early));
+    QVERIFY(controller.beginProjectLoad(path, QJsonDocument::fromJson(readBytes(path)).object()));
+    QTRY_COMPARE(controller.outingLaps().size(), 5);
+    QCOMPARE(controller.outingLapMessages().size(), 1);
+    QVERIFY(controller.outingLapMessages()[0].contains("missing"));
+    QVERIFY(writeBytes(late, recording(16)));
+    QVERIFY(controller.beginProjectLoad(path, QJsonDocument::fromJson(readBytes(path)).object()));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.outingLapMessages().size() == 2);
+    QVERIFY(controller.outingLaps().isEmpty());
+    QVERIFY(controller.outingLapMessages().join(' ').contains("identity"));
+    // A completed old worker result must not repopulate a newly cleared document.
+    AppController::OutingLapResult stale;
+    stale.key = controller.outingLapKey(); stale.generation = controller.m_sourceGeneration;
+    stale.rows = {{"stale", "Stale", LapSectionType::Lap, 1, 0, 10, {}, 0}};
+    QPromise<AppController::OutingLapResult> promise; promise.start();
+    controller.m_outingLapWatcher.setFuture(promise.future());
+    controller.requestNewProject();
+    promise.addResult(stale); promise.finish();
+    QTRY_VERIFY(controller.outingLaps().isEmpty());
+    QTRY_VERIFY(!controller.m_outingLapWatcher.isRunning());
+    QVERIFY(controller.eventRuns().isEmpty());
 }
 
 void TelemetryTests::presentsBrakingUpInGForceWidgets()

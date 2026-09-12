@@ -5,6 +5,8 @@ import QtQuick.Controls
 
 Rectangle {
     id: root
+    property bool lapDetail: false
+    readonly property var pathSegments: lapDetail ? appController.outingLapTrack : [appController.trackPoints]
     color: "#070b10"
     border.color: "#1c2631"
     radius: 8
@@ -21,10 +23,12 @@ Rectangle {
 
     Item {
         id: mapArea
-        anchors.fill: parent
-        anchors.margins: 24
-        anchors.topMargin: 32
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: 10
+        width: Math.max(0, Math.min(parent.width - 48, parent.height - 64))
+        height: width
         property var currentPoint: {
+            if (root.lapDetail) return appController.outingLapTrackPoint;
             appController.playbackTime;
             return appController.currentTrackPoint;
         }
@@ -32,23 +36,27 @@ Rectangle {
         Canvas {
             id: trackCanvas
             anchors.fill: parent
+            property var segments: root.pathSegments
+            onSegmentsChanged: requestPaint()
+            onAvailableChanged: if (available) requestPaint()
+            onVisibleChanged: if (visible) requestPaint()
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
             onPaint: {
                 const context = getContext("2d");
                 context.reset();
-                const points = appController.trackPoints;
-                if (points.length < 2)
-                    return;
                 context.strokeStyle = "#536779";
                 context.lineWidth = 2.5;
                 context.lineCap = "round";
                 context.lineJoin = "round";
-                context.beginPath();
-                context.moveTo(Number(points[0].x) * width, Number(points[0].y) * height);
-                for (let index = 1; index < points.length; ++index)
-                    context.lineTo(Number(points[index].x) * width, Number(points[index].y) * height);
-                context.stroke();
+                for (const points of segments) {
+                    if (points.length < 2) continue;
+                    context.beginPath();
+                    context.moveTo(Number(points[0].x) * width, Number(points[0].y) * height);
+                    for (let index = 1; index < points.length; ++index)
+                        context.lineTo(Number(points[index].x) * width, Number(points[index].y) * height);
+                    context.stroke();
+                }
             }
             Connections {
                 target: appController
@@ -56,6 +64,12 @@ Rectangle {
                     trackCanvas.requestPaint();
                 }
             }
+        }
+        Label {
+            anchors.centerIn: parent
+            visible: root.lapDetail && root.pathSegments.length === 0
+            text: qsTr("No GPS data in this section")
+            color: "#657386"
         }
         Rectangle {
             visible: mapArea.currentPoint.x !== undefined

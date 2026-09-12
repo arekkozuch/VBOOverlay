@@ -5,6 +5,7 @@
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/TelemetryImportPlan.h"
+#include "telemetry/OutingLaps.h"
 #include "export/MediaProbe.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportOutputTransaction.h"
@@ -88,6 +89,17 @@ class AppController final : public QObject {
     Q_PROPERTY(QString activeRunId READ activeRunId NOTIFY documentStateChanged)
     Q_PROPERTY(QString batchImportState READ batchImportState NOTIFY batchImportChanged)
     Q_PROPERTY(QString batchImportError READ batchImportError NOTIFY batchImportChanged)
+    Q_PROPERTY(QStringList analysisImportMessages READ analysisImportMessages NOTIFY batchImportChanged)
+    Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QString outingLapDetailError READ outingLapDetailError NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QStringList outingLapChannels READ outingLapChannels NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
+    Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
+    Q_PROPERTY(QVariantList outingLaps READ outingLaps NOTIFY outingLapsChanged)
+    Q_PROPERTY(QStringList outingLapMessages READ outingLapMessages NOTIFY outingLapsChanged)
+    Q_PROPERTY(bool outingLapsLoading READ outingLapsLoading NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList batchImportRows READ batchImportRows NOTIFY batchImportChanged)
     Q_PROPERTY(int batchImportProcessed READ batchImportProcessed NOTIFY batchImportChanged)
     Q_PROPERTY(int batchImportTotal READ batchImportTotal NOTIFY batchImportChanged)
@@ -183,10 +195,27 @@ public:
     Q_INVOKABLE bool selectEventRun(const QString &runId);
     [[nodiscard]] QString batchImportState() const { return m_batchState; }
     [[nodiscard]] QString batchImportError() const { return m_batchError; }
+    [[nodiscard]] QStringList analysisImportMessages() const { return m_analysisImportMessages; }
+    Q_INVOKABLE bool selectOutingLap(int index);
+    Q_INVOKABLE void closeOutingLap();
+    Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
+    Q_INVOKABLE QString outingLapValueText(const QString &channel) const;
+    [[nodiscard]] QVariantMap selectedOutingLap() const { return m_selectedOutingLap; }
+    [[nodiscard]] QString outingLapDetailState() const { return m_outingLapDetailState; }
+    [[nodiscard]] QString outingLapDetailError() const { return m_outingLapDetailError; }
+    [[nodiscard]] QStringList outingLapChannels() const { return m_outingLapChannels; }
+    [[nodiscard]] QVariantList outingLapTrack() const { return m_outingLapTrack; }
+    [[nodiscard]] QVariantMap outingLapTrackPoint() const;
+    [[nodiscard]] double outingLapCursor() const { return m_outingLapCursor; }
+    void setOutingLapCursor(double seconds);
+    [[nodiscard]] QVariantList outingLaps() const { return m_outingLapRows; }
+    [[nodiscard]] QStringList outingLapMessages() const { return m_outingLapMessages; }
+    [[nodiscard]] bool outingLapsLoading() const { return m_outingLapsLoading; }
     [[nodiscard]] QVariantList batchImportRows() const { return m_batchRows; }
     [[nodiscard]] int batchImportProcessed() const { return m_batchProcessed; }
     [[nodiscard]] int batchImportTotal() const { return m_batchTotal; }
     Q_INVOKABLE bool beginBatchImport(const QList<QUrl> &urls);
+    Q_INVOKABLE bool importAnalysisRuns(const QString &name, const QList<QUrl> &urls);
     Q_INVOKABLE void cancelBatchImport();
     Q_INVOKABLE bool confirmBatchImport(const QString &name, bool append, const QVariantList &choices);
     Q_INVOKABLE void relinkVideo(const QUrl &url);
@@ -261,6 +290,9 @@ public slots:
 signals:
     void batchImportChanged();
     void batchImportCommitted();
+    void outingLapsChanged();
+    void outingLapDetailChanged();
+    void outingLapCursorChanged();
     void videoSourceChanged();
     void telemetryChanged();
     void lapNavigationChanged();
@@ -398,6 +430,52 @@ private:
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
 
     QSettings m_settings;
+    struct OutingLapDetailResult {
+        quint64 request = 0;
+        std::shared_ptr<const TelemetrySession> session;
+        TrackGeometry geometry;
+        QVariantList track;
+        QString error;
+    };
+    void initializeOutingLapDetail();
+    void loadOutingLapDetail();
+    static QVariantMap sessionSeries(const TelemetrySession &session, const QString &channel,
+        double start, double end, int maximumPoints);
+    QFutureWatcher<OutingLapDetailResult> m_outingLapDetailWatcher;
+    QTimer m_outingLapDetailTimer;
+    std::shared_ptr<std::atomic_bool> m_outingLapDetailCancellation;
+    std::shared_ptr<const TelemetrySession> m_outingLapDetailSession;
+    TrackGeometry m_outingLapDetailGeometry;
+    QVariantMap m_selectedOutingLap;
+    QJsonObject m_outingLapDetailSource;
+    QByteArray m_outingLapDetailKey;
+    quint64 m_outingLapDetailGeneration = 0;
+    quint64 m_outingLapDetailRequest = 0;
+    bool m_outingLapDetailPending = false;
+    QString m_outingLapDetailState = QStringLiteral("idle");
+    QString m_outingLapDetailError;
+    QStringList m_outingLapChannels;
+    QVariantList m_outingLapTrack;
+    double m_outingLapCursor = 0;
+    struct OutingLapResult {
+        QVector<OutingLapRow> rows;
+        QStringList messages;
+        QByteArray key;
+        quint64 generation = 0;
+        bool cancelled = false;
+    };
+    void initializeOutingLaps();
+    void refreshOutingLaps();
+    [[nodiscard]] QJsonArray outingLapSources() const;
+    [[nodiscard]] QByteArray outingLapKey() const;
+    QFutureWatcher<OutingLapResult> m_outingLapWatcher;
+    QTimer m_outingLapTimer;
+    std::shared_ptr<std::atomic_bool> m_outingLapCancellation;
+    QByteArray m_outingLapRequestedKey;
+    quint64 m_outingLapGeneration = 0;
+    QVariantList m_outingLapRows;
+    QStringList m_outingLapMessages;
+    bool m_outingLapsLoading = false;
     struct BatchImportResult {
         std::shared_ptr<TelemetryImportPlan> plan;
         QHash<QString, QJsonObject> fingerprints;
@@ -430,6 +508,10 @@ private:
     int m_batchTotal = 0;
     bool m_batchApplying = false;
     bool m_batchPending = false;
+    bool m_analysisImportAutomatic = false;
+    bool m_analysisImportAppend = false;
+    QString m_analysisImportName;
+    QStringList m_analysisImportMessages;
     QUrl m_videoSource;
     QString m_telemetryPath;
     ProjectSourceReference m_videoReference;

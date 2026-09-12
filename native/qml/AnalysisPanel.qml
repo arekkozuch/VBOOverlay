@@ -6,6 +6,7 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    property bool lapDetail: false
     required property real mediaDuration
     signal seekRequested(real milliseconds)
 
@@ -13,11 +14,17 @@ Rectangle {
     border.color: "#202a36"
 
     property real durationSeconds: Math.max(0.001, mediaDuration > 0 ? mediaDuration / 1000 : appController.telemetryDuration)
+    readonly property var visibleChannels: lapDetail ? appController.outingLapChannels : appController.analysisChannels
+    readonly property real rangeStart: lapDetail ? Number(appController.selectedOutingLap.startTime || 0) : 0
+    readonly property real rangeEnd: lapDetail ? Number(appController.selectedOutingLap.endTime || 1) : durationSeconds
+    readonly property real cursorTime: lapDetail ? appController.outingLapCursor : appController.playbackTime
     property var plotColors: ["#55e6a5", "#42a5ff", "#ffb84d", "#ff647c"]
 
     function seekAt(ratio) {
         const bounded = Math.max(0, Math.min(1, ratio));
-        if (mediaDuration > 0)
+        if (lapDetail)
+            appController.outingLapCursor = rangeStart + bounded * (rangeEnd - rangeStart);
+        else if (mediaDuration > 0)
             seekRequested(bounded * mediaDuration);
         else
             appController.playbackTime = bounded * durationSeconds;
@@ -30,7 +37,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: appController.eventRuns.length > 0
+            visible: !root.lapDetail && appController.eventRuns.length > 0
             spacing: 8
             Label {
                 text: appController.eventName
@@ -72,7 +79,9 @@ Rectangle {
                 font.letterSpacing: 1.2
             }
             Label {
-                text: qsTr("%1 synchronized channels").arg(appController.analysisChannels.length)
+                Layout.fillWidth: root.lapDetail
+                elide: Text.ElideRight
+                text: root.lapDetail ? qsTr("Move across a graph to inspect this lap") : qsTr("%1 synchronized channels").arg(appController.analysisChannels.length)
                 color: "#536172"
                 font.pixelSize: 9
             }
@@ -80,6 +89,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             FeComboBox {
+                visible: !root.lapDetail
                 id: channelPicker
                 Layout.preferredWidth: 210
                 implicitHeight: 30
@@ -87,6 +97,7 @@ Rectangle {
             }
             FeButton {
                 compact: true
+                visible: !root.lapDetail
                 text: qsTr("Add channel")
                 enabled: channelPicker.count > 0 && appController.analysisChannels.length < 4
                 onClicked: appController.toggleAnalysisChannel(channelPicker.currentText)
@@ -94,6 +105,7 @@ Rectangle {
         }
 
         LapTimingPanel {
+            visible: !root.lapDetail
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
             Layout.minimumHeight: 118
@@ -119,18 +131,23 @@ Rectangle {
                 }
 
                 Repeater {
-                    model: appController.analysisChannels
+                    model: root.visibleChannels
 
                     Item {
                         id: chartRow
                         required property int index
                         required property var modelData
                         SplitView.fillWidth: true
-                        SplitView.preferredHeight: Math.max(54, chartSplit.height / Math.max(1, appController.analysisChannels.length))
+                        SplitView.preferredHeight: Math.max(54, chartSplit.height / Math.max(1, root.visibleChannels.length))
                         SplitView.minimumHeight: 42
                         property string channelName: String(modelData)
                         property color lineColor: root.plotColors[index % root.plotColors.length]
                         property var series: {
+                            if (root.lapDetail) {
+                                appController.outingLapDetailState;
+                                appController.selectedOutingLap;
+                                return appController.outingLapSeries(channelName, Math.max(100, Math.round(width * 1.5)));
+                            }
                             appController.syncOffset;
                             appController.timeScale;
                             appController.telemetryDuration;
@@ -159,6 +176,11 @@ Rectangle {
                                     spacing: 5
                                     Label {
                                         text: {
+                                            if (root.lapDetail) {
+                                                appController.outingLapCursor;
+                                                appController.outingLapDetailState;
+                                                return appController.outingLapValueText(chartRow.channelName);
+                                            }
                                             appController.playbackTime;
                                             return appController.valueText(chartRow.channelName, 2);
                                         }
@@ -177,6 +199,7 @@ Rectangle {
                                 anchors.left: parent.left
                                 anchors.bottom: parent.bottom
                                 anchors.bottomMargin: 1
+                                visible: !root.lapDetail
                                 text: "×"
                                 color: removeMouse.containsMouse ? "#ff8090" : "#647386"
                                 font.pixelSize: 11
@@ -203,6 +226,8 @@ Rectangle {
                                     anchors.fill: parent
                                     property var plotSeries: chartRow.series
                                     onPlotSeriesChanged: requestPaint()
+                                    onAvailableChanged: if (available) requestPaint()
+                                    onVisibleChanged: if (visible) requestPaint()
                                     onWidthChanged: requestPaint()
                                     onHeightChanged: requestPaint()
                                     onPaint: {
@@ -262,18 +287,20 @@ Rectangle {
                                     font.pixelSize: 10
                                 }
                                 Rectangle {
-                                    x: Math.max(0, Math.min(parent.width - width, appController.playbackTime / root.durationSeconds * parent.width))
+                                    x: Math.max(0, Math.min(parent.width - width, (root.cursorTime - root.rangeStart) / Math.max(0.001, root.rangeEnd - root.rangeStart) * parent.width))
                                     width: 1
                                     height: parent.height
                                     color: "#f3f6fa"
                                     opacity: 0.8
                                 }
                                 MouseArea {
+                                    objectName: "analysisPlotPointer"
                                     anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
+                                    hoverEnabled: root.lapDetail
+                                    cursorShape: Qt.CrossCursor
                                     onPressed: mouse => root.seekAt(mouse.x / width)
                                     onPositionChanged: mouse => {
-                                        if (pressed)
+                                        if (pressed || root.lapDetail)
                                             root.seekAt(mouse.x / width);
                                     }
                                 }
@@ -285,8 +312,8 @@ Rectangle {
 
             Label {
                 anchors.centerIn: parent
-                visible: appController.analysisChannels.length === 0
-                text: appController.channelNames.length ? qsTr("Add a telemetry channel to begin analysis") : qsTr("Open a VBO file to inspect telemetry")
+                visible: root.visibleChannels.length === 0
+                text: root.lapDetail ? qsTr("No speed or G channels recorded in this source") : appController.channelNames.length ? qsTr("Add a telemetry channel to begin analysis") : qsTr("Open a VBO file to inspect telemetry")
                 color: "#657386"
                 font.pixelSize: 11
             }

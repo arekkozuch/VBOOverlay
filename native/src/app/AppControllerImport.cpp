@@ -145,13 +145,40 @@ void AppController::initializeBatchImport()
             m_batchExisting = std::move(result.existing);
             m_batchState = QStringLiteral("review");
             publishBatchRows();
+            if (m_analysisImportAutomatic) {
+                m_analysisImportAutomatic = false;
+                QVariantList choices;
+                const auto primaryGroups = automaticVboPrimaries(*m_batchPlan);
+                for (const auto &value : m_batchRows) {
+                    const auto row = value.toMap();
+                    const QString id = row.value("proposalId").toString();
+                    const bool ready = row.value("status").toString() == "ready";
+                    const bool existing = m_analysisImportAppend && row.value("existing").toBool();
+                    QString group = primaryGroups.value(id, id);
+                    if (m_analysisImportAppend && m_batchExisting.contains(group)) group = id;
+                    if (ready) choices.append(QVariantMap{{"proposalId", id}, {"groupId", existing ? QString{} : group}});
+                    if (ready && !existing && group != id)
+                        m_analysisImportMessages.append(row.value("name").toString()
+                            + ": matching RCZ/VBO recording; VBO supplies the lap list and analysis.");
+                    if (!ready || existing) {
+                        m_analysisImportMessages.append(row.value("name").toString() + ": "
+                            + (existing ? QStringLiteral("Already in this outing; skipped.") : row.value("message").toString()));
+                    }
+                }
+                // Reuse the same guarded document transaction and final digest check.
+                // Automatic groups require unique dated GPS evidence.
+                confirmBatchImport(m_analysisImportName, m_analysisImportAppend, choices);
+            }
         }
+        if (!m_batchPending) m_analysisImportAutomatic = false;
         emit batchImportChanged();
     });
 }
 
 void AppController::cancelBatchImport()
 {
+    m_analysisImportAutomatic = false;
+    m_analysisImportMessages.clear();
     if (m_batchCancellation) m_batchCancellation->store(true);
     m_batchPlan.reset();
     m_batchFingerprints.clear();
@@ -161,6 +188,26 @@ void AppController::cancelBatchImport()
     m_batchState = m_batchPending ? QStringLiteral("cancelling") : QStringLiteral("idle");
     if (!m_batchPending) m_batchProgressTimer.stop();
     emit batchImportChanged();
+}
+
+bool AppController::importAnalysisRuns(const QString &name, const QList<QUrl> &urls)
+{
+    if (m_batchPending || exporting() || projectLoading() || recoveryPending()
+        || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None) return false;
+    const bool append = EventProjectCodec::isEvent(m_projectTemplate);
+    if (!append && (dirty() || name.trimmed().isEmpty() || name.size() > 160)) {
+        cancelBatchImport();
+        m_batchState = QStringLiteral("error");
+        m_batchError = dirty() ? QStringLiteral("Save your current project before starting an outing.")
+                              : QStringLiteral("Enter an outing name (1–160 characters).");
+        emit batchImportChanged();
+        return false;
+    }
+    if (!beginBatchImport(urls)) return false;
+    m_analysisImportAutomatic = true;
+    m_analysisImportAppend = append;
+    m_analysisImportName = name.trimmed();
+    return true;
 }
 
 bool AppController::beginBatchImport(const QList<QUrl> &urls)

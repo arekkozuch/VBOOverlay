@@ -21,6 +21,7 @@ flappedear_enable_warnings(flappedear_probe_test_helper)
 
 qt_add_executable(flappedear_native_tests
     ../src/app/AppControllerImport.cpp
+    ../src/app/AppControllerOuting.cpp
     TelemetryTests.cpp
     ../src/app/AppController.cpp
     ../src/app/AppController.h
@@ -53,6 +54,14 @@ target_compile_definitions(flappedear_native_tests PRIVATE
 )
 add_dependencies(flappedear_native_tests flappedear_gui_session_lock_helper flappedear_native flappedear_raw_transport_consumer flappedear_probe_test_helper)
 add_test(NAME flappedear_native_tests COMMAND flappedear_native_tests)
+# Window interaction tests need real native handles for the QRhi swapchain.
+# Offscreen QPA supplies synthetic IDs, not NSView/HWND handles. Preserve the
+# renderer/backend and all export pixel assertions; startup smoke is separate.
+if(APPLE)
+    set_tests_properties(flappedear_native_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+elseif(WIN32)
+    set_tests_properties(flappedear_native_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=windows")
+endif()
 qt_add_executable(flappedear_rcz_tests RczTests.cpp RczFixture.h)
 target_compile_features(flappedear_rcz_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_rcz_tests PRIVATE flappedear_core Qt6::Test ZLIB::ZLIBSTATIC)

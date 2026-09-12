@@ -317,6 +317,8 @@ AppController::AppController(QObject *parent, QString recoveryPath,
         }
     });
     initializeBatchImport();
+    initializeOutingLaps();
+    initializeOutingLapDetail();
     retireLegacyDocumentSettings();
     restoreStartupState();
 }
@@ -329,11 +331,13 @@ AppController::~AppController()
     sourceShutdown.start();
     while (sourceShutdown.elapsed() < 2'000
            && (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
-               || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning())) {
+               || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
+               || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning())) {
         QThread::msleep(10);
     }
     if (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
-        || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()) {
+        || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
+        || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning()) {
         AppLog::warn(QStringLiteral("Source worker shutdown exceeded the bounded wait"));
     }
     if (exporting()) {
@@ -865,7 +869,7 @@ quint64 AppController::beginSourceGeneration()
 void AppController::cancelSourceJobs()
 {
     for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
-                                     m_projectLoadCancellation, m_syncCancellation}) {
+                                     m_projectLoadCancellation, m_syncCancellation, m_outingLapCancellation, m_outingLapDetailCancellation}) {
         if (cancellation) {
             cancellation->store(true);
         }
@@ -1189,7 +1193,13 @@ QVariantMap AppController::telemetrySeries(
     }
     const double telemetryStart = videoToTelemetryTime(videoStart, m_sync);
     const double telemetryEnd = videoToTelemetryTime(videoEnd, m_sync);
-    const QVector<QVector<QPointF>> sampledSegments = m_session->sampledSegments(
+    return sessionSeries(*m_session, channelName, telemetryStart, telemetryEnd, maximumPoints);
+}
+
+QVariantMap AppController::sessionSeries(const TelemetrySession &session, const QString &channelName,
+    double telemetryStart, double telemetryEnd, int maximumPoints)
+{
+    const QVector<QVector<QPointF>> sampledSegments = session.sampledSegments(
         channelName, telemetryStart, telemetryEnd, qBound(2, maximumPoints, 2000));
     if (sampledSegments.isEmpty()) {
         return {};
@@ -1219,13 +1229,13 @@ QVariantMap AppController::telemetrySeries(
         // preserving telemetry gaps as separate polylines.
         segments.append(QVariant::fromValue(points));
     }
-    const QString resolved = m_session->aliases.value(channelName, channelName);
-    const auto channel = m_session->channels.constFind(resolved);
+    const QString resolved = session.aliases.value(channelName, channelName);
+    const auto channel = session.channels.constFind(resolved);
     return {
         {"segments", segments},
         {"minimum", minimum},
         {"maximum", maximum},
-        {"unit", channel == m_session->channels.cend() ? QString() : channel->unit},
+        {"unit", channel == session.channels.cend() ? QString() : channel->unit},
     };
 }
 

@@ -48,6 +48,10 @@ struct TelemetryImportPlan {
     QVector<TelemetryRunMatchCandidate> possibleSameRuns;
 };
 
+// One-to-one GPS matches with matching absolute recording time. VBO remains
+// primary; no clock is inferred from filenames or elapsed trace similarity alone.
+[[nodiscard]] QHash<QString, QString> automaticVboPrimaries(const TelemetryImportPlan &plan);
+
 struct TelemetryImportLimits {
     // Callers may lower, but never raise, these safety ceilings.
     qsizetype maximumFiles = 64;

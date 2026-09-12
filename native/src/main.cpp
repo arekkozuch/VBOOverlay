@@ -715,6 +715,11 @@ int main(int argc, char *argv[])
             Qt::QueuedConnection);
         engine.loadFromModule("FlappedEar", "Main");
         if (startupSmokeMode && !engine.rootObjects().isEmpty()) {
+            if (!engine.rootObjects().first()->property("welcomeVisible").toBool()
+                || !engine.rootObjects().first()->findChild<QObject *>(QStringLiteral("welcomeLapAnalysis"))) {
+                qCritical() << "Startup smoke failed: fresh launch must offer Lap Analysis on the welcome screen";
+                return EXIT_FAILURE;
+            }
             // Load the all-in-one broadcast composition as well as the normal
             // application window. This catches QML binding/Loader regressions
             // across the widget family in one deterministic scene.
