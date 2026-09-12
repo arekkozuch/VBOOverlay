@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <algorithm>
+#include <cmath>
 
 using namespace FlappedEar;
 
@@ -112,6 +113,49 @@ private slots:
         const auto reordered = prepareTelemetryImport({other, copy});
         QCOMPARE(reordered.runs[0].id, plan.runs[1].id);
         QCOMPARE(reordered.runs[1].id, plan.runs[0].id);
+    }
+
+    void retainsCompleteLapsWithinTheirOwningRun()
+    {
+        QTemporaryDir directory;
+        // The existing directional-lap regression, imported through the batch API.
+        const QByteArray bytes =
+            "[laptiming]\nStart 21.0000 52.0000 21.0000 52.0002 start\n"
+            "[column names]\ntime latitude longitude\n[data]\n"
+            "0 52.0001 21.0002\n1 52.0001 21.0002\n2 52.0001 20.9998\n"
+            "3 52.0008 20.9998\n4 52.0008 21.0002\n5 52.0001 21.0002\n"
+            "6 52.0001 20.9998\n7 52.0008 20.9998\n8 52.0008 21.0002\n"
+            "10 52.0001 21.0002\n11 52.0001 20.9998\n12 52.0008 20.9998\n"
+            "13 52.0008 21.0002\n14 52.0001 21.0002\n15 52.0001 20.9998\n";
+        const auto a = writeSource(directory, "laps.vbo", bytes);
+        const auto b = writeSource(directory, "other.vbo", vbo());
+        const auto plan = prepareTelemetryImport({a, b});
+        QCOMPARE(plan.runs.size(), 2);
+        const auto &laps = plan.runs[0].laps;
+        QCOMPARE(laps.status, LapSessionStatus::Available);
+        QCOMPARE(laps.timedLaps.size(), 3);
+        QCOMPARE(laps.lapTraces.size(), 3);
+        QVERIFY(std::abs(laps.timedLaps[0].durationSeconds - 4.0) < .001);
+        QVERIFY(std::abs(laps.timedLaps[1].durationSeconds - 5.0) < .001);
+        QVERIFY(std::abs(laps.timedLaps[2].durationSeconds - 4.0) < .001);
+        QCOMPARE(laps.fastestLapIndex, std::optional<qsizetype>(0));
+        QVERIFY(plan.runs[1].laps.timedLaps.isEmpty());
+    }
+
+    void preservesSelectedFormatForLinkedSource()
+    {
+#ifdef Q_OS_WIN
+        QSKIP("POSIX file-link dispatch check; macOS is the target for this iteration.");
+#else
+        QTemporaryDir directory;
+        const auto backing = writeSource(directory, "recording.data", vbo());
+        const auto selected = directory.filePath("selected.vbo");
+        QVERIFY(QFile::link(backing, selected));
+        const auto plan = prepareTelemetryImport({selected});
+        QCOMPARE(plan.runs.size(), 1);
+        QCOMPARE(plan.runs[0].format, QStringLiteral("vbo"));
+        QCOMPARE(plan.runs[0].sourcePath, selected);
+#endif
     }
 
     void isolatesFailuresAndDoesNotDeduplicateUnparsedContent()
