@@ -2,6 +2,8 @@
 #include "telemetry/TelemetryGeometry.h"
 
 #include <QFile>
+#include <QDateTime>
+#include <QTimeZone>
 #include <QRegularExpression>
 #include <QStringConverter>
 #include <algorithm>
@@ -446,6 +448,7 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
     QVector<QVector<float>> rawValues(names.size());
     QVector<double> rawTimes;
     std::optional<double> origin;
+    bool originIsClock = false;
     std::optional<double> previousAbsoluteTime;
     std::optional<double> previousClockTime;
     double clockDayOffset = 0.0;
@@ -495,6 +498,7 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
         }
         if (!origin) {
             origin = absoluteTime;
+            originIsClock = parsedTime->format == TimestampFormat::Clock;
         }
         if (previousAbsoluteTime) {
             if (absoluteTime == *previousAbsoluteTime) {
@@ -565,6 +569,29 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
     }
     session.duration = rawTimes.back() - rawTimes.front();
     session.startTime = origin.value_or(0.0);
+    // Only a recognized RaceChrono export with a valid date and clock establishes
+    // UTC chronology. Relative seconds and arbitrary filenames do not establish it.
+    session.metadata.remove("firstTimestampMilliseconds");
+    session.metadata.remove("gpsLongitudeConvention");
+    if (centreDirection) session.metadata.insert("gpsLongitudeConvention", "west-positive");
+    if (raceChrono && originIsClock) {
+        static const QRegularExpression createdPattern(
+            "^File created on (\\d{2}/\\d{2}/\\d{4}) at (\\d{2}:\\d{2}:\\d{2})$");
+        QStringList creationLines;
+        for (const auto &line : sections.value(QString{}))
+            if (line.startsWith("File created on ")) creationLines.append(line);
+        if (creationLines.size() == 1) {
+            const auto match = createdPattern.match(creationLines.first());
+            QDate date = QDate::fromString(match.captured(1), "dd/MM/yyyy");
+            const QTime createdTime = QTime::fromString(match.captured(2), "HH:mm:ss");
+            if (match.hasMatch() && date.isValid() && createdTime.isValid()) {
+                if (session.startTime + 12 * 3600 < QTime(0, 0).secsTo(createdTime)) date = date.addDays(1);
+                const auto midnight = QDateTime(date, QTime(0, 0), QTimeZone::UTC).toMSecsSinceEpoch();
+                session.metadata.insert("firstTimestampMilliseconds",
+                    QString::number(midnight + std::llround(session.startTime * 1000.0)));
+            }
+        }
+    }
     session.sampleCount = rawTimes.size();
     session.aliases = resolveAliases(session.channelNames());
     throwIfCancelled(cancelled);

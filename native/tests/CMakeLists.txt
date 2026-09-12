@@ -21,6 +21,7 @@ flappedear_enable_warnings(flappedear_probe_test_helper)
 
 qt_add_executable(flappedear_native_tests
     ../src/app/AppControllerImport.cpp
+    ../src/app/AppControllerOuting.cpp
     TelemetryTests.cpp
     ../src/app/AppController.cpp
     ../src/app/AppController.h

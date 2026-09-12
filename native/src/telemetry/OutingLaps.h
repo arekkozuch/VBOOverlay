@@ -1,0 +1,28 @@
+#pragma once
+
+#include "telemetry/LapTiming.h"
+
+namespace FlappedEar {
+
+enum class LapSectionType { Out, Lap, In, Unknown };
+
+struct OutingLapRow {
+    QString runId;
+    QString runName;
+    LapSectionType type = LapSectionType::Unknown;
+    int lapNumber = 0;
+    double start = 0;
+    double end = 0;
+    std::optional<qint64> timestampMilliseconds;
+    qsizetype sourceOrder = 0;
+};
+
+inline constexpr qsizetype maximumOutingLapRows = 20'000;
+
+[[nodiscard]] std::optional<qint64> recordingTimestamp(const TelemetrySession &session);
+[[nodiscard]] QVector<OutingLapRow> outingLapRows(
+    const TelemetrySession &session, const LapSession &laps, const QString &runId,
+    const QString &runName, qsizetype sourceOrder, const CancellationCheck &cancelled = {});
+void sortOutingLaps(QVector<OutingLapRow> &rows);
+
+} // namespace FlappedEar

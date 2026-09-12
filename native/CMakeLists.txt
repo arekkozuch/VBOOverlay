@@ -101,6 +101,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TelemetryGeometry.h
     src/telemetry/LapTiming.cpp
     src/telemetry/LapTiming.h
+    src/telemetry/OutingLaps.cpp
+    src/telemetry/OutingLaps.h
     src/telemetry/TimingGate.h
     src/telemetry/SourceOperation.h
     src/telemetry/TelemetryRenderContext.cpp
@@ -145,6 +147,7 @@ endif()
 
 qt_add_executable(flappedear_native MACOSX_BUNDLE
     src/app/AppControllerImport.cpp
+    src/app/AppControllerOuting.cpp
     src/app/AppController.cpp
     src/app/AppController.h
     src/main.cpp
@@ -176,6 +179,8 @@ qt_add_qml_module(flappedear_native
         qml/AnalysisPanel.qml
         qml/BatchImportDialog.qml
         qml/AnalysisWindow.qml
+        qml/AnalysisStartPanel.qml
+        qml/OutingLapPanel.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml
         qml/FeCheckBox.qml

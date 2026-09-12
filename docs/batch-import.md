@@ -1,4 +1,4 @@
-# Flapped Ear Telemetry: multi-file import review
+# Flapped Ear Telemetry: outings and multi-file import
 
 ## Which format should I export from RaceChrono?
 
@@ -13,11 +13,57 @@ In the inspected RCZ/VBO pair, those calculated columns exist only in the VBO
 export; the VBO has a common 10 Hz timeline. That rate is specific to this export,
 not a limit imposed by Flapped Ear Telemetry.
 
-Importing both formats does not combine their channels. To keep both in one run,
+Importing both formats does not combine their channels. Lap Analysis groups uniquely
+matching dated exports automatically. In advanced review, to keep both in one run,
 leave VBO as **Import as a run** and set the RCZ to **Same run as: [that VBO]**.
 Analysis then uses VBO; RCZ remains attached as an alternative source.
 
-## macOS workflow
+## Lap Analysis: the whole day
+
+1. Launch the application and choose **Lap Analysis** on the welcome screen.
+2. Enter an **Outing name** (for example, a track and day).
+3. Choose **Add RCZ / VBO files…** and select the recordings for the day.
+4. **All laps** automatically lists recorded sections from every run, in UTC
+   chronological order. Columns show start time, **OUT / LAP / IN**, the source
+   run and section duration. No video or run selection is required.
+5. **Add files…** extends the outing. Save the project to retain its source
+   references; reopening rebuilds the entire list from verified sources.
+
+OUT is the recording start through its first accepted start/finish crossing;
+LAP is a complete interval between crossings; IN is the final crossing through
+recording end. Zero-length fragments are omitted. A recording without reliable
+crossings is marked UNKNOWN, rather than inventing a lap type. This is boundary
+classification, not detection of a pit lane or every pause within a recording.
+
+RCZ supplies absolute timestamps. A recognized RaceChrono VBO supplies UTC through
+its valid creation date and first clock sample, including a midnight transition.
+Files without an established date/time remain visible after the chronological
+records, in import order, with an explicit explanation. No recording dates are
+inferred from filenames or file modification time. Sorting never joins raw channel
+clocks, changes synchronization or depends on FPS.
+
+Exact file duplicates are skipped. A one-to-one VBO/RCZ pair is grouped only when
+absolute starts differ by at most one second, durations agree within two seconds,
+and the moving GPS traces agree at at least 29 of 32 sampled points within ten
+metres. Dated comparisons use the same absolute instants across both exports.
+Comparison evidence normalizes the validated RaceChrono VBO west-positive longitude
+to RCZ’s east-positive convention; existing channel/gate values remain unchanged.
+See the [VBOX format specification](https://racelogic.support/knowledge-bases/general-kb/vbo-files/).
+VBO is primary and RCZ is retained as an alternative; channels are not fused.
+Unknown clocks, different dates and ambiguous matches remain separate. When
+appending, this pairing applies to new sources in the same selection; use the
+advanced review for other grouping choices.
+
+Failed files and duplicates are reported while valid files proceed. An all-failed
+or all-duplicate append retains the document and reports the reason. Adding files
+preserves the active run and unsaved timing edits. List construction parses sources
+sequentially on a cancellable worker, checks persisted fingerprints and caps input
+at 64 recordings / 256 MiB and output at 20,000 sections. Missing or changed sources
+are reported individually; a valid project still opens. Stale results are guarded
+by source generation, document identity, path and the full primary-source reference
+set. Only derived rows are retained; the native project schema is unchanged.
+
+## Advanced import review
 
 1. Choose **File → Import telemetry runs…** and select multiple VBO/RCZ files
    in the native file dialog (up to 64).
@@ -30,7 +76,7 @@ Analysis then uses VBO; RCZ remains attached as an alternative source.
    recording date. Similar GPS traces are suggestions, not automatic merges.
 4. Choose **Create a new event** and supply a name, or **Add runs to current
    event**. Confirm. The files are rechecked before the document changes.
-5. Save the event. Use **Active run** in Analysis to switch recordings.
+5. Save the event. The outing’s **All laps** view includes all runs.
 
 The lap timing panel displays all complete telemetry laps even without video or
 when a lap falls outside video coverage. Video coverage only enables the seek
@@ -55,8 +101,8 @@ supported by this dialog. Import complementary exports together to group them.
 
 Only the selected primary supplies channels and derived laps. Alternatives are
 persisted with independent references and fingerprints; no channel fusion or
-cross-source clock transform is invented. Grouping two sources is a user
-assertion, not proof that they represent the same stint. Cycles, missing/skipped
+cross-source clock transform is invented. Manual grouping two sources is a user
+assertion; automatic grouping requires the evidence described above. Cycles, missing/skipped
 primaries, duplicate choices and oversized source groups are rejected.
 
 Identical same-format files within a batch appear as duplicates and produce one
@@ -108,7 +154,9 @@ preparation/confirmation, file changes after review, dirty-document protection,
 Save As/source-generation invalidation and submission through the production QML
 dialog. The import suite also verifies completed-file progress callbacks.
 
-Run the normal native build and all five CTest registrations. This Work runtime
-has no CMake/Qt, so executable results are recorded in the implementation PR's
-CI validation record. Interactive macOS/native-picker testing, private recordings
-and hardware export validation are separate and are not implied by hosted CI.
+Run the normal native build and all five CTest registrations. Automatic-analysis
+regressions cover name validation, partial failure, duplicates, append/reopen,
+cancellation, source-generation invalidation, dirty-state protection, production
+Analysis QML, OUT/LAP/IN boundaries, unknown classification, malformed UTC metadata,
+chronological ordering, source identity rejection and stale list results. See [testing](testing.md) for actual local validation scope; native
+picker, private recordings and hardware export results remain separate from CI.

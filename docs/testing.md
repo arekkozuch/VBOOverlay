@@ -246,6 +246,36 @@ of 0.010323 s (VBO) and 0.007576 s (RCZ). VBO parsing reported 13,819 samples,
 49 channels and no warnings. This iteration did not run a private GoPro decode,
 synchronization or final recording export acceptance.
 
+## September 12 whole-outing lap list acceptance
+
+The native macOS Debug build with Qt 6.11.1 passed
+`cmake --build build-native --parallel` and
+`ctest --test-dir build-native --output-on-failure`: all five registrations,
+310 Qt Test passes and six optional private-fixture skips. The local VideoToolbox
+ten-bit/full-range integration passed; hardware tests were not disabled.
+
+Synthetic regressions cover automatic import through the production Analysis QML,
+partial failure, duplicate handling, cancellation and stale generations, plus a
+reverse-imported morning/afternoon outing sorted into ten OUT/LAP/IN sections.
+Save/reopen preserves the derived list; missing and replaced sources are reported
+without rejecting the document, and stale worker completion cannot refill a new
+document. Parser cases include malformed/missing UTC metadata and midnight;
+matching cases cover dated coordinate conventions and ambiguous alternatives.
+
+Separately, a temporary native Qt Test harness loaded production Main/Analysis
+with isolated settings on Cocoa/Metal. It clicked Lap Analysis, entered an outing
+name containing spaces and submitted the private VBO/RCZ pair at the selected-files
+boundary. The result was one run, VBO primary with RCZ retained, and seven rows:
+OUT, five complete LAPs, IN. All 32 compared GPS points matched within 1.26 m after
+accounting for the export coordinate conventions and absolute sample times.
+Screenshots were inspected at the normal window size and 760×480, including
+scrolling to the final IN row. The native OS file picker itself was not exercised.
+Private recordings, temporary harnesses and screenshots are not committed.
+
+This validates boundary-fragment classification; it does not establish pit-lane
+or intermediate-pause detection. No fresh real-GoPro synchronization or private
+recording export was performed for this iteration.
+
 ## Candidate acceptance
 
 See [beta-acceptance.md](beta-acceptance.md) for supported scope, archive identity, installation prerequisites, the real-media walkthrough and required evidence. Passing a hosted startup check with the build SDK hidden is useful deployment evidence; it does not replace testing on a clean physical machine or using the final hardware encoder.

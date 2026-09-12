@@ -29,7 +29,8 @@ ApplicationWindow {
     property int editorVisibility: Window.Windowed
     property bool fullScreenControlsVisible: false
     property bool fullScreenScrubbing: false
-    property bool welcomeVisible: !appController.projectPath && !appController.videoName
+    property bool welcomeVisible: appController.projectPath.toString().length === 0
+        && !appController.videoName && appController.eventRuns.length === 0
     property int selectedWidgetIndex: -1
     property var selectedWidgetIndices: []
     property var widgetCatalog: [
@@ -509,7 +510,7 @@ ApplicationWindow {
                 onTriggered: window.toggleFullScreen()
             }
             Action {
-                text: qsTr("Telemetry Analysis")
+                text: qsTr("Lap Analysis")
                 checkable: true
                 checked: appController.analysisVisible
                 shortcut: "Ctrl+Shift+A"
@@ -2463,7 +2464,7 @@ ApplicationWindow {
                 spacing: 5
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: qsTr("Turn a drive into a finished telemetry overlay")
+                    text: qsTr("Your track day, in detail")
                     color: "#f2f6fb"
                     font.family: "Helvetica Neue"
                     font.pixelSize: 25
@@ -2471,9 +2472,20 @@ ApplicationWindow {
                 }
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: qsTr("Choose the clip and telemetry for this export. Nothing else gets in the way.")
+                    text: qsTr("Analyse your laps or create a telemetry overlay.")
                     color: "#8290a1"
                     font.pixelSize: 12
+                }
+            }
+
+            FeButton {
+                objectName: "welcomeLapAnalysis"
+                Layout.fillWidth: true
+                text: qsTr("Lap Analysis  →")
+                accent: true
+                onClicked: {
+                    window.welcomeVisible = false;
+                    appController.analysisVisible = true;
                 }
             }
 
@@ -2604,7 +2616,7 @@ ApplicationWindow {
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: qsTr("Resume a configured v2 project")
+                            text: qsTr("Resume a saved outing or overlay")
                             color: "#718092"
                             wrapMode: Text.WordWrap
                             font.pixelSize: 10

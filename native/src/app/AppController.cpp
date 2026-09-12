@@ -317,6 +317,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
         }
     });
     initializeBatchImport();
+    initializeOutingLaps();
     retireLegacyDocumentSettings();
     restoreStartupState();
 }
@@ -329,11 +330,13 @@ AppController::~AppController()
     sourceShutdown.start();
     while (sourceShutdown.elapsed() < 2'000
            && (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
-               || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning())) {
+               || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
+               || m_outingLapWatcher.isRunning())) {
         QThread::msleep(10);
     }
     if (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
-        || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()) {
+        || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
+        || m_outingLapWatcher.isRunning()) {
         AppLog::warn(QStringLiteral("Source worker shutdown exceeded the bounded wait"));
     }
     if (exporting()) {
@@ -865,7 +868,7 @@ quint64 AppController::beginSourceGeneration()
 void AppController::cancelSourceJobs()
 {
     for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
-                                     m_projectLoadCancellation, m_syncCancellation}) {
+                                     m_projectLoadCancellation, m_syncCancellation, m_outingLapCancellation}) {
         if (cancellation) {
             cancellation->store(true);
         }
