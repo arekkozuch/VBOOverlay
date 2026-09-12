@@ -125,6 +125,11 @@ configurations and define a review UI. No source wins on extension alone.
 
 ## Next slices and acceptance gates
 
+Slice 3 now includes the native multi-file picker and transactional review,
+explicit source grouping, new event creation and append. See
+[batch import workflow and limitations](batch-import.md). Folder discovery and
+drag/drop remain follow-ups; this does not implement event-wide statistics.
+
 Slice 2 is now implemented as development `.fetproject` v3 with a run-local
 source/sync model and an Active run selector in Analysis. See
 [event project format and macOS fixture walkthrough](event-project-format.md).
@@ -160,4 +165,5 @@ system package setup was permission-blocked. The user authorized a development
 branch and PR so the existing CI can compile and execute tests. Do not report a
 native pass until its workflow actually passes. A hosted test pass does not
 validate private recordings, interactive macOS UI or physical VideoToolbox
-hardware. No merge or release is authorized by this iteration.
+hardware. The owner now authorizes merging development PRs after all required
+CI checks pass. Releases remain outside this authorization.

@@ -20,6 +20,7 @@ target_link_libraries(flappedear_probe_test_helper PRIVATE Qt6::Core)
 flappedear_enable_warnings(flappedear_probe_test_helper)
 
 qt_add_executable(flappedear_native_tests
+    ../src/app/AppControllerImport.cpp
     TelemetryTests.cpp
     ../src/app/AppController.cpp
     ../src/app/AppController.h
@@ -44,6 +45,7 @@ target_compile_definitions(flappedear_native_tests PRIVATE
     GUI_SESSION_LOCK_HELPER_PATH="$<TARGET_FILE:flappedear_gui_session_lock_helper>"
     TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/basic.vbo"
     ANALYSIS_PANEL_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/AnalysisPanel.qml"
+    BATCH_IMPORT_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/BatchImportDialog.qml"
     TRACK_WIDGET_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/widgets/TrackWidget.qml"
     RAW_TRANSPORT_CONSUMER_PATH="$<TARGET_FILE:flappedear_raw_transport_consumer>"
     PROBE_TEST_HELPER_PATH="$<TARGET_FILE:flappedear_probe_test_helper>"
