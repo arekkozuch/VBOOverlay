@@ -107,7 +107,14 @@ Rectangle {
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
                     }
-                    Label { text: row.modelData.runName; Layout.fillWidth: true; color: "#dce4ee"; font.pixelSize: 12; elide: Text.ElideMiddle }
+                    Label {
+                        text: row.modelData.runName + (row.modelData.referenceIssue ? " · " + row.modelData.referenceIssue
+                            : row.modelData.bestOfRun ? qsTr(" · Best of run") : "")
+                        Layout.fillWidth: true
+                        color: row.modelData.referenceIssue ? "#d6a457" : "#dce4ee"
+                        font.pixelSize: 12
+                        elide: Text.ElideMiddle
+                    }
                     Label { text: root.duration(row.modelData.durationSeconds); Layout.preferredWidth: 92; horizontalAlignment: Text.AlignRight; color: "#f2f6fb"; font.family: "Menlo"; font.pixelSize: 12 }
                 }
             }

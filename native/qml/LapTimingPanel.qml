@@ -14,6 +14,7 @@ Rectangle {
             kind: "lap", label: qsTr("Lap %1").arg(lap.number),
             durationSeconds: lap.durationSeconds,
             deltaToBestSeconds: lap.deltaToBestSeconds, isBest: lap.isBest,
+            hasDelta: lap.hasDelta, referenceIssue: lap.referenceIssue,
             seekMilliseconds: appController.videoMillisecondsForTelemetryTime(lap.startTelemetryTime)
         }));
     }
@@ -113,14 +114,14 @@ Rectangle {
                     }
                     Label {
                         visible: lapRow.isTimedLap
-                        text: root.delta(lapRow.modelData.deltaToBestSeconds)
+                        text: lapRow.modelData.hasDelta ? root.delta(lapRow.modelData.deltaToBestSeconds) : "—"
                         color: lapRow.modelData.isBest ? "#55e6a5" : "#ffb84d"
                         font.family: "Menlo"
                         font.pixelSize: 10
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: lapRow.seekMilliseconds >= 0 ? "▶" : qsTr("Outside video")
+                        text: lapRow.modelData.referenceIssue || (lapRow.seekMilliseconds >= 0 ? "▶" : qsTr("Outside video"))
                         color: lapRow.seekMilliseconds >= 0 ? "#6f8295" : "#465463"
                         font.pixelSize: 9
                     }

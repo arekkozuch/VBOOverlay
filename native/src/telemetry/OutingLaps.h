@@ -15,6 +15,9 @@ struct OutingLapRow {
     double end = 0;
     std::optional<qint64> timestampMilliseconds;
     qsizetype sourceOrder = 0;
+    bool referenceEligible = false;
+    LapReferenceIssue referenceIssue = LapReferenceIssue::None;
+    bool bestOfRun = false;
 };
 
 inline constexpr qsizetype maximumOutingLapRows = 20'000;

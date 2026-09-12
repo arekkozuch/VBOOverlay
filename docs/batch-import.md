@@ -1,5 +1,14 @@
 # Flapped Ear Telemetry: outings and multi-file import
 
+Product scope and delivery status: [vision](product-vision.md),
+[audit and milestones](product-delivery.md).
+
+Lap quality: start-to-start measured times remain visible even with incomplete
+GPS. Such laps carry a GPS warning, are excluded from spatial references and do
+not show a numeric delta or BEST badge. Best-of-run badges use GPS-continuous
+laps only; they do not establish cross-run layout/conditions compatibility or
+automatically detect pit visits. Event-wide ranking is still pending.
+
 ## Which format should I export from RaceChrono?
 
 **Use VBO for analysis with RaceChrono's calculated lateral and longitudinal G.**

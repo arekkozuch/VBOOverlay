@@ -2,6 +2,10 @@
 
 Flapped Ear Telemetry is one native Qt 6 application for overlay editing/generation and telemetry analysis. C++ owns telemetry, media, project, synchronization, and export behavior; QML presents the editor and the reusable telemetry scene.
 
+The [product vision](product-vision.md) defines the full intended analytical workflow;
+the [delivery plan](product-delivery.md) distinguishes implementation from remaining
+work and acceptance. This document describes the current module boundaries.
+
 ```mermaid
 flowchart TD
   A["Video + VBO/RCZ + project"] --> B[AppController]
@@ -38,6 +42,15 @@ Project open first performs bounded file reading, JSON parsing, and structural v
 
 `ProjectSourceReferenceCodec` owns the v2 source-reference migration, project-relative resolution, absolute fallback, serialization, and lightweight fingerprints. The current schema and compatibility rules are in [project-format.md](project-format.md).
 
+Event projects use the development v3 schema and `EventProjectCodec`: one event
+contains stable run/source identities, one primary telemetry source per run,
+optional alternatives, and run-local video references and synchronization.
+The selected run is projected into the existing editor interface; saves fold its
+state back into the authoritative event and preserve inactive runs. Ordinary v2
+single-recording projects remain supported. See [event project format](event-project-format.md)
+for save/recovery/relink behavior and limits. Lap rows carry their owning run;
+derived lap numbers are not permanent annotation identities across source or gate changes.
+
 ## Source loading
 
 Video metadata probing uses `MediaProbe`/`ffprobe`; `TelemetrySource::load` dispatches VBO/RCZ and parses telemetry and builds `TrackGeometry`. Standalone loads, resolved project sources, and relink candidates run asynchronously. Their independent states are `idle`, `loading`, `ready`, `missing`, `mismatch`, or `error`. A relink candidate is probed/parsed before commit; a fingerprint mismatch is held outside committed state until the user explicitly accepts replacement.
@@ -46,17 +59,29 @@ Each source operation begins a new source generation and uses normalized source 
 
 ## Telemetry
 
-`TelemetryImportPlan` adds a review-only multi-file worker API on top of
-`TelemetrySource` and `deriveSourceLapSession`. It retains independent immutable
-recordings and source-derived lap results, reports exact duplicates and file
-errors, and exposes possible cross-format GPS matches without merging them.
-It is not wired into `AppController` or QML yet, so existing source generations,
-project format and export ownership remain unchanged. The [event delivery plan](event-analysis-plan.md)
-defines the limits, evidence heuristics and next integration/migration gates.
+`TelemetryImportPlan` supplies the bounded multi-file preparation API used by
+`AppControllerImport` and the QML import workflows. It retains independent
+immutable recordings and source-derived laps, reports exact duplicates and
+per-file errors, and exposes cross-format matching evidence. Advanced review
+supports explicit grouping; outing import chooses VBO for unique RCZ/VBO pairs
+supported by recording-date/time and GPS evidence. Ambiguous candidates remain
+separate. A source group retains alternatives, not fused channels. Final source
+verification, cancellation and document/source context checks precede committing
+an event. The [import workflow](batch-import.md) and [event delivery plan](event-analysis-plan.md)
+describe the remaining boundaries.
+
+`AppControllerOuting` loads primary sources under fingerprint, cancellation and
+generation guards to build the event's chronological OUT/LAP/IN rows. Unknown
+recording times remain explicit and sort after dated rows in import order.
+Opening a row loads an independent, bounded detail session for its telemetry
+range; `OutingLapDetailPanel` presents channels and a map with a shared cursor.
+This inspection does not replace the editor's active run or its video transform.
+Event statistics, independent A/B distance alignment, sectors and time-loss
+analysis are not implemented by this list/detail boundary.
 
 `VboParser` performs bounded chunked file reads, reads VBO sections, resolves standard channel aliases, normalizes supported coordinate formats, parses bounded RaceChrono timing-gate metadata, and produces a `TelemetrySession`. It rejects files above 128 MiB, more than 1,000,000 lines or 500,000 data rows, more than 512 columns, lines above 1 MiB, and fields above 64 KiB before the corresponding unbounded work. These limits leave substantial headroom over the validated 32,718-row, 49-channel fixture while preventing multi-GiB allocation patterns. `TelemetrySession` performs time-based channel lookup and interpolation, with one lazily cached median positive interval per immutable channel for O(1) cadence-gap thresholds after first use. `TrackGeometry` derives an offline normalized track outline from valid latitude/longitude samples and cooperatively checks cancellation in bounded batches.
 
-`LapTiming` consumes the immutable raw session and one unambiguous source Start gate on the existing VBO worker. It derives same-direction gate passages, complete laps, fastest-lap state, and per-lap metric traces under the same cancellation generation. `VboLoadResult` commits the session, track geometry, and `LapSession` atomically. `AppController` exposes bounded lap summaries and owns telemetry-to-video conversion for lap-start seeking; QML never performs synchronization arithmetic. Recent lap code is implemented but still awaits the deferred deterministic, macOS runtime, and private-fixture validation pass.
+`LapTiming` consumes the immutable raw session and one unambiguous source Start gate on the existing VBO worker. It derives same-direction gate passages, complete laps, fastest-lap state, and per-lap metric traces under the same cancellation generation. `VboLoadResult` commits the session, track geometry, and `LapSession` atomically. `AppController` exposes bounded lap summaries and owns telemetry-to-video conversion for lap-start seeking; QML never performs synchronization arithmetic. Complete laps remain visible without video coverage. Automated and private-fixture evidence is recorded in [current state](../currentstate.md); it does not replace exact-candidate macOS acceptance.
 
 `TelemetryRenderContext` combines a session, optional track geometry, optional lap session, and the central `SyncTransform`. Its telemetry time is `videoTime * timeScale + offset`; preview and export both use this context. The context converts normalized track points to its cached QML representation exactly when `setTrackGeometry()` is called and publishes a dedicated geometry revision; time updates do not rebuild that cache. It is also the presentation boundary: bounded holding and small channel-specific smoothing windows apply there only. Live lap delta maps current raw GPS position to a bounded time-local region of the best completed lap trace, while current/reference speed share the ordinary presentation policy. `AppController` obtains analysis segments directly from raw `TelemetrySession` samples, retaining the nested segment→point shape across the QML boundary so charts preserve gaps and extrema and never inherit overlay filtering. An individual non-overlapping row explicitly reports no data rather than looking like a paint failure. The full behavioral contract is in [telemetry-semantics.md](telemetry-semantics.md).
 

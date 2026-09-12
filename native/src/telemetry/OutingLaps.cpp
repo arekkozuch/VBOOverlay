@@ -24,11 +24,18 @@ QVector<OutingLapRow> outingLapRows(const TelemetrySession &session, const LapSe
     if (laps.timedLaps.size() > maximumOutingLapRows - 2)
         throw ResourceLimitError("Too many lap sections in this recording.");
     const auto origin = recordingTimestamp(session);
-    const auto append = [&](LapSectionType type, int number, double start, double end) {
+    const auto append = [&](LapSectionType type, int number, double start, double end, const TimedLap *lap = nullptr) {
         throwIfCancelled(cancelled);
         if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end > session.duration || end <= start)
             return;
         OutingLapRow row{runId, runName, type, number, start, end, {}, sourceOrder};
+        if (lap) {
+            row.referenceEligible = lap->referenceEligible();
+            row.referenceIssue = lap->referenceIssue;
+            row.bestOfRun = lap->referenceEligible() && laps.fastestLapIndex && *laps.fastestLapIndex >= 0
+                && *laps.fastestLapIndex < laps.timedLaps.size()
+                && laps.timedLaps[*laps.fastestLapIndex].number == lap->number;
+        }
         const double milliseconds = start * 1000.0;
         if (origin && milliseconds < static_cast<double>(std::numeric_limits<qint64>::max())) {
             const auto delta = static_cast<qint64>(std::llround(milliseconds));
@@ -43,7 +50,7 @@ QVector<OutingLapRow> outingLapRows(const TelemetrySession &session, const LapSe
     }
     append(LapSectionType::Out, 0, 0, laps.acceptedPasses.first().telemetryTime);
     for (const auto &lap : laps.timedLaps)
-        append(LapSectionType::Lap, lap.number, lap.startTelemetryTime, lap.endTelemetryTime);
+        append(LapSectionType::Lap, lap.number, lap.startTelemetryTime, lap.endTelemetryTime, &lap);
     append(LapSectionType::In, 0, laps.acceptedPasses.last().telemetryTime, session.duration);
     return rows;
 }

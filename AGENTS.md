@@ -2,6 +2,9 @@
 
 ## Engineering rules
 
+- Follow the [task delivery workflow](docs/development-workflow.md): one active Jira
+  task, a focused PR, passing native CI, integration and a verified `main` before
+  marking implementation complete. All Jira content must be in English.
 - Treat Qt 6, C++, and QML as the only production application architecture.
 - Preserve the native `.fetproject` schema and behavioral test fixtures.
 - Use C++20, Qt Test, CMake targets, compiler warnings, and explicit ownership in native code.

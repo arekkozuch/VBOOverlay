@@ -180,7 +180,38 @@ std::optional<GpsSample> gpsSampleAt(
     return GpsSample{latitudeTime, {projected.eastMeters, projected.northMeters}};
 }
 
-void deriveTimedLaps(LapSession &result)
+LapReferenceIssue referenceIssueForLap(const TelemetrySession &session, const TimedLap &lap,
+    const GeoCoordinate &origin, const CancellationCheck &cancelled)
+{
+    const auto latitude = session.channels.constFind(session.aliases.value("latitude"));
+    const auto longitude = session.channels.constFind(session.aliases.value("longitude"));
+    if (latitude == session.channels.cend() || longitude == session.channels.cend()
+        || latitude->timestamps.size() != latitude->values.size()
+        || longitude->timestamps.size() != longitude->values.size()
+        || latitude->timestamps.size() != longitude->timestamps.size()
+        || latitude->timestamps.isEmpty()) return LapReferenceIssue::InvalidGps;
+    const auto &times = latitude->timestamps;
+    auto first = std::lower_bound(times.cbegin(), times.cend(), lap.startTelemetryTime);
+    if (first != times.cbegin() && (first == times.cend() || *first > lap.startTelemetryTime)) --first;
+    const auto last = std::lower_bound(first, times.cend(), lap.endTelemetryTime);
+    if (first == times.cend() || *first > lap.startTelemetryTime || last == times.cend())
+        return LapReferenceIssue::GpsGap;
+    const double threshold = std::min(telemetryGapThreshold(*latitude), telemetryGapThreshold(*longitude));
+    std::optional<double> previous;
+    for (auto it = first; it <= last; ++it) {
+        const qsizetype index = std::distance(times.cbegin(), it);
+        if ((index & 0xff) == 0) throwIfCancelled(cancelled);
+        const auto sample = gpsSampleAt(*latitude, *longitude, index, origin);
+        if (!sample) return LapReferenceIssue::InvalidGps;
+        if (previous && (sample->time <= *previous || threshold <= 0.0 || sample->time - *previous > threshold))
+            return LapReferenceIssue::GpsGap;
+        previous = sample->time;
+    }
+    return LapReferenceIssue::None;
+}
+
+void deriveTimedLaps(const TelemetrySession &session, LapSession &result,
+    const GeoCoordinate &origin, const CancellationCheck &cancelled)
 {
     for (qsizetype index = 1; index < result.acceptedPasses.size(); ++index) {
         const double start = result.acceptedPasses[index - 1].telemetryTime;
@@ -192,17 +223,19 @@ void deriveTimedLaps(LapSession &result)
         }
         result.timedLaps.append({
             static_cast<int>(result.timedLaps.size() + 1), start, end, duration, 0.0});
+        auto &lap = result.timedLaps.last();
+        lap.referenceIssue = referenceIssueForLap(session, lap, origin, cancelled);
     }
     if (result.timedLaps.isEmpty()) return;
-    qsizetype fastest = 0;
-    for (qsizetype index = 1; index < result.timedLaps.size(); ++index) {
-        if (result.timedLaps[index].durationSeconds
-            < result.timedLaps[fastest].durationSeconds) {
-            fastest = index;
+    for (qsizetype index = 0; index < result.timedLaps.size(); ++index) {
+        if (result.timedLaps[index].referenceEligible()
+            && (!result.fastestLapIndex || result.timedLaps[index].durationSeconds
+                < result.timedLaps[*result.fastestLapIndex].durationSeconds)) {
+            result.fastestLapIndex = index;
         }
     }
-    result.fastestLapIndex = fastest;
-    const double fastestDuration = result.timedLaps[fastest].durationSeconds;
+    if (!result.fastestLapIndex) return;
+    const double fastestDuration = result.timedLaps[*result.fastestLapIndex].durationSeconds;
     for (TimedLap &lap : result.timedLaps) {
         lap.deltaToBestSeconds = lap.durationSeconds - fastestDuration;
     }
@@ -247,6 +280,7 @@ void buildLapTraces(
     result.lapTraces.reserve(result.timedLaps.size());
     for (const TimedLap &lap : result.timedLaps) {
         throwIfCancelled(cancelled);
+        if (!lap.referenceEligible()) continue;
         LapTrace trace{lap.number, lap.startTelemetryTime, lap.durationSeconds, {}};
         appendCoordinate(trace, lap.startTelemetryTime);
         auto latitudeTime = std::upper_bound(
@@ -446,7 +480,7 @@ LapSession detectLaps(
         result.status = LapSessionStatus::NoUsableGps;
         return result;
     }
-    deriveTimedLaps(result);
+    deriveTimedLaps(session, result, origin, cancelled);
     if (result.acceptedPasses.isEmpty()) {
         result.status = LapSessionStatus::NoAcceptedPasses;
     } else if (result.timedLaps.isEmpty()) {

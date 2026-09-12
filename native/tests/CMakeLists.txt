@@ -80,6 +80,16 @@ target_compile_definitions(flappedear_event_project_tests PRIVATE
 )
 flappedear_enable_warnings(flappedear_event_project_tests)
 add_test(NAME flappedear_event_project_tests COMMAND flappedear_event_project_tests)
+qt_add_executable(flappedear_lap_eligibility_tests LapEligibilityTests.cpp)
+target_compile_features(flappedear_lap_eligibility_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_lap_eligibility_tests PRIVATE flappedear_core Qt6::Test)
+flappedear_enable_warnings(flappedear_lap_eligibility_tests)
+add_test(NAME flappedear_lap_eligibility_tests COMMAND flappedear_lap_eligibility_tests)
+qt_add_executable(flappedear_export_log_tests PersistentExportLogTests.cpp)
+target_compile_features(flappedear_export_log_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_export_log_tests PRIVATE flappedear_core Qt6::Test)
+flappedear_enable_warnings(flappedear_export_log_tests)
+add_test(NAME flappedear_export_log_tests COMMAND flappedear_export_log_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES
     # Startup checks QML loading and controller/window lifecycle. Offscreen QPA
