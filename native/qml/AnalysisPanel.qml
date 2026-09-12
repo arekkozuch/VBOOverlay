@@ -30,6 +30,39 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
+            visible: appController.eventRuns.length > 0
+            spacing: 8
+            Label {
+                text: appController.eventName
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                color: "#dce4ee"
+                font.pixelSize: 12
+            }
+            Label {
+                text: qsTr("Active run")
+                color: "#8d9aaa"
+                font.pixelSize: 11
+            }
+            FeComboBox {
+                id: runPicker
+                objectName: "eventRunPicker"
+                Layout.preferredWidth: 230
+                implicitHeight: 30
+                model: appController.eventRuns.map(run => run.name)
+                currentIndex: appController.eventRuns.findIndex(run => run.id === appController.activeRunId)
+                enabled: !appController.projectLoading && !appController.exporting
+                    && !appController.recoveryPending && appController.pendingDestructiveAction === ""
+                onActivated: index => {
+                    appController.selectEventRun(appController.eventRuns[index].id);
+                    // Restore the authoritative selection even if a guarded switch was refused.
+                    currentIndex = Qt.binding(() => appController.eventRuns.findIndex(run => run.id === appController.activeRunId));
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
             spacing: 8
             Label {
                 text: qsTr("TELEMETRY ANALYSIS")

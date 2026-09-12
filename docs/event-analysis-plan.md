@@ -125,6 +125,14 @@ configurations and define a review UI. No source wins on extension alone.
 
 ## Next slices and acceptance gates
 
+Slice 2 is now implemented as development `.fetproject` v3 with a run-local
+source/sync model and an Active run selector in Analysis. See
+[event project format and macOS fixture walkthrough](event-project-format.md).
+The owner authorized schema evolution without a legacy-data migration burden.
+The existing v2 single-recording path remains; event creation/batch review is
+still slice 3. Validation results belong to the implementation PR, not these
+implementation checkboxes.
+
 | Slice | Scope | Required acceptance |
 | --- | --- | --- |
 | 2 — persisted event model | Event/Run/Lap identity, source groups, active editor run, optional per-run video binding; explicit project-version/migration decision | Existing v2 projects open unchanged; event save/open/recovery round trip; missing/relinked sources preserve other runs; conflicting legacy active-source projection cannot silently overwrite event state |

@@ -1,4 +1,5 @@
 #include "project/ProjectLimits.h"
+#include "project/EventProjectCodec.h"
 
 #include <QJsonArray>
 
@@ -60,7 +61,10 @@ bool validateWidgets(const QJsonArray &widgets, QString *error)
 bool validateProject(const QJsonObject &project, QString *error)
 {
     if (!validateValue(project, 0, error)) return false;
-    if (project.value(QStringLiteral("version")).toInt() != 2) return fail(error, QStringLiteral("Unsupported project version."));
+    const double version = project.value(QStringLiteral("version")).toDouble();
+    if (version != 2.0 && version != 3.0) return fail(error, QStringLiteral("Unsupported project version."));
+    if (version == 3.0 && !EventProjectCodec::validate(project, error)) return false;
+    if (version == 2.0 && project.contains(QStringLiteral("event"))) return fail(error, QStringLiteral("Events require project version 3."));
     const QJsonValue sceneValue = project.value(QStringLiteral("scene"));
     if (!sceneValue.isObject() || !sceneValue.toObject().value(QStringLiteral("widgets")).isArray()) {
         return fail(error, QStringLiteral("Project scene/widgets structure is missing."));

@@ -91,6 +91,8 @@ qt_add_library(flappedear_core STATIC
     src/project/ProjectRecoveryStore.h
     src/project/ProjectSourceReference.cpp
     src/project/ProjectSourceReference.h
+    src/project/EventProjectCodec.cpp
+    src/project/EventProjectCodec.h
     src/sync/TelemetrySyncEngine.cpp
     src/sync/TelemetrySyncEngine.h
     src/telemetry/TelemetrySession.cpp

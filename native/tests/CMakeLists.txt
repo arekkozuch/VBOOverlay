@@ -25,7 +25,7 @@ qt_add_executable(flappedear_native_tests
     ../src/app/AppController.h
 )
 target_compile_features(flappedear_native_tests PRIVATE cxx_std_20)
-target_link_libraries(flappedear_native_tests PRIVATE flappedear_core Qt6::Concurrent Qt6::Gui Qt6::Multimedia Qt6::Test ZLIB::ZLIBSTATIC)
+target_link_libraries(flappedear_native_tests PRIVATE flappedear_core Qt6::Concurrent Qt6::Gui Qt6::Multimedia Qt6::QuickControls2 Qt6::Test ZLIB::ZLIBSTATIC)
 flappedear_enable_warnings(flappedear_native_tests)
 qt_add_resources(flappedear_native_tests "flappedear_test_qml"
     PREFIX "/qt/qml/FlappedEar/qml"
@@ -43,6 +43,7 @@ qt_add_resources(flappedear_native_tests "flappedear_test_qml"
 target_compile_definitions(flappedear_native_tests PRIVATE
     GUI_SESSION_LOCK_HELPER_PATH="$<TARGET_FILE:flappedear_gui_session_lock_helper>"
     TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/basic.vbo"
+    ANALYSIS_PANEL_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/AnalysisPanel.qml"
     TRACK_WIDGET_QML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../qml/widgets/TrackWidget.qml"
     RAW_TRANSPORT_CONSUMER_PATH="$<TARGET_FILE:flappedear_raw_transport_consumer>"
     PROBE_TEST_HELPER_PATH="$<TARGET_FILE:flappedear_probe_test_helper>"
@@ -60,6 +61,14 @@ target_compile_features(flappedear_import_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_import_tests PRIVATE flappedear_core Qt6::Test ZLIB::ZLIBSTATIC)
 flappedear_enable_warnings(flappedear_import_tests)
 add_test(NAME flappedear_import_tests COMMAND flappedear_import_tests)
+qt_add_executable(flappedear_event_project_tests EventProjectTests.cpp EventProjectFixture.h)
+target_compile_features(flappedear_event_project_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_event_project_tests PRIVATE flappedear_core Qt6::Test)
+target_compile_definitions(flappedear_event_project_tests PRIVATE
+    EVENT_PROJECT_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/event-demo.fetproject"
+)
+flappedear_enable_warnings(flappedear_event_project_tests)
+add_test(NAME flappedear_event_project_tests COMMAND flappedear_event_project_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES
     # Startup checks QML loading and controller/window lifecycle. Offscreen QPA
