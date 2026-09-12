@@ -839,7 +839,10 @@ Item {
     QVERIFY2(root, qPrintable(component.errorString()));
     const auto dots = root->findChildren<QQuickItem *>(QStringLiteral("gForceDot"));
     QCOMPARE(dots.size(), 2);
-    for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 < 120);
+    for (auto *dot : dots) {
+        QVERIFY(dot->isVisible());
+        QVERIFY(dot->y() + dot->height() / 2 < 120);
+    }
     root->setProperty("acceleration", 0.5);
     for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 > 120);
     root->setProperty("inverted", true);

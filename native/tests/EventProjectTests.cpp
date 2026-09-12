@@ -175,6 +175,9 @@ void EventProjectTests::prefersMovedRelativeSourceToStaleAbsoluteFallback()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
+    // Save As requires an existing destination directory. Resolve its real path
+    // too on macOS, where the temporary root can be reached through /var.
+    QVERIFY(QDir().mkpath(directory.filePath("new")));
     const QString actual = directory.filePath("a.vbo");
     QFile file(actual); QVERIFY(file.open(QIODevice::WriteOnly)); file.close();
     const auto json = EventProjectCodec::referenceForSave(

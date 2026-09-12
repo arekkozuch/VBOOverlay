@@ -3,11 +3,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
+    id: root
     property var frame: parent.frame
     anchors.fill: parent
     GForceData {
         id: gForce
-        frame: parent.frame
+        frame: root.frame
     }
     property real range: Math.max(0.1, Number(frame.widgetSettings.gRange ?? 2))
     Rectangle {
