@@ -1,23 +1,27 @@
-# Single-session beta acceptance
+# macOS product candidate acceptance
 
-Updated 11 September 2026. Status: internal candidate preparation; invited beta is
-not approved until the checks below have results for the exact delivered archive.
-Application version remains 0.2.0. Multi-session work is deferred.
+Updated 12 September 2026. Internal candidates are not approved for distribution
+until the exact delivered archive passes acceptance. Version remains 0.2.0.
+The old single-session-only product scope is superseded by
+[the full product contract](product-vision.md) and [delivery ledger](product-delivery.md).
 
-## Scope
+## Scope and evidence
 
-One MP4/MOV video and one VBO or uninterrupted version-1 RCZ telemetry session per
-project. Candidate targets are macOS ARM64 and Windows x64, Qt 6.8.3. Advertise only
-the OS versions and hardware configurations actually entered in the acceptance record.
-Cloud runner OS versions are build/test environments, not a declared user-support matrix.
+The requested product is one Mac application for whole-day event analysis and
+video overlay editing/export. An event contains multiple runs with optional
+run-local video/sync. Current video handling still supports one file per run;
+chapter assembly and advanced analysis remain tracked capabilities, not implied
+by event persistence. First core and full-vision acceptance are distinct.
 
-Export supports the documented 8-bit/10-bit SDR policy. HDR/Log, non-zero rotation
-and non-square sample aspect ratio are rejected at export preflight. RCZ support and
-channel limitations are listed in [rcz-format.md](rcz-format.md). Identified RaceChrono
-Pro 10.2.4 VBO gates use verified centre/direction conversion; other identified RaceChrono
-versions retain telemetry but omit unverified gates with a warning. Generic VBO gate
-endpoints retain their existing interpretation. Multiple videos, resumed/multiple RCZ
-sessions, sectors and theoretical best laps are outside this beta scope.
+The delivery ledger's end-to-end checklist is mandatory for core completion.
+The existing installation/export/recovery procedures below remain useful gates;
+they do not by themselves prove A/B, corner analysis or reports are implemented.
+Existing Windows CI remains regression coverage, while new product focus is Mac.
+
+Advertise only OS/hardware combinations actually recorded for the candidate.
+Supported SDR/color and RCZ restrictions remain in their implementation contracts.
+HDR/Log and non-zero rotation/non-square SAR exports currently fail preflight;
+no broader support or public release is claimed by this document.
 
 ## Candidate builds
 

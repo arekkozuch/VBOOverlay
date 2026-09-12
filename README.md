@@ -4,17 +4,21 @@ Flapped Ear Telemetry is one native desktop application for video telemetry over
 
 ## Status
 
-The Qt 6/C++20/QML application is preparing a single-session invited beta. It remains unapproved for beta distribution until the exact candidate completes [beta acceptance](docs/beta-acceptance.md). Native RCZ import and the eight numbered shipping-review fixes are implemented. Manual timing edits now invalidate pending auto-sync results; the verified RaceChrono Pro 10.2.4 VBO gate conversion recovers the supplied recording's five laps. See [current state](currentstate.md) for evidence and outstanding work.
+The Qt 6/C++20/QML application combines a working overlay editor/export pipeline with macOS-first track-day analysis under development. Event import, a chronological outing lap list and interactive individual-lap details are implemented; cross-run A/B comparison, corner analysis and automatic time-loss reports remain unfinished. The [product vision](docs/product-vision.md) preserves the complete intended scope, and the [delivery plan](docs/product-delivery.md) tracks remaining work and acceptance. Distribution still requires the exact candidate's [acceptance evidence](docs/beta-acceptance.md). See [current state](currentstate.md) for implementation and validation boundaries.
 
 ## Current capabilities
 
-Event/multi-run analysis is now in macOS-first development in this same application.
-The first slice adds a native, review-only VBO/RCZ batch import planner; the UI and
-saved projects still use one recording. See the [event analysis delivery plan](docs/event-analysis-plan.md)
-for scope, acceptance criteria and the next implementation slices.
+Saved events use **Event → Run → Lap**, with independent source references and
+video synchronization per run. Analysis can import a whole outing and list its
+OUT/LAP/IN segments chronologically when recording timestamps are available.
+Opening a row shows that segment's map and telemetry with a shared cursor,
+without requiring video. This is individual-lap inspection, not yet A/B or
+event-wide performance analysis. See the [event implementation plan](docs/event-analysis-plan.md).
 
 - MP4/MOV playback with timeline controls and preview overlays.
 - RaceChrono and VBOX VBO telemetry import, plus native single-session RaceChrono RCZ import ([supported format](docs/rcz-format.md)).
+- Multi-file outing import and advanced import review, duplicate/error reporting, persisted source groups, and event save/reopen. The outing workflow selects VBO for unique RCZ/VBO matches supported by recording-date/time and GPS evidence; ambiguous sources stay separate. Grouping retains alternatives without combining channels.
+- Chronological outing laps and interactive single-lap speed/G/channel detail with a synchronized map cursor; missing timestamps and source failures remain visible.
 - GoPro GPMF GPS extraction and GPS-speed auto synchronization.
 - A visual widget editor, projects, built-in layouts, and shareable templates. Both editor sidebars remain fully scrollable at the supported 1180×720 minimum size.
 - Lazily loaded synchronized telemetry analysis, including charts and a track view; its secondary decoder exists only while the Analysis window is open.

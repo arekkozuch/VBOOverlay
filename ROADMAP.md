@@ -1,6 +1,6 @@
 # Flapped Ear Telemetry roadmap
 
-Updated 12 September 2026. This roadmap tracks completed foundations and remaining work. Current evidence is in [currentstate.md](currentstate.md); the invited-beta gate is [beta acceptance](docs/beta-acceptance.md). Event/multi-run analysis is now requested for the same application, with macOS as the development focus; see the [delivery plan](docs/event-analysis-plan.md).
+Updated 12 September 2026. Full scope and delivery status are authoritative in [product vision](docs/product-vision.md) and [product delivery](docs/product-delivery.md). This technical checklist tracks foundations and remaining work; checked means implemented, not exact-candidate acceptance. Current evidence is in [currentstate.md](currentstate.md); the invited-beta gate is [beta acceptance](docs/beta-acceptance.md). Event/multi-run analysis is now requested for the same application, with macOS as the development focus; see the [delivery plan](docs/event-analysis-plan.md).
 
 ## Completed foundation
 
@@ -47,13 +47,13 @@ These additional audit findings remain open. Their effect on the advertised beta
 - [ ] Implement and validate color-managed HDR/HLG/PQ/Log preservation; current export rejects these sources without silent conversion.
 - [ ] Validate production 8K on representative renderer/encoder hardware; deterministic model and capability-decision coverage is complete.
 - [ ] Preserve rotation and sample-aspect-ratio display transforms end to end (probe/model retention is complete; export currently fails fast for non-zero rotation or non-square SAR rather than applying an implicit transform).
-- [x] Establish process-tree termination guarantees for FFmpeg/ffprobe (macOS/Unix runtime-tested; Windows validated on the known configuration above).
+- [x] Supervise live FFmpeg/ffprobe process trees on tested configurations; leader-exit descendant handling remains open above.
 - [x] Add disk-space preflight and manifest-owned temporary-file management policy, including representative FFV1 sampling.
 - [ ] Validate the QML preview/export result against broader real media.
 - [ ] Broaden Windows GPU/encoder and installed-dependency runtime coverage beyond the known configuration.
 - [ ] Validate heavy 4K export GUI responsiveness on Windows.
 - [ ] Add native Windows ACL-denied filesystem coverage and validate multi-instance export-log safety.
-- [x] Define single-session beta scope, reproducible candidate build procedure and exact-build acceptance record.
+- [x] Define candidate build/acceptance procedure; historical single-session scope superseded by the product contract.
 - [x] Add Debug/Release platform CI and internal Qt deployment with SDK-isolated startup and archive hashes.
 - [ ] Complete clean-machine and real-video acceptance on an identified candidate archive.
 - [ ] Finalize distribution notices/source access, signing/notarization, retained artifacts and installation UX.
@@ -64,20 +64,16 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 
 ### Event and multi-run analysis (macOS first)
 
-- [x] Native review-only batch import preparation: per-file results, immutable
-  telemetry/lap proposals, source provenance, full-content duplicate detection,
-  cancellation and aggregate budgets. UI behavior is unchanged.
-- [x] Conservative VBO/RCZ GPS-evidence candidates for user review, without
-  automatic merging or filename-based recording identity.
-- Verification gate: the new import target and existing regressions must pass
-  on the exact macOS PR head; [PR #7](https://github.com/arekkozuch/VBOOverlay/pull/7)
-  carries current CI status and validation evidence.
-- [ ] Persist Event → Run → Lap and source groups with explicit legacy-project
-  migration, recovery and relinking behavior.
-- [ ] Connect macOS multi-file/folder/drop import and transactional review.
-- [ ] Add event overview, compatible event best, run notes and cross-run comparison.
-- [ ] Add sectors, theoretical best, progression and evidence-based insights in
-  dependency order. See the delivery plan for acceptance gates and non-goals.
+- [x] Bounded batch preparation, provenance, duplicate detection and cancellation.
+- [x] Event v3 persistence, source groups, recovery and relinking.
+- [x] Native multi-file transactional import/review and create/append.
+- [x] Whole-outing chronological sections and independent single-section map/charts in PR #11 (CI/integration tracked in delivery ledger).
+- [ ] Folder import and drag/drop.
+- [ ] Compatible event best, run notes/exclusions and progression.
+- [ ] Independent A/B distance comparison and paired map/channels.
+- [ ] Reviewed sectors/corners, theoretical best, consistency and G-G.
+- [ ] Ranked time losses and automatic evidence-linked event report.
+- [ ] Remaining full-vision F00–F20 capabilities; see product contract rather than treating this abbreviated checklist as the entire scope.
 
 ### Native RaceChrono RCZ import
 

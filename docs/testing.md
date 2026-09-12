@@ -13,12 +13,14 @@ The native suite assigns a unique test application identity and checks a default
 
 ## Cloud CI
 
-[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Four jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application Qt Test suite, RCZ/parser suite and production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows Release also compiles NSIS and runs two install/uninstall cycles, checking payload hashes, per-user registration/shortcuts, SDK-hidden startup, overwrite rejection and preservation of a user-added file. See [Windows installer](windows-installer.md).
+[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Four jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows Release also compiles NSIS and runs two install/uninstall cycles, checking payload hashes, per-user registration/shortcuts, SDK-hidden startup, overwrite rejection and preservation of a user-added file. See [Windows installer](windows-installer.md).
 
 | Job | Renderer | Toolchain |
 | --- | --- | --- |
-| `macOS arm64 / Debug or Release / Qt 6.8.3` | Metal, offscreen | `macos-15`, Apple Clang |
-| `Windows x64 / Debug or Release / Qt 6.8.3` | D3D11 WARP, offscreen | `windows-2022`, MSVC 2022 x64 |
+| `macOS arm64 / Debug or Release / Qt 6.8.3` | Metal; Cocoa for native window interaction | `macos-15`, Apple Clang |
+| `Windows x64 / Debug or Release / Qt 6.8.3` | D3D11 WARP; Windows QPA for native window interaction | `windows-2022`, MSVC 2022 x64 |
+
+Native interaction tests expose real windows and therefore require native QPA handles. Offscreen QPA cannot supply the NSView/HWND required by a native QRhi swapchain. Export pixel tests retain QRhi render-control targets; the separate startup smoke explicitly uses offscreen/software. Do not suppress input assertions or renderer coverage to avoid a platform mismatch.
 
 Qt's private GUI headers are required by CMake and supplied by the matching SDK. CMake accepts the GuiPrivate target exported by Qt 6.8's Gui package and loads the separate matching GuiPrivate package on newer SDKs when needed. Qt Multimedia and Shader Tools are installed explicitly; SVG comes with the base Qt archives. The Qt version is pinned because QRhi/GuiPrivate APIs are version-sensitive; changing it still requires local render/export smoke validation. This baseline does not establish compatibility with every later Qt release.
 
@@ -299,3 +301,17 @@ recording export was run; the local synthetic VideoToolbox integration passed.
 ## Candidate acceptance
 
 See [beta-acceptance.md](beta-acceptance.md) for supported scope, archive identity, installation prerequisites, the real-media walkthrough and required evidence. Passing a hosted startup check with the build SDK hidden is useful deployment evidence; it does not replace testing on a clean physical machine or using the final hardware encoder.
+
+## Coordinated product hardening — 12 September 2026
+
+Two additional standalone CTest registrations cover GPS-reference eligibility and
+production export-log retention. Measured laps with interior GPS gaps/invalid
+coordinates stay inspectable but cannot supply a reference or BEST/delta. Outing
+rows propagate those reasons and best-of-run badges; cross-run compatibility is
+still a separate requirement. Retention covers actual canonical UUIDs, legacy IDs,
+active-log preservation, unrelated filenames and Unix symlinks.
+
+Native build/CTest commands were attempted in the coordinator workspace and failed
+because CMake/CTest are absent. Record exact-head CI results in the implementation
+PR; this paragraph is not a native-pass claim. Earlier five-registration results
+in this document are historical results for their stated snapshots.
