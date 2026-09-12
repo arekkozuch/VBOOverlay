@@ -180,20 +180,20 @@ QVariantMap TelemetryRenderContext::lapTiming() const
         m_lapSession.timedLaps.cbegin(), m_lapSession.timedLaps.cend(), currentTime,
         [](const double time, const TimedLap &lap) { return time < lap.endTelemetryTime; });
     if (completedEnd != m_lapSession.timedLaps.cbegin()) {
-        const auto bestLap = std::min_element(
-            m_lapSession.timedLaps.cbegin(), completedEnd,
-            [](const TimedLap &left, const TimedLap &right) {
-                return left.durationSeconds < right.durationSeconds;
-            });
         const TimedLap &lastLap = *(completedEnd - 1);
-        bestCompletedLap = &*bestLap;
-        result.insert(QStringLiteral("bestLapNumber"), bestLap->number);
-        result.insert(QStringLiteral("bestLapSeconds"), bestLap->durationSeconds);
+        for (auto lap = m_lapSession.timedLaps.cbegin(); lap != completedEnd; ++lap) {
+            if (lap->referenceEligible() && (!bestCompletedLap
+                || lap->durationSeconds < bestCompletedLap->durationSeconds)) bestCompletedLap = &*lap;
+        }
         result.insert(QStringLiteral("lastLapNumber"), lastLap.number);
         result.insert(QStringLiteral("lastLapSeconds"), lastLap.durationSeconds);
-        result.insert(QStringLiteral("lastDeltaToBestSeconds"),
-                      lastLap.durationSeconds - bestLap->durationSeconds);
-        result.insert(QStringLiteral("lastLapIsBest"), lastLap.number == bestLap->number);
+        if (bestCompletedLap) {
+            result.insert(QStringLiteral("bestLapNumber"), bestCompletedLap->number);
+            result.insert(QStringLiteral("bestLapSeconds"), bestCompletedLap->durationSeconds);
+            if (lastLap.referenceEligible()) result.insert(QStringLiteral("lastDeltaToBestSeconds"),
+                lastLap.durationSeconds - bestCompletedLap->durationSeconds);
+            result.insert(QStringLiteral("lastLapIsBest"), lastLap.number == bestCompletedLap->number);
+        }
     }
 
     if (m_session && m_session->duration > 0.0 && currentTime > m_session->duration) {

@@ -52,12 +52,18 @@ struct GatePass {
     double normalSpeedMetersPerSecond = 0.0;
 };
 
+enum class LapReferenceIssue { None, GpsGap, InvalidGps };
+
 struct TimedLap {
     int number = 0;
     double startTelemetryTime = 0.0;
     double endTelemetryTime = 0.0;
     double durationSeconds = 0.0;
     double deltaToBestSeconds = 0.0;
+    // A measured gate-to-gate interval remains visible even when its GPS
+    // coverage cannot support ranking or a spatial reference.
+    LapReferenceIssue referenceIssue = LapReferenceIssue::None;
+    [[nodiscard]] bool referenceEligible() const { return referenceIssue == LapReferenceIssue::None; }
 };
 
 struct LapTracePoint {

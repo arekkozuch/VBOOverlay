@@ -583,7 +583,13 @@ QVariantList AppController::lapSummaries() const
             {QStringLiteral("number"), lap.number},
             {QStringLiteral("startTelemetryTime"), lap.startTelemetryTime},
             {QStringLiteral("durationSeconds"), lap.durationSeconds},
-            {QStringLiteral("deltaToBestSeconds"), lap.deltaToBestSeconds},
+            {QStringLiteral("hasDelta"), lap.referenceEligible() && m_lapSession.fastestLapIndex.has_value()},
+            {QStringLiteral("referenceEligible"), lap.referenceEligible()},
+            {QStringLiteral("referenceIssue"), lap.referenceIssue == LapReferenceIssue::GpsGap
+                ? QStringLiteral("GPS gap") : lap.referenceIssue == LapReferenceIssue::InvalidGps
+                    ? QStringLiteral("Invalid GPS") : QString()},
+            {QStringLiteral("deltaToBestSeconds"), lap.referenceEligible() && m_lapSession.fastestLapIndex
+                ? QVariant(lap.deltaToBestSeconds) : QVariant()},
             {QStringLiteral("isBest"), m_lapSession.fastestLapIndex
                     && *m_lapSession.fastestLapIndex == index},
         });
@@ -631,7 +637,10 @@ QVariantList AppController::lapNavigationSegments() const
         if (lap) {
             segment.insert(QStringLiteral("number"), lap->number);
             segment.insert(QStringLiteral("durationSeconds"), lap->durationSeconds);
-            segment.insert(QStringLiteral("deltaToBestSeconds"), lap->deltaToBestSeconds);
+            const bool hasDelta = lap->referenceEligible() && m_lapSession.fastestLapIndex.has_value();
+            segment.insert(QStringLiteral("hasDelta"), hasDelta);
+            segment.insert(QStringLiteral("referenceEligible"), lap->referenceEligible());
+            segment.insert(QStringLiteral("deltaToBestSeconds"), hasDelta ? QVariant(lap->deltaToBestSeconds) : QVariant());
             segment.insert(QStringLiteral("isBest"), isBest);
         }
         segments.append(segment);

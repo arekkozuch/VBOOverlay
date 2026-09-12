@@ -59,6 +59,9 @@ void AppController::initializeOutingLaps()
             m_outingLapRows.append(QVariantMap{{"runId", row.runId}, {"runName", row.runName},
                 {"type", type}, {"lapNumber", row.lapNumber}, {"startTime", row.start},
                 {"endTime", row.end}, {"durationSeconds", row.end - row.start}, {"clock", clock},
+                {"referenceEligible", row.referenceEligible}, {"bestOfRun", row.bestOfRun},
+                {"referenceIssue", row.referenceIssue == LapReferenceIssue::GpsGap ? QStringLiteral("GPS gap")
+                    : row.referenceIssue == LapReferenceIssue::InvalidGps ? QStringLiteral("Invalid GPS") : QString()},
                 {"chronologyKnown", row.timestampMilliseconds.has_value()}});
         }
         m_outingLapsLoading = false;
