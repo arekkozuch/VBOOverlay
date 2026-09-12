@@ -3,11 +3,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
+    id: root
     property var frame: parent.frame
     anchors.fill: parent
     GForceData {
         id: gForce
-        frame: parent.frame
+        frame: root.frame
     }
     property real range: Math.max(0.1, Number(frame.widgetSettings.gRange ?? 2))
     Rectangle {
@@ -32,13 +33,15 @@ Item {
     }
     Rectangle {
         property real dot: Number(frame.widgetSettings.dotSize ?? 12) * frame.sceneScale
+        objectName: "gForceDot"
         width: dot
         height: dot
         radius: dot / 2
         color: frame.accent
         visible: gForce.hasValue
         x: parent.width / 2 - width / 2 + Math.max(-1, Math.min(1, gForce.lateral / parent.range)) * parent.width * 0.28
-        y: parent.height / 2 - height / 2 - Math.max(-1, Math.min(1, gForce.longitudinal / parent.range)) * parent.height * 0.28
+        // Braking (negative acceleration) moves up; acceleration moves down.
+        y: parent.height / 2 - height / 2 + Math.max(-1, Math.min(1, gForce.longitudinal / parent.range)) * parent.height * 0.28
     }
     Label {
         anchors.horizontalCenter: parent.horizontalCenter

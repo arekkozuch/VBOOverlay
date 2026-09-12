@@ -77,6 +77,7 @@ Item {
     }
     Rectangle {
         readonly property real dotDiameter: Math.max(5 * root.frame.sceneScale, root.fieldDiameter * 0.055)
+        objectName: "gForceDot"
         readonly property real availableRadius: Math.max(0, root.fieldRadius - dotDiameter / 2)
         readonly property real ratio: gForce.hasValue ? Math.min(1, gForce.combinedG / root.maxG) : 0
         width: dotDiameter
@@ -85,6 +86,7 @@ Item {
         visible: gForce.hasValue
         color: root.frame.widgetSettings.dotColor || "#f5a623"
         x: parent.width / 2 - width / 2 + (gForce.combinedG > 0 ? gForce.lateral / gForce.combinedG : 0) * ratio * availableRadius
-        y: parent.height / 2 - height / 2 - (gForce.combinedG > 0 ? gForce.longitudinal / gForce.combinedG : 0) * ratio * availableRadius
+        // Match the G ball: braking up, acceleration down; raw signs are retained.
+        y: parent.height / 2 - height / 2 + (gForce.combinedG > 0 ? gForce.longitudinal / gForce.combinedG : 0) * ratio * availableRadius
     }
 }

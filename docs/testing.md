@@ -213,6 +213,39 @@ The zlib 1.3.2 source has two upstream download locations (zlib.net and the offi
 madler/zlib release asset), verified against the same pinned SHA-256. The fallback
 addresses intermittent invalid downloads without accepting changed dependency bytes.
 
+## September 12 import-readability acceptance
+
+PR #10's G-direction regression exposed a QML scope error in the G ball:
+the nonvisual `GForceData` helper must bind to `root.frame` explicitly. The
+regression now also requires both dots to be visible before checking braking,
+acceleration and the retained manual longitudinal inversion setting.
+
+The local Save As fixture now creates its destination directory, as a real save
+requires. This lets macOS canonicalize the temporary-root alias consistently;
+the test still requires the moved relative source to win over the stale absolute
+fallback and retain its fingerprint.
+
+On macOS 26.5.2 arm64 with Qt 6.11.1, the application build and all five CTest
+registrations passed (302 Qt Test passes, six optional private-fixture skips).
+QRhi rendering and synthetic FFmpeg integrations passed, including the distinct
+VideoToolbox Main10/full-range color test; hardware skipping was not enabled.
+
+A separate temporary Qt harness loaded production Main/Analysis QML with the real
+AppController and isolated test settings. At 1180×720, native Cocoa/Metal windows
+were exercised using Qt Test mouse/keyboard events: destination and grouping
+dropdowns, RCZ linked to VBO, event creation, and Analysis without video. Captures
+were visually inspected for readable highlighted rows and detected lap times.
+Both production G widgets were captured with synthetic ±0.5 g longitudinal input:
+braking above centre, acceleration below centre with inversion disabled, then
+manual inversion enabled. The OS file-picker interaction was not exercised by
+this harness. Captures and private data were not added to the repository.
+
+Separately, the private matching VBO/RCZ parser comparison passed: five complete
+laps through each parser, maximum duration differences against recorded metadata
+of 0.010323 s (VBO) and 0.007576 s (RCZ). VBO parsing reported 13,819 samples,
+49 channels and no warnings. This iteration did not run a private GoPro decode,
+synchronization or final recording export acceptance.
+
 ## Candidate acceptance
 
 See [beta-acceptance.md](beta-acceptance.md) for supported scope, archive identity, installation prerequisites, the real-media walkthrough and required evidence. Passing a hosted startup check with the build SDK hidden is useful deployment evidence; it does not replace testing on a clean physical machine or using the final hardware encoder.

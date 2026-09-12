@@ -1,19 +1,42 @@
 # Flapped Ear Telemetry: multi-file import review
 
+## Which format should I export from RaceChrono?
+
+**Use VBO for analysis with RaceChrono's calculated lateral and longitudinal G.**
+Export the complete run with `latacc-calc` and `longacc-calc` enabled. Flapped Ear
+Telemetry uses these columns for automatic G-force channel selection when present.
+
+RCZ preserves the recorded GPS, OBD, heart-rate and device sensor channels at their
+original sampling rates. It is useful as the source archive, but the currently
+supported RCZ reader does not reconstruct RaceChrono's calculated acceleration.
+In the inspected RCZ/VBO pair, those calculated columns exist only in the VBO
+export; the VBO has a common 10 Hz timeline. That rate is specific to this export,
+not a limit imposed by Flapped Ear Telemetry.
+
+Importing both formats does not combine their channels. To keep both in one run,
+leave VBO as **Import as a run** and set the RCZ to **Same run as: [that VBO]**.
+Analysis then uses VBO; RCZ remains attached as an alternative source.
+
 ## macOS workflow
 
 1. Choose **File → Import telemetry runs…** and select multiple VBO/RCZ files
    in the native file dialog (up to 64).
-2. Review every result: successfully parsed sources, identical duplicates,
-   failures, duration, complete-lap count, available channel count, parser
-   warnings and possible same-run GPS matches.
-3. Keep a source as a separate run, skip it, or assign it as an alternative of
+2. Review the file names, durations in minutes:seconds and complete-lap counts.
+   Duplicates and failures remain visible. **Show file details and import warnings**
+   reveals paths, parser diagnostics and possible same-run GPS matches.
+3. Keep **Import as a run**, choose **Skip this file**, or **Same run as**
    another source. That other source must itself remain a separate primary run.
    Grouping is explicit and does not depend on filename, extension or a guessed
    recording date. Similar GPS traces are suggestions, not automatic merges.
 4. Choose **Create a new event** and supply a name, or **Add runs to current
    event**. Confirm. The files are rechecked before the document changes.
 5. Save the event. Use **Active run** in Analysis to switch recordings.
+
+The lap timing panel displays all complete telemetry laps even without video or
+when a lap falls outside video coverage. Video coverage only enables the seek
+action; video in/out fragments remain available through the existing video navigation.
+Import dropdowns use the application's explicit dark background and highlighted
+text colors, independent of the native macOS control palette.
 
 A new event starts without a video binding and with independent zero-offset,
 unit-scale transforms; the current widget layout and global analysis/settings

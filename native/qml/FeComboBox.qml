@@ -30,7 +30,9 @@ ComboBox {
         border.color: control.activeFocus ? "#55e6a5" : "#273342"
     }
     delegate: ItemDelegate {
+        required property int index
         required property var modelData
+        highlighted: control.highlightedIndex === index
         width: control.width
         height: 34
         contentItem: Text {
@@ -39,6 +41,7 @@ ComboBox {
             font.family: "Helvetica Neue"
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideMiddle
         }
         background: Rectangle {
             color: parent.highlighted ? "#55e6a5" : parent.hovered ? "#1a2430" : "#101720"

@@ -402,7 +402,7 @@ TelemetrySession RczParser::parseFile(const QString &path, const CancellationChe
         } catch (const OperationCancelled &) { throw; }
         catch (const std::exception &error) { session.warnings.append(QString::fromUtf8(error.what())); }
     }
-    session.warnings.append("RCZ imports recorded channels at their native rates. RaceChrono-derived G/lean channels are not synthesized.");
+    session.warnings.append("Recorded accelerometer channels, when present, are available as x_acc-acc, y_acc-acc and z_acc-acc in g. These are device axes, not calibrated vehicle lateral/longitudinal G. Calculated G and lean channels are not reconstructed.");
     throwIfCancelled(cancelled);
     return session;
 }

@@ -89,6 +89,9 @@ private slots:
     void cancelsAndRejectsChangedBatchSources();
     void invalidatesBatchReviewAfterDocumentChanges();
     void reviewsBatchThroughProductionQml();
+    void displaysTimedLapsWithoutVideo();
+    void prefersRaceChronoCalculatedAcceleration();
+    void presentsBrakingUpInGForceWidgets();
     void rejectsBatchLinksWithDifferentPersistedFormats();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
@@ -801,6 +804,92 @@ void TelemetryTests::reviewsBatchThroughProductionQml()
     QVERIFY(QMetaObject::invokeMethod(dialog.get(), "submit"));
     QTRY_COMPARE(controller.eventName(), QStringLiteral("QML event"));
     QCOMPARE(controller.eventRuns().size(), 1);
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::presentsBrakingUpInGForceWidgets()
+{
+    QQmlEngine engine;
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData(R"QML(
+import QtQuick
+import "widgets"
+Item {
+    id: root
+    width: 240; height: 240
+    property real acceleration: -0.5
+    property bool inverted: false
+    QtObject {
+        id: frameData
+        property var widgetSettings: ({invertLongitudinal: root.inverted})
+        property real sceneScale: 1
+        property real labelScale: 1
+        property string family: "Helvetica Neue"
+        property color primary: "white"
+        property color accent: "orange"
+        function raw(source, alias) { return alias === "longitudinalAcceleration" ? root.acceleration : 0; }
+    }
+    GForceWidget { frame: frameData }
+    F1GForceRadarWidget { frame: frameData }
+}
+)QML", QUrl::fromLocalFile(QStringLiteral(BATCH_IMPORT_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    const auto dots = root->findChildren<QQuickItem *>(QStringLiteral("gForceDot"));
+    QCOMPARE(dots.size(), 2);
+    for (auto *dot : dots) {
+        QVERIFY(dot->isVisible());
+        QVERIFY(dot->y() + dot->height() / 2 < 120);
+    }
+    root->setProperty("acceleration", 0.5);
+    for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 > 120);
+    root->setProperty("inverted", true);
+    for (auto *dot : dots) QVERIFY(dot->y() + dot->height() / 2 < 120);
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::prefersRaceChronoCalculatedAcceleration()
+{
+    const auto session = VboParser::parse(u"[column names]\ntime latacc longacc latacc-calc longacc-calc\n[data]\n"
+        "0 0 0 0.5 -0.75\n1 0 0 invalid nan\n2 0 0 -0.25 0.125\n");
+    QCOMPARE(session.valueAt("lateralAcceleration", 0).value(), 0.5);
+    QCOMPARE(session.valueAt("longitudinalAcceleration", 0).value(), -0.75);
+    QCOMPARE(session.valueAt("latacc", 0).value(), 0.0);
+    QVERIFY(!session.valueAt("lateralAcceleration", 1));
+    QVERIFY(!session.valueAt("longitudinalAcceleration", 1));
+    QCOMPARE(session.valueAt("lateralAcceleration", 2).value(), -0.25);
+    const auto calculatedOnly = VboParser::parse(u"[column names]\ntime latacc-calc longacc-calc\n[data]\n0 0.5 -0.75\n1 0.5 -0.75\n");
+    QCOMPARE(calculatedOnly.valueAt("lateralAcceleration", 0).value(), 0.5);
+    QCOMPARE(calculatedOnly.valueAt("longitudinalAcceleration", 0).value(), -0.75);
+}
+
+void TelemetryTests::displaysTimedLapsWithoutVideo()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    const auto panelPath = QFileInfo(QStringLiteral(BATCH_IMPORT_QML_PATH)).dir().filePath("LapTimingPanel.qml");
+    QQmlComponent component(&engine, QUrl::fromLocalFile(panelPath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> panel(component.createWithInitialProperties({{"width", 760}, {"height", 158}}));
+    QVERIFY2(panel, qPrintable(component.errorString()));
+    auto *list = panel->findChild<QObject *>(QStringLiteral("timedLapList"));
+    QVERIFY(list);
+    QCOMPARE(list->property("count").toInt(), 0);
+    controller.loadVbo(QUrl::fromLocalFile(QFileInfo(QStringLiteral(TEST_FIXTURE_PATH)).dir().filePath("event-laps.vbo")));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.lapSummaries().size(), 3);
+    QVERIFY(controller.lapNavigationSegments().isEmpty());
+    QTRY_COMPARE(list->property("count").toInt(), 3);
+    QVERIFY(list->property("visible").toBool());
+    controller.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QTRY_COMPARE(list->property("count").toInt(), 0);
     QCOMPARE(warnings.size(), 0);
 }
 

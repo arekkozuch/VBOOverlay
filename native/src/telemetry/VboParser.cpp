@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QRegularExpression>
 #include <QStringConverter>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -234,6 +235,21 @@ QHash<QString, QString> resolveAliases(const QStringList &names)
 {
     QHash<QString, QString> aliases;
     for (const AliasPattern &aliasPattern : aliasPatterns) {
+        // RaceChrono's generic columns may be zero placeholders. Prefer its
+        // explicitly calculated vehicle acceleration; preserve every raw column.
+        const QString calculated = aliasPattern.alias == QStringLiteral("lateralAcceleration")
+            ? QStringLiteral("latacc-calc")
+            : aliasPattern.alias == QStringLiteral("longitudinalAcceleration")
+                ? QStringLiteral("longacc-calc") : QString();
+        if (!calculated.isEmpty()) {
+            const auto found = std::find_if(names.cbegin(), names.cend(), [&calculated](const QString &name) {
+                return name.compare(calculated, Qt::CaseInsensitive) == 0;
+            });
+            if (found != names.cend()) {
+                aliases.insert(aliasPattern.alias, *found);
+                continue;
+            }
+        }
         for (const QString &name : names) {
             bool matched = false;
             for (const QRegularExpression &pattern : aliasPattern.patterns) {
