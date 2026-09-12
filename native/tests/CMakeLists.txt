@@ -55,6 +55,11 @@ target_compile_features(flappedear_rcz_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_rcz_tests PRIVATE flappedear_core Qt6::Test ZLIB::ZLIBSTATIC)
 flappedear_enable_warnings(flappedear_rcz_tests)
 add_test(NAME flappedear_rcz_tests COMMAND flappedear_rcz_tests)
+qt_add_executable(flappedear_import_tests TelemetryImportTests.cpp RczFixture.h)
+target_compile_features(flappedear_import_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_import_tests PRIVATE flappedear_core Qt6::Test ZLIB::ZLIBSTATIC)
+flappedear_enable_warnings(flappedear_import_tests)
+add_test(NAME flappedear_import_tests COMMAND flappedear_import_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES
     # Startup checks QML loading and controller/window lifecycle. Offscreen QPA
