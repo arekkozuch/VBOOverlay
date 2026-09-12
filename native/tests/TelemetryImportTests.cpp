@@ -185,7 +185,7 @@ private slots:
         const auto b = writeSource(directory, "b.vbo", vbo("73"));
         TelemetryImportLimits limits;
         limits.maximumFiles = 1;
-        QVERIFY_THROWS_EXCEPTION(ResourceLimitError, prepareTelemetryImport({a, b}, limits));
+        QVERIFY_THROWS_EXCEPTION(ResourceLimitError, (void)prepareTelemetryImport({a, b}, limits));
         limits = {};
         limits.maximumFileBytes = vbo().size() - 1;
         QCOMPARE(prepareTelemetryImport({a}, limits).files[0].status, TelemetryImportFileStatus::Error);
@@ -221,16 +221,16 @@ private slots:
     {
         TelemetryImportLimits limits;
         limits.maximumFiles = 0;
-        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, prepareTelemetryImport({}, limits));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, (void)prepareTelemetryImport({}, limits));
         limits = {};
         ++limits.maximumFileBytes;
-        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, prepareTelemetryImport({}, limits));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, (void)prepareTelemetryImport({}, limits));
         limits = {};
         ++limits.maximumBatchBytes;
-        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, prepareTelemetryImport({}, limits));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, (void)prepareTelemetryImport({}, limits));
         limits = {};
         ++limits.maximumRetainedChannelSamples;
-        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, prepareTelemetryImport({}, limits));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument, (void)prepareTelemetryImport({}, limits));
         QVERIFY(prepareTelemetryImport({}).runs.isEmpty());
     }
 
@@ -238,7 +238,7 @@ private slots:
     {
         QTemporaryDir directory;
         const auto a = writeSource(directory, "a.vbo", vbo());
-        QVERIFY_THROWS_EXCEPTION(OperationCancelled, prepareTelemetryImport({a}, {}, [] { return true; }));
+        QVERIFY_THROWS_EXCEPTION(OperationCancelled, (void)prepareTelemetryImport({a}, {}, [] { return true; }));
         // Same callback checkpoints on repeated reads: cancel well after the
         // first file completed, including parsing/digest/matching preparation.
         int singleChecks = 0;
@@ -246,7 +246,7 @@ private slots:
         const auto b = writeSource(directory, "b.vbo", vbo("73"));
         int checks = 0;
         QVERIFY_THROWS_EXCEPTION(OperationCancelled,
-            prepareTelemetryImport({a, b}, {}, [&] { return ++checks >= singleChecks; }));
+            (void)prepareTelemetryImport({a, b}, {}, [&] { return ++checks >= singleChecks; }));
         QCOMPARE(checks, singleChecks);
     }
 
