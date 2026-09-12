@@ -27,14 +27,15 @@ Updated 12 September 2026. Full scope and delivery status are authoritative in [
 
 - [x] Close shipping-review R1–R8: frame arithmetic, global sync confidence, bounded template persistence, GUI recovery ownership, complete interleaved source requests, positive PTS, delayed audio and FFmpeg composition preflight.
 - [x] Guard auto-sync results with a timing-edit revision and cancellation; invalidate stale review candidates.
-- [ ] Preserve GPS-gap segment boundaries in best-lap reference traces; cover numeric delta and nearby track crossings.
+- [x] Exclude GPS-incomplete laps from spatial references/ranking and expose no-delta/quality states (PR12 implementation; execution evidence in its checks).
+- [ ] Validate shared track-progress correspondence at nearby crossings for A/B comparison.
 - [ ] Bound VBO line splitting before bulk allocation; validate finite derived timestamps and synchronization work budgets.
 - [ ] Terminate Unix descendants when the process-group leader has already exited; verify application cleanup ownership in that case.
-- [ ] Correct export-log retention for hyphenated production UUIDs.
+- [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (PR12 implementation).
 - [ ] Validate coordinate-unit ambiguity near the equator/prime meridian across exporters.
 - [ ] Validate long final scans, slow destinations and a destination volume filling during Stage B.
 
-These additional audit findings remain open. Their effect on the advertised beta workflow must be resolved or explicitly bounded before approval; a passing CI run does not close them.
+Unchecked audit findings remain open. Their effect on the advertised product workflow must be resolved or explicitly bounded before approval; a passing CI run does not close unrelated findings.
 
 
 - [x] Enforce final CFR at the effective rational export rate, including deterministic VFR-to-CFR, non-zero range, and audio-timeline coverage.

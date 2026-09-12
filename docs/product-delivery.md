@@ -12,7 +12,8 @@ must not override it. Feature implementation is not the same as runtime acceptan
   `34711964074` crashes in `startsOutingThroughAnalysisQml` on Qt 6.8.3. Root cause:
   offscreen QPA supplies synthetic ID 1, while Metal expects a native NSView.
   Follow-up `8aeb572` uses native Cocoa/Windows QPA for real window interaction,
-  retaining QRhi and pixel/export assertions; fresh CI is pending. Local
+  retaining QRhi and pixel/export assertions; execution evidence is tracked in
+  [PR #11](https://github.com/arekkozuch/VBOOverlay/pull/11). Local
   Qt 6.11.1 success recorded in that PR is not a pass for the CI configuration.
 - Current coordinated work: repair that blocker, harden GPS-reference eligibility,
   correct production export-log retention and reconcile product documentation.
@@ -49,8 +50,8 @@ must be extended, not replaced with another summary-loading architecture.
 | ID | Finding | Required closure / current action |
 | --- | --- | --- |
 | C01 | PR11 Qt6.8 Mac QML crash | Fix lifecycle/compatibility cause; retain UI coverage and production renderer tests; CI must pass before integration |
-| C02 | Flat best-lap trace bridges missing GPS | Preserve measured timings but exclude invalid references before trace construction/ranking; exercise interior invalid samples and time gaps; in progress |
-| C03 | Log retention ignores canonical UUIDs | Match actual production identifiers while preserving unrelated/active files; focused regression; in progress |
+| C02 | Flat best-lap trace bridges missing GPS | Implemented in PR12: preserve timings, exclude invalid references before trace construction/ranking, expose reason/no-delta; focused tests await exact-head verification |
+| C03 | Log retention ignores canonical UUIDs | Implemented in PR12: match actual IDs, preserve unrelated/active files and symlinks; focused tests await exact-head verification |
 | C04 | Unix descendants outlive group leader | Supervise group through leader exit and stop descendants before owned-artifact cleanup; regression for TERM-resistant descendant; open |
 | C05 | VBO bulk split/derived time budgets | Bound before allocation and reject nonfinite/overflow derived times; open |
 | C06 | Coordinate interpretation ambiguity | Explicit exporter evidence near equator/prime meridian; open |
@@ -71,10 +72,10 @@ divided by agent count: critical algorithm and acceptance work is sequential.
 | M0 — regain a reliable baseline | Existing outing workflow integrated; master vision/status truthful | PR11 green, C01–C03 closed; other blockers explicitly retained | 1–3 working days |
 | M1 — day results | Best eligible run/day, run progression, notes/conditions and exclusions | Reuse outing service; compatible layout/direction/gate groups; missing files and GPS incomplete states; persistence/recovery | 2–4 days |
 | M2 — comparison evidence | Independent A/B, distance delta, speed/available channels, two traces, common cursor | M1; deterministic shared track-progress alignment including crossings/gaps; no editor mutation | 6–10 days |
-| M3 — corner analysis | Reviewed sectors, entry/apex/exit/braking metrics, sector theoretical | M2; editable boundaries, metric prerequisites/provenance and downstream straight effects | 7–12 days |
+| M3 — corner analysis | Automatic sector/corner proposals with review/editing, entry/apex/exit/braking metrics, sector theoretical | M2; stable editable boundaries, metric prerequisites/provenance and downstream straight effects | 7–12 days |
 | M4 — useful conclusions | Ranked losses, consistency, G-G, available thermal/HR summary and clickable report | M3; non-overlapping losses, sample counts, missing-data semantics, measured/inferred distinction | 5–9 days |
 | M5 — complete core acceptance | A tested Mac app covering the core product journey and overlay export | M4 + C04–C08; full-day/private-video walkthrough, reopen/recovery, installed candidate, short/lap/full exports | 4–7 days plus external access |
-| M6 — remaining original vision | Realistic potential, expanded state/coasting/trail analysis, thermal correlation, multi-event history, fusion, chapter/comparison video and explanations | Individually validated algorithms; explicit clocks/provenance; earlier core remains usable | Additional 25–45 days, low confidence |
+| M6 — remaining original vision | Realistic potential, expanded state/coasting/trail analysis, thermal correlation, multi-event history, fusion, chapter/comparison video and explanations; remaining F00 folder/drop, reusable vehicle/track references and alternatives on existing runs; remaining F05 channel map layers | Individually validated algorithms, source/clock provenance; explicit acceptance per F00–F20; earlier core remains usable | Additional 25–45 days, low confidence |
 
 First core workflow forecast: approximately **25–45 focused working days** from
 this baseline. Full original vision: roughly **50–90 working days total**. These

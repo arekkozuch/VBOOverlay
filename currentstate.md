@@ -16,8 +16,8 @@ RaceChrono calculated-G selection/presentation.
 
 PR #11 adds whole-outing import, dated GPS-evidence pairing, chronological
 OUT/LAP/IN sections and independent selected-section map/charts/cursor. The
-coordinator is resolving its Qt6.8 CI native-window platform mismatch; consult
-its exact-head checks before treating it as integrated.
+coordinator fixed its Qt6.8 CI native-window platform mismatch in `8aeb572`;
+consult its exact-head checks and merge state for integration evidence.
 
 Current coordinated work also excludes incomplete GPS laps from reference
 ranking while keeping measured timings visible, shows quality/best-of-run

@@ -43,7 +43,7 @@ Finishing an intermediate milestone does not close the full vision.
 | --- | --- | --- |
 | F00 | Whole-day organization | Multi-file, folder and drop import; review duplicates/source groups; save/reopen event; run notes and conditions; reusable vehicle/track references |
 | F01 | Lap comparison | Independent A/B from compatible runs, best run/day references, shared track-progress axis and delta time; incomplete laps remain inspectable |
-| F02 | Track segmentation | Reviewed/editable straights, braking zones, entry, apex and exit, with stable segment identity |
+| F02 | Track segmentation | Automatically proposed straights/corners and phases, then reviewed/editable braking zones, entry, apex and exit, with stable segment identity |
 | F03 | Time Loss Analyzer | Rank non-overlapping observed losses; each result opens its evidence and affected corner/following straight |
 | F04 | Optimal lap | Sector theoretical with source-lap provenance; separately validated realistic potential respects adjoining fragments' compatibility |
 | F05 | Analytical map | Two traces, shared cursor, selected segment, speed/delta/G/pedal/temperature layers; no precision beyond GPS evidence |
