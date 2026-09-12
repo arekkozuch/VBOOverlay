@@ -109,7 +109,8 @@ A private RaceChrono fixture has been validated with 32,718 samples, 49 channels
 - A source currently contains one video file; multi-chapter timelines are not implemented.
 - Export requires compatible external FFmpeg at runtime, including the production overlay filters; the application fails early when these are absent.
 - Identified RaceChrono VBO versions other than Pro 10.2.4 retain telemetry but omit unverified timing gates with a warning.
-- Additional audit hardening remains tracked in [ROADMAP.md](ROADMAP.md), including lap comparisons across GPS gaps.
+- GPS-incomplete laps retain their measured timings but are excluded from spatial references and best-lap ranking, with explicit quality/no-delta states. Independent cross-run A/B comparison still requires compatibility and shared-progress alignment; see [the capability ledger](docs/product-delivery.md#actual-capability-audit).
+- Additional parser, export-process and destination hardening remains tracked in [ROADMAP.md](ROADMAP.md).
 - Rotation and sample-aspect-ratio display-transform preservation, HDR/Log color-managed preservation, and production 8K validation remain pending. One real HERO11 5312×2988 10-bit SDR fixture has passed native and 3840×2160 macOS exports; this is not a broader hardware guarantee.
 - Real-media coverage remains limited.
 - Interactive map tiles are pending; the local GPS track view works without map tiles.

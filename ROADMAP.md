@@ -2,6 +2,13 @@
 
 Updated 12 September 2026. Full scope and delivery status are authoritative in [product vision](docs/product-vision.md) and [product delivery](docs/product-delivery.md). This technical checklist tracks foundations and remaining work; checked means implemented, not exact-candidate acceptance. Current evidence is in [currentstate.md](currentstate.md); the invited-beta gate is [beta acceptance](docs/beta-acceptance.md). Event/multi-run analysis is now requested for the same application, with macOS as the development focus; see the [delivery plan](docs/event-analysis-plan.md).
 
+Reconciled against `main` at `7138fbd511e3d06ed9b237130d385e1f62bde027`, including
+merged PRs #11 and #12 and passing four-job Native CI. The
+[delivery ledger](docs/product-delivery.md#dependency-ordered-delivery) maps all
+100 Jira Tasks to M0–M6; its F00–F20 table identifies each capability's remaining
+work. Earlier hardware results below describe their recorded fixtures and
+environments, not physical acceptance of this baseline.
+
 ## Completed foundation
 
 - [x] Native Qt 6/C++/QML application and local Qt Test target.
@@ -27,13 +34,14 @@ Updated 12 September 2026. Full scope and delivery status are authoritative in [
 
 - [x] Close shipping-review R1–R8: frame arithmetic, global sync confidence, bounded template persistence, GUI recovery ownership, complete interleaved source requests, positive PTS, delayed audio and FFmpeg composition preflight.
 - [x] Guard auto-sync results with a timing-edit revision and cancellation; invalidate stale review candidates.
-- [x] Exclude GPS-incomplete laps from spatial references/ranking and expose no-delta/quality states (PR12 implementation; execution evidence in its checks).
-- [ ] Validate shared track-progress correspondence at nearby crossings for A/B comparison.
-- [ ] Bound VBO line splitting before bulk allocation; validate finite derived timestamps and synchronization work budgets.
-- [ ] Terminate Unix descendants when the process-group leader has already exited; verify application cleanup ownership in that case.
-- [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (PR12 implementation).
-- [ ] Validate coordinate-unit ambiguity near the equator/prime meridian across exporters.
-- [ ] Validate long final scans, slow destinations and a destination volume filling during Stage B.
+- [x] Exclude GPS-incomplete laps from spatial references/ranking and expose no-delta/quality states ([KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5), PR #12 merged at `7138fbd`; PR/main CI passed).
+- [ ] Validate shared track-progress correspondence at nearby crossings for A/B comparison ([KAN-32](https://kozucharkadiusz.atlassian.net/browse/KAN-32)).
+- [ ] Bound VBO line splitting before bulk allocation; validate finite derived timestamps and synchronization bounds (KAN-14, KAN-15 and KAN-17 in the delivery ledger).
+- [ ] Terminate Unix descendants when the process-group leader has already exited; verify application cleanup ownership ([KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13)).
+- [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (KAN-5, PR #12 merged at `7138fbd`; PR/main CI passed).
+- [ ] Validate coordinate-unit ambiguity near the equator/prime meridian across exporters ([KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16)).
+- [ ] Validate long final scans, slow destinations and a destination volume filling during Stage B ([KAN-75](https://kozucharkadiusz.atlassian.net/browse/KAN-75)).
+- [ ] Standardize user-facing product and package names while preserving stored identity ([KAN-18](https://kozucharkadiusz.atlassian.net/browse/KAN-18)).
 
 Unchecked audit findings remain open. Their effect on the advertised product workflow must be resolved or explicitly bounded before approval; a passing CI run does not close unrelated findings.
 
@@ -68,7 +76,7 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
 - [x] Bounded batch preparation, provenance, duplicate detection and cancellation.
 - [x] Event v3 persistence, source groups, recovery and relinking.
 - [x] Native multi-file transactional import/review and create/append.
-- [x] Whole-outing chronological sections and independent single-section map/charts in PR #11 (CI/integration tracked in delivery ledger).
+- [x] Whole-outing chronological sections and independent single-section map/charts (PR #11 merged at `a0122ab`; PR/main CI passed, retained at the verified baseline).
 - [ ] Folder import and drag/drop.
 - [ ] Compatible event best, run notes/exclusions and progression.
 - [ ] Independent A/B distance comparison and paired map/channels.

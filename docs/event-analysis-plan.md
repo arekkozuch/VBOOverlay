@@ -11,7 +11,10 @@ This page is an entry point, not a competing roadmap.
 - Version 3 Event/Run/source persistence, recovery, rebasing and explicit relinking.
 - Multi-file transactional review, create/append and optional per-run video/sync.
 - Whole-outing import and chronological section list with independent map/channel
-  inspection in PR #11; verify that PR's current CI/merge state.
+  inspection: PR #11 merged at `a0122ab`, with passing PR/main CI.
+- GPS-reference eligibility and quality/no-delta presentation: PR #12 merged at
+  `7138fbd`, with passing PR/main CI; [KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5)
+  is complete. Exact source and run links are in the delivery ledger.
 
 The manual review workflow leaves source grouping explicit. Whole-outing import
 can group a unique dated VBO/RCZ GPS match and use VBO for calculated G. These are
