@@ -1,6 +1,6 @@
 # Architecture
 
-FlappedEar Telemetry is a native Qt 6 application. C++ owns telemetry, media, project, synchronization, and export behavior; QML presents the editor and the reusable telemetry scene.
+Flapped Ear Telemetry is one native Qt 6 application for overlay editing/generation and telemetry analysis. C++ owns telemetry, media, project, synchronization, and export behavior; QML presents the editor and the reusable telemetry scene.
 
 ```mermaid
 flowchart TD
@@ -45,6 +45,14 @@ Video metadata probing uses `MediaProbe`/`ffprobe`; `TelemetrySource::load` disp
 Each source operation begins a new source generation and uses normalized source identities: cleaned absolute paths, or canonical paths when available. Results carry their generation and are ignored if a newer operation has started or identities no longer match. All long-running source work receives the same lightweight `CancellationCheck` callback and throws `OperationCancelled` on cancellation. VBO/RCZ reads/parsing, media probes, GoPro packet indexing/reads/decoding, and both coarse and fine synchronization check it in bounded batches. Starting a replacement generation signals every previous source and sync token; destruction does the same before a bounded two-second convergence wait. Generation checks prevent stale commits while cancellation stops wasted work, so neither replaces the other. At startup, sources are restored only as part of loading the authoritative saved project or an explicitly accepted recovery snapshot.
 
 ## Telemetry
+
+`TelemetryImportPlan` adds a review-only multi-file worker API on top of
+`TelemetrySource` and `deriveSourceLapSession`. It retains independent immutable
+recordings and source-derived lap results, reports exact duplicates and file
+errors, and exposes possible cross-format GPS matches without merging them.
+It is not wired into `AppController` or QML yet, so existing source generations,
+project format and export ownership remain unchanged. The [event delivery plan](event-analysis-plan.md)
+defines the limits, evidence heuristics and next integration/migration gates.
 
 `VboParser` performs bounded chunked file reads, reads VBO sections, resolves standard channel aliases, normalizes supported coordinate formats, parses bounded RaceChrono timing-gate metadata, and produces a `TelemetrySession`. It rejects files above 128 MiB, more than 1,000,000 lines or 500,000 data rows, more than 512 columns, lines above 1 MiB, and fields above 64 KiB before the corresponding unbounded work. These limits leave substantial headroom over the validated 32,718-row, 49-channel fixture while preventing multi-GiB allocation patterns. `TelemetrySession` performs time-based channel lookup and interpolation, with one lazily cached median positive interval per immutable channel for O(1) cadence-gap thresholds after first use. `TrackGeometry` derives an offline normalized track outline from valid latitude/longitude samples and cooperatively checks cancellation in bounded batches.
 

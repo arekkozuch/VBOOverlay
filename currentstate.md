@@ -1,6 +1,6 @@
-# FlappedEar Telemetry — current state
+# Flapped Ear Telemetry — current state
 
-Updated 11 September 2026. Application version: **0.2.0**. Status: **internal candidate preparation; beta approval pending**.
+Updated 12 September 2026. Application version: **0.2.0**. Status: **internal candidate preparation; beta approval pending; macOS-first event analysis development**.
 
 The September 1 handoff is preserved in [the historical checkpoint](docs/history/2026-09-01-currentstate.md). Its open/closed statements describe that older baseline.
 
@@ -17,12 +17,17 @@ The September 1 handoff is preserved in [the historical checkpoint](docs/history
 
 ## Evidence
 
+The new event-import slice adds a core-only batch preparation API and a separate
+Qt Test target. It does not yet change the single-recording UI or project format.
+Local native compilation is unavailable in this Work environment; verification
+of this slice is pending the PR's CI. See the [working delivery plan](docs/event-analysis-plan.md).
+
 | Evidence | Result / boundary |
 |---|---|
 | PR #4 CI, run 34589013875 | macOS application 203 passed / 0 failed / 6 skipped; Windows 198 / 0 / 11; RCZ 26 / 0 / 1 and startup passed on each platform |
 | New local parser comparison | Qt 6.8.3, 30 passed / 0 failed, including the supplied private RCZ/VBO pair |
 | Supplied pair laps | Five complete laps through both parsers; maximum duration differences from recorded metadata: RCZ 0.0076 s, VBO 0.0104 s |
-| Current change | [PR #5](https://github.com/arekkozuch/VBOOverlay/pull/5); use its workflow results for the final candidate commit and artifact |
+| Previous beta-readiness change | [PR #5](https://github.com/arekkozuch/VBOOverlay/pull/5); historical candidate evidence, not validation of the new import slice |
 | Real-video/hardware evidence | Earlier development checks remain historical. No matching GoPro video is available in this workspace for fresh candidate acceptance |
 
 CI skips for private media and hardware remain visible. A hosted renderer or installed startup check does not establish interactive or clean-machine acceptance.
@@ -33,7 +38,10 @@ Follow [beta acceptance](docs/beta-acceptance.md) and record results against the
 
 Additional audit hardening remains open: lap-reference GPS gaps, VBO pre-allocation/derived-time bounds, Unix descendants after leader exit, production UUID log retention, coordinate-unit ambiguity, and slow/filling export destinations. [ROADMAP.md](ROADMAP.md) tracks these explicitly; they are not closed by the two latest fixes.
 
-Multi-session and multi-video work stays deferred. HDR/Log and display-transform export support, 8K hardware acceptance, sectors and theoretical best laps are outside the current beta scope.
+Multi-run event work has begun as a separate development slice within this same
+application. It does not broaden the existing single-session beta acceptance
+claim. Multi-video, HDR/Log and display-transform export support, 8K hardware
+acceptance, sectors and theoretical best laps remain outside that beta scope.
 
 ## Documentation map
 

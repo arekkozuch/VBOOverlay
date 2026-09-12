@@ -49,6 +49,28 @@ For broadcast-HUD visual changes, render the same production QML acceptance comp
 
 The capture refuses to save unless all nine production widget frames are visible. Inspect both images; a successful command alone is not a visual acceptance result.
 
+## Event import preparation
+
+`flappedear_import_tests` is registered with the existing CTest gate. It covers
+mixed VBO/RCZ batches, native channel/no-data preservation, source-derived lap
+results, renamed/repeated exact duplicates, stable proposal identity across
+input ordering, per-file failures, wrong file formats, byte/sample/file-count
+ceilings and cooperative cancellation without partial publication. Synthetic
+GPS pairs cover elapsed-origin differences, stationary/distant/sparse/duration
+mismatches and ambiguous one-to-many candidates. Candidate matches must never
+merge recordings automatically. See [the import contract](event-analysis-plan.md).
+
+This slice requires macOS CI validation because this Work environment has no
+usable Qt/CMake toolchain. Private RCZ/VBO equivalence, interactive import UI and
+physical hardware export acceptance are separate; the latter two are not added
+by a backend planner test. Existing CI jobs and their skip policy are unchanged.
+
+Run the focused gate with:
+
+```bash
+ctest --test-dir build-native -R '^flappedear_import_tests$' --output-on-failure
+```
+
 ## Private real fixtures
 
 Optional real-media tests read paths from environment variables:

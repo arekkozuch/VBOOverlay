@@ -1,12 +1,17 @@
-# FlappedEar Telemetry
+# Flapped Ear Telemetry
 
-FlappedEar Telemetry is a native desktop editor for synchronizing motorsport telemetry with video and rendering telemetry overlays.
+Flapped Ear Telemetry is one native desktop application for video telemetry overlay editing/generation and motorsport telemetry analysis.
 
 ## Status
 
 The Qt 6/C++20/QML application is preparing a single-session invited beta. It remains unapproved for beta distribution until the exact candidate completes [beta acceptance](docs/beta-acceptance.md). Native RCZ import and the eight numbered shipping-review fixes are implemented. Manual timing edits now invalidate pending auto-sync results; the verified RaceChrono Pro 10.2.4 VBO gate conversion recovers the supplied recording's five laps. See [current state](currentstate.md) for evidence and outstanding work.
 
 ## Current capabilities
+
+Event/multi-run analysis is now in macOS-first development in this same application.
+The first slice adds a native, review-only VBO/RCZ batch import planner; the UI and
+saved projects still use one recording. See the [event analysis delivery plan](docs/event-analysis-plan.md)
+for scope, acceptance criteria and the next implementation slices.
 
 - MP4/MOV playback with timeline controls and preview overlays.
 - RaceChrono and VBOX VBO telemetry import, plus native single-session RaceChrono RCZ import ([supported format](docs/rcz-format.md)).

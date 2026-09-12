@@ -1,6 +1,6 @@
-# FlappedEar Telemetry roadmap
+# Flapped Ear Telemetry roadmap
 
-Updated 11 September 2026. This roadmap tracks completed foundations and remaining work. Current evidence is in [currentstate.md](currentstate.md); the invited-beta gate is [beta acceptance](docs/beta-acceptance.md). Multi-session implementation remains deferred.
+Updated 12 September 2026. This roadmap tracks completed foundations and remaining work. Current evidence is in [currentstate.md](currentstate.md); the invited-beta gate is [beta acceptance](docs/beta-acceptance.md). Event/multi-run analysis is now requested for the same application, with macOS as the development focus; see the [delivery plan](docs/event-analysis-plan.md).
 
 ## Completed foundation
 
@@ -61,6 +61,21 @@ These additional audit findings remain open. Their effect on the advertised beta
 Development validation includes a successful private 3840×2160, `60000/1001`, 30→90 HEVC/AAC export on macOS with 3,597 final packets; native and 3840×2160 exports of one 5312×2988 HERO11 Main10/BT.709 fixture (442 final packets each); a separate 5.855-second 3840×2160 Main10/full-range BT.709 color-fidelity export with the production nine-widget overlay (351 packets); plus restored real GoPro/VBO auto-sync at +90.217 s and 0.999575 correlation. It does not replace wider real-media or Windows runtime validation.
 
 ## Product work
+
+### Event and multi-run analysis (macOS first)
+
+- [x] Native review-only batch import preparation: per-file results, immutable
+  telemetry/lap proposals, source provenance, full-content duplicate detection,
+  cancellation and aggregate budgets. UI behavior is unchanged.
+- [x] Conservative VBO/RCZ GPS-evidence candidates for user review, without
+  automatic merging or filename-based recording identity.
+- [ ] Verify the new import target and existing regression gates on the PR head.
+- [ ] Persist Event → Run → Lap and source groups with explicit legacy-project
+  migration, recovery and relinking behavior.
+- [ ] Connect macOS multi-file/folder/drop import and transactional review.
+- [ ] Add event overview, compatible event best, run notes and cross-run comparison.
+- [ ] Add sectors, theoretical best, progression and evidence-based insights in
+  dependency order. See the delivery plan for acceptance gates and non-goals.
 
 ### Native RaceChrono RCZ import
 

@@ -109,6 +109,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/RczParser.h
     src/telemetry/TelemetrySource.cpp
     src/telemetry/TelemetrySource.h
+    src/telemetry/TelemetryImportPlan.cpp
+    src/telemetry/TelemetryImportPlan.h
     src/telemetry/VboParser.cpp
     src/telemetry/VboParser.h
     src/widgets/WidgetModel.cpp
