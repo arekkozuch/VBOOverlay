@@ -46,6 +46,13 @@ ProjectSourceReference sourceReference(const QJsonObject &object)
             object.value(QStringLiteral("fingerprint")).toObject()};
 }
 
+QDir referenceDirectory(const QString &projectPath)
+{
+    const QFileInfo directory(QFileInfo(projectPath).absolutePath());
+    const QString canonical = directory.canonicalFilePath();
+    return QDir(canonical.isEmpty() ? directory.absoluteFilePath() : canonical);
+}
+
 QJsonObject rebaseReference(QJsonObject reference, const QString &oldPath, const QString &newPath)
 {
     const QJsonObject known = EventProjectCodec::referenceForSave(sourceReference(reference), oldPath, newPath);
@@ -160,7 +167,7 @@ QJsonObject EventProjectCodec::referenceForSave(
     QString absolute = ProjectSourceReferenceCodec::resolve(reference, previousProjectPath);
     if (absolute.isEmpty() && !reference.relativePath.isEmpty() && !previousProjectPath.isEmpty()) {
         // Missing files still have a location; never reinterpret it against Save As or cwd.
-        absolute = QDir(QFileInfo(previousProjectPath).absolutePath()).absoluteFilePath(reference.relativePath);
+        absolute = referenceDirectory(previousProjectPath).absoluteFilePath(reference.relativePath);
     }
     if (absolute.isEmpty()) absolute = reference.absolutePath;
     if (absolute.isEmpty()) return ProjectSourceReferenceCodec::toJson(reference, targetProjectPath);
@@ -175,7 +182,7 @@ QStringList EventProjectCodec::referencedPaths(const QJsonObject &project, const
         const auto reference = sourceReference(object);
         if (!reference.absolutePath.isEmpty()) paths.append(reference.absolutePath);
         if (!reference.relativePath.isEmpty() && !projectPath.isEmpty()) {
-            paths.append(QDir(QFileInfo(projectPath).absolutePath()).absoluteFilePath(reference.relativePath));
+            paths.append(referenceDirectory(projectPath).absoluteFilePath(reference.relativePath));
         }
     };
     const auto event = project.value(QStringLiteral("event")).toObject();

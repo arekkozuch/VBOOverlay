@@ -59,7 +59,9 @@ Save As rebases all source references, including inactive runs, alternatives and
 missing video/telemetry. Resolution prefers an existing relative location, then
 the absolute fallback. If neither exists, the previous document's relative
 location is retained as the intended location. An old relative spelling is never
-reused against an unrelated Save As directory. Existing fingerprint checks and
+reused against an unrelated Save As directory. Existing directory symlinks are
+resolved before rebasing a missing source, so Save As through a linked folder
+does not introduce a dependency on the old link name. Existing fingerprint checks and
 explicit mismatch confirmation still apply on relink.
 Export target protection includes all event references, including inactive runs
 and alternative exports; overwrite consent cannot turn a source into an output.

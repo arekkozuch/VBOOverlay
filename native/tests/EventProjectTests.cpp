@@ -25,6 +25,7 @@ private slots:
     void prefersMovedRelativeSourceToStaleAbsoluteFallback();
     void retainsEventRecoveryIdentity();
     void protectsInactiveSourcesFromExportOverwrite();
+    void keepsMissingReferencesPortableThroughDirectorySymlinks();
 };
 
 void EventProjectTests::acceptsLegacyAndEventDocuments()
@@ -114,10 +115,16 @@ void EventProjectTests::boundsRunsAndSources()
         auto s = run.value("sources").toObject();
         auto t = s.value("telemetry").toArray();
         t.append(Fixture::source(QStringLiteral("alternative-%1").arg(i), "a.rcz"));
-        if (i == 63) t.append(Fixture::source("excess", "b.rcz"));
         s.insert("telemetry", t); run.insert("sources", s); runs.append(run);
     }
     Fixture::setRuns(project, runs);
+    QVERIFY(ProjectLimits::validateProject(project, &error));
+    auto last = runs.last().toObject();
+    auto lastSources = last.value("sources").toObject();
+    auto lastTelemetry = lastSources.value("telemetry").toArray();
+    lastTelemetry.append(Fixture::source("excess", "b.rcz"));
+    lastSources.insert("telemetry", lastTelemetry); last.insert("sources", lastSources);
+    runs[runs.size() - 1] = last; Fixture::setRuns(project, runs);
     QVERIFY(!ProjectLimits::validateProject(project, &error));
 }
 
@@ -128,6 +135,11 @@ void EventProjectTests::rebasesInactiveAlternativeAndMissingReferences()
     const QString oldPath = directory.filePath("old/event.fetproject");
     const QString newPath = directory.filePath("new/event.fetproject");
     QJsonObject project = Fixture::project();
+    auto originalRuns = Fixture::runs(project);
+    auto inactive = originalRuns[1].toObject();
+    auto inactiveSources = inactive.value("sources").toObject();
+    inactiveSources.insert("video", QJsonObject{{"relativePath", "run-b.mp4"}, {"futureVideo", true}});
+    inactive.insert("sources", inactiveSources); originalRuns[1] = inactive; Fixture::setRuns(project, originalRuns);
     QJsonObject editor = EventProjectCodec::editorProjection(project);
     auto sources = editor.value("sources").toObject();
     for (const QString &key : {QStringLiteral("video"), QStringLiteral("telemetry")}) {
@@ -148,6 +160,9 @@ void EventProjectTests::rebasesInactiveAlternativeAndMissingReferences()
     QCOMPARE(Fixture::reference(runs[0].toObject(), 1).value("relativePath").toString(), QStringLiteral("../old/run-a.rcz"));
     QCOMPARE(Fixture::reference(runs[1].toObject()).value("relativePath").toString(), QStringLiteral("../old/run-b.vbo"));
     QCOMPARE(Fixture::reference(runs[1].toObject()).value("futureReference").toInt(), 42);
+    const auto inactiveVideo = runs[1].toObject().value("sources").toObject().value("video").toObject();
+    QCOMPARE(inactiveVideo.value("relativePath").toString(), QStringLiteral("../old/run-b.mp4"));
+    QVERIFY(inactiveVideo.value("futureVideo").toBool());
     QCOMPARE(runs[0].toObject().value("sync").toObject().value("offset").toDouble(), 9.0);
     QCOMPARE(runs[1].toObject().value("sync"), Fixture::runs(project)[1].toObject().value("sync"));
     QCOMPARE(saved.value("futureRoot"), project.value("futureRoot"));
@@ -199,6 +214,24 @@ void EventProjectTests::protectsInactiveSourcesFromExportOverwrite()
         QCOMPARE(transaction.prepare(path, directory.filePath("active-video.mp4"), paths, true).status,
                  ExportOutputTransaction::PreparationStatus::Error);
     }
+}
+
+void EventProjectTests::keepsMissingReferencesPortableThroughDirectorySymlinks()
+{
+#ifdef Q_OS_UNIX
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString real = directory.filePath("real");
+    const QString alias = directory.filePath("alias");
+    QVERIFY(QDir().mkpath(real));
+    QVERIFY(QFile::link(real, alias));
+    const auto rebased = EventProjectCodec::referenceForSave(
+        {"missing.vbo", {}, {}}, QDir(alias).filePath("event.fetproject"), QDir(alias).filePath("saved.fetproject"));
+    QCOMPARE(rebased.value("relativePath").toString(), QStringLiteral("missing.vbo"));
+    QCOMPARE(rebased.value("absolutePath").toString(), QDir(QFileInfo(real).canonicalFilePath()).filePath("missing.vbo"));
+#else
+    QSKIP("Directory symlink portability is covered on macOS/Unix.");
+#endif
 }
 
 QTEST_GUILESS_MAIN(EventProjectTests)
