@@ -792,7 +792,8 @@ ApplicationWindow {
         fileMode: FileDialog.OpenFiles
         nameFilters: [qsTr("Telemetry (*.vbo *.rcz *.VBO *.RCZ)")]
         onAccepted: {
-            if (appController.beginBatchImport(selectedFiles)) {
+            const started = appController.beginBatchImport(selectedFiles);
+            if (started || appController.batchImportState === "error") {
                 window.welcomeVisible = false;
                 batchReview.open();
             }

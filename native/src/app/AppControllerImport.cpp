@@ -205,8 +205,14 @@ bool AppController::beginBatchImport(const QList<QUrl> &urls)
         try {
             result.plan = std::make_shared<TelemetryImportPlan>(prepareTelemetryImport(paths, {}, cancelled,
                 [progress](qsizetype processed, qsizetype) { progress->store(static_cast<int>(processed)); }));
+            QSet<QString> unsupportedLinks;
             for (const auto &run : result.plan->runs) {
                 throwIfCancelled(cancelled);
+                const auto persistedPath = ProjectSourceReferenceCodec::forLoadedSource(run.sourcePath, {}).absolutePath;
+                if (QFileInfo(persistedPath).suffix().toLower() != run.format) {
+                    unsupportedLinks.insert(run.id);
+                    continue;
+                }
                 if (known.contains(contentKey(run))) result.existing.insert(run.id);
                 const auto fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(run.sourcePath, *run.telemetry);
                 if (sourceDigest(run.sourcePath, cancelled) != run.contentSha256) {
@@ -214,6 +220,16 @@ bool AppController::beginBatchImport(const QList<QUrl> &urls)
                 }
                 result.fingerprints.insert(run.id, fingerprint);
             }
+            for (auto &file : result.plan->files) {
+                if (!unsupportedLinks.contains(file.runId)) continue;
+                file.status = TelemetryImportFileStatus::Error;
+                file.runId.clear();
+                file.message = QStringLiteral("The link target has a different format extension. Import a regular copy with the correct VBO/RCZ extension.");
+            }
+            result.plan->runs.removeIf([&unsupportedLinks](const auto &run) { return unsupportedLinks.contains(run.id); });
+            result.plan->possibleSameRuns.removeIf([&unsupportedLinks](const auto &match) {
+                return unsupportedLinks.contains(match.firstRunId) || unsupportedLinks.contains(match.secondRunId);
+            });
         } catch (const OperationCancelled &) { result.cancelled = true; }
         catch (const std::exception &error) { result.error = QString::fromUtf8(error.what()); }
         return result;

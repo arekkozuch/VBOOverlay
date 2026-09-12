@@ -89,6 +89,7 @@ private slots:
     void cancelsAndRejectsChangedBatchSources();
     void invalidatesBatchReviewAfterDocumentChanges();
     void reviewsBatchThroughProductionQml();
+    void rejectsBatchLinksWithDifferentPersistedFormats();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
     void exportsSyntheticRczThroughWorker_data();
@@ -660,9 +661,16 @@ void TelemetryTests::importsSixRunsAndAppendsWithoutDuplicates()
     QCOMPARE(controller.eventRuns().size(), 6);
     QVERIFY(controller.dirty()); QVERIFY(controller.projectPath().isEmpty());
     QVERIFY(controller.videoSource().isEmpty());
+    controller.writeRecoverySnapshot();
+    ProjectRecoverySnapshot snapshot;
+    QVERIFY(ProjectRecoveryStore(directory.filePath("recovery.json")).load(&snapshot));
+    QCOMPARE(EventProjectFixture::runs(snapshot.project).size(), 6);
+    QCOMPARE(snapshot.lastSavedRevision, quint64(0));
+    QVERIFY(snapshot.revision > 0);
     const QString active = controller.activeRunId();
     const auto projectPath = directory.filePath("day.fetproject");
     QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectPath)));
+    controller.setSyncOffset(3.0); // Appending must retain unsaved active-run edits.
     const auto savedRuns = EventProjectFixture::runs(controller.currentProjectObject());
     const auto extra = directory.filePath("new.vbo"); QVERIFY(QFile::copy(QStringLiteral(TEST_FIXTURE_PATH), extra));
     QVERIFY(controller.beginBatchImport({urls[0], QUrl::fromLocalFile(extra)}));
@@ -673,6 +681,7 @@ void TelemetryTests::importsSixRunsAndAppendsWithoutDuplicates()
     QTRY_COMPARE(controller.batchImportState(), QStringLiteral("idle"));
     QCOMPARE(controller.eventRuns().size(), 7);
     QCOMPARE(controller.activeRunId(), active);
+    QCOMPARE(controller.syncOffset(), 3.0);
     const auto appended = EventProjectFixture::runs(controller.currentProjectObject());
     for (int i = 0; i < 6; ++i) QCOMPARE(appended[i], savedRuns[i]);
     QVERIFY(controller.saveCurrentProject());
@@ -793,6 +802,28 @@ void TelemetryTests::reviewsBatchThroughProductionQml()
     QTRY_COMPARE(controller.eventName(), QStringLiteral("QML event"));
     QCOMPARE(controller.eventRuns().size(), 1);
     QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::rejectsBatchLinksWithDifferentPersistedFormats()
+{
+#ifdef Q_OS_UNIX
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto backing = directory.filePath("recording.bin");
+    const auto link = directory.filePath("recording.vbo");
+    QVERIFY(QFile::copy(QStringLiteral(TEST_FIXTURE_PATH), backing));
+    QVERIFY(QFile::link(backing, link));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    // A parser can dispatch via the selected link extension, but a saved project
+    // resolves the backing path. Do not offer a source that cannot reopen.
+    QVERIFY(controller.beginBatchImport({QUrl::fromLocalFile(link)}));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QCOMPARE(controller.batchImportRows()[0].toMap().value("status").toString(), QStringLiteral("error"));
+    QVERIFY(independentBatchChoices(controller.batchImportRows()).isEmpty());
+    QVERIFY(!controller.confirmBatchImport("Day", false, {}));
+#else
+    QSKIP("Native source-link dispatch is covered on macOS/Unix.");
+#endif
 }
 
 void TelemetryTests::rejectsUnsafeExportPaths()

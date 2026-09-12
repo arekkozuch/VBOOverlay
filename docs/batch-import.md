@@ -25,6 +25,8 @@ keeps current unsaved edits, the active run, its video/sync and all existing IDs
 The multi-file dialog does not turn the existing **Open telemetry…** action
 into an append action. Folder discovery and drag/drop are not part of this
 iteration. It also does not add event best times or cross-run lap comparison.
+Appending creates new runs; attaching another export to an existing run is not
+supported by this dialog. Import complementary exports together to group them.
 
 ## Source groups and duplicate policy
 
@@ -46,6 +48,9 @@ available when creating a separate new event.
 No dates or track configuration are inferred, and no event-wide performance
 statistics are calculated from unconfirmed compatibility. A malformed file does
 not hide other successful results. An all-failed/all-skipped batch cannot commit.
+Links whose backing file has a different format extension are reported as errors:
+project reopening resolves the backing path, so import a correctly named regular
+copy instead. Ordinary same-format links retain the normal project behavior.
 
 ## Transaction, cancellation and limits
 
