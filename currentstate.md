@@ -19,8 +19,11 @@ The September 1 handoff is preserved in [the historical checkpoint](docs/history
 
 The new event-import slice adds a core-only batch preparation API and a separate
 Qt Test target. It does not yet change the single-recording UI or project format.
-Local native compilation is unavailable in this Work environment; verification
-of this slice is pending the PR's CI. See the [working delivery plan](docs/event-analysis-plan.md).
+Local native compilation is unavailable in this Work environment. Native
+verification for this slice is tracked against the exact head of
+[PR #7](https://github.com/arekkozuch/VBOOverlay/pull/7); consult its checks and
+validation record rather than the historical results below. See the
+[working delivery plan](docs/event-analysis-plan.md).
 
 | Evidence | Result / boundary |
 |---|---|

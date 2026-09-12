@@ -68,7 +68,11 @@ Acceptance criteria:
 - [x] Bound file count, bytes read and retained channel samples; preserve the
   existing parser bounds and cooperative cancellation.
 - [x] Add a separately registered Qt Test target for this API.
-- [ ] Verify the new target and existing regression gate on the exact PR head.
+
+Verification gate: the new target and existing macOS regressions must pass on
+the exact PR head. [PR #7](https://github.com/arekkozuch/VBOOverlay/pull/7) retains
+the current check status and validation record; implementation checkboxes above
+do not themselves claim that execution passed.
 
 ### Import limits and failure behavior
 

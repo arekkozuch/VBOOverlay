@@ -53,7 +53,8 @@ The capture refuses to save unless all nine production widget frames are visible
 
 `flappedear_import_tests` is registered with the existing CTest gate. It covers
 mixed VBO/RCZ batches, native channel/no-data preservation, source-derived lap
-results, renamed/repeated exact duplicates, stable proposal identity across
+results (including complete timed laps), macOS linked-source format dispatch,
+renamed/repeated exact duplicates, stable proposal identity across
 input ordering, per-file failures, wrong file formats, byte/sample/file-count
 ceilings and cooperative cancellation without partial publication. Synthetic
 GPS pairs cover elapsed-origin differences, stationary/distant/sparse/duration
@@ -166,7 +167,9 @@ Ordinary import and explicit relink preserve the entire other pending request ac
 a source generation: path, fingerprint, mismatch-confirmation policy and dirty-state
 intent. Eight controller regressions cover both asset orders, import/relink and matching/
 mismatching project references. Replacing one asset must not strand the other or accept
-a mismatched reference without confirmation. Multi-session work remains deferred.
+a mismatched reference without confirmation. These single-recording controller
+rules remain unchanged by the review-only event import planner; transactional
+batch integration is a later slice.
 
 ## Original media timestamps
 

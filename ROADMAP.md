@@ -69,7 +69,9 @@ Development validation includes a successful private 3840×2160, `60000/1001`, 3
   cancellation and aggregate budgets. UI behavior is unchanged.
 - [x] Conservative VBO/RCZ GPS-evidence candidates for user review, without
   automatic merging or filename-based recording identity.
-- [ ] Verify the new import target and existing regression gates on the PR head.
+- Verification gate: the new import target and existing regressions must pass
+  on the exact macOS PR head; [PR #7](https://github.com/arekkozuch/VBOOverlay/pull/7)
+  carries current CI status and validation evidence.
 - [ ] Persist Event → Run → Lap and source groups with explicit legacy-project
   migration, recovery and relinking behavior.
 - [ ] Connect macOS multi-file/folder/drop import and transactional review.
