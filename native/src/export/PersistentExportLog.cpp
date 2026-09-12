@@ -10,7 +10,7 @@
 namespace FlappedEar {
 namespace {
 const QRegularExpression kExportLogName(
-    QStringLiteral(R"(^export-\d{8}-\d{6}-[0-9a-fA-F]{8,}\.log$)"));
+    QStringLiteral(R"(^export-\d{8}-\d{6}-(?:[0-9a-fA-F]{8,}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.log\z)"));
 } // namespace
 
 PersistentExportLog::PersistentExportLog(std::unique_ptr<QFile> file) : m_file(std::move(file)) {}
@@ -59,7 +59,8 @@ void PersistentExportLog::retainNewest(
 {
     QDir dir(directory);
     QList<QFileInfo> logs;
-    for (const QFileInfo &entry : dir.entryInfoList({QStringLiteral("export-*.log")}, QDir::Files)) {
+    for (const QFileInfo &entry : dir.entryInfoList(
+             {QStringLiteral("export-*.log")}, QDir::Files | QDir::NoSymLinks)) {
         if (kExportLogName.match(entry.fileName()).hasMatch()) logs.append(entry);
     }
     std::sort(logs.begin(), logs.end(), [](const QFileInfo &left, const QFileInfo &right) {
