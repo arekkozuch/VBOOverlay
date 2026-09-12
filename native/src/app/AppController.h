@@ -90,6 +90,13 @@ class AppController final : public QObject {
     Q_PROPERTY(QString batchImportState READ batchImportState NOTIFY batchImportChanged)
     Q_PROPERTY(QString batchImportError READ batchImportError NOTIFY batchImportChanged)
     Q_PROPERTY(QStringList analysisImportMessages READ analysisImportMessages NOTIFY batchImportChanged)
+    Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QString outingLapDetailError READ outingLapDetailError NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QStringList outingLapChannels READ outingLapChannels NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
+    Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
     Q_PROPERTY(QVariantList outingLaps READ outingLaps NOTIFY outingLapsChanged)
     Q_PROPERTY(QStringList outingLapMessages READ outingLapMessages NOTIFY outingLapsChanged)
     Q_PROPERTY(bool outingLapsLoading READ outingLapsLoading NOTIFY outingLapsChanged)
@@ -189,6 +196,18 @@ public:
     [[nodiscard]] QString batchImportState() const { return m_batchState; }
     [[nodiscard]] QString batchImportError() const { return m_batchError; }
     [[nodiscard]] QStringList analysisImportMessages() const { return m_analysisImportMessages; }
+    Q_INVOKABLE bool selectOutingLap(int index);
+    Q_INVOKABLE void closeOutingLap();
+    Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
+    Q_INVOKABLE QString outingLapValueText(const QString &channel) const;
+    [[nodiscard]] QVariantMap selectedOutingLap() const { return m_selectedOutingLap; }
+    [[nodiscard]] QString outingLapDetailState() const { return m_outingLapDetailState; }
+    [[nodiscard]] QString outingLapDetailError() const { return m_outingLapDetailError; }
+    [[nodiscard]] QStringList outingLapChannels() const { return m_outingLapChannels; }
+    [[nodiscard]] QVariantList outingLapTrack() const { return m_outingLapTrack; }
+    [[nodiscard]] QVariantMap outingLapTrackPoint() const;
+    [[nodiscard]] double outingLapCursor() const { return m_outingLapCursor; }
+    void setOutingLapCursor(double seconds);
     [[nodiscard]] QVariantList outingLaps() const { return m_outingLapRows; }
     [[nodiscard]] QStringList outingLapMessages() const { return m_outingLapMessages; }
     [[nodiscard]] bool outingLapsLoading() const { return m_outingLapsLoading; }
@@ -272,6 +291,8 @@ signals:
     void batchImportChanged();
     void batchImportCommitted();
     void outingLapsChanged();
+    void outingLapDetailChanged();
+    void outingLapCursorChanged();
     void videoSourceChanged();
     void telemetryChanged();
     void lapNavigationChanged();
@@ -409,6 +430,33 @@ private:
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
 
     QSettings m_settings;
+    struct OutingLapDetailResult {
+        quint64 request = 0;
+        std::shared_ptr<const TelemetrySession> session;
+        TrackGeometry geometry;
+        QVariantList track;
+        QString error;
+    };
+    void initializeOutingLapDetail();
+    void loadOutingLapDetail();
+    static QVariantMap sessionSeries(const TelemetrySession &session, const QString &channel,
+        double start, double end, int maximumPoints);
+    QFutureWatcher<OutingLapDetailResult> m_outingLapDetailWatcher;
+    QTimer m_outingLapDetailTimer;
+    std::shared_ptr<std::atomic_bool> m_outingLapDetailCancellation;
+    std::shared_ptr<const TelemetrySession> m_outingLapDetailSession;
+    TrackGeometry m_outingLapDetailGeometry;
+    QVariantMap m_selectedOutingLap;
+    QJsonObject m_outingLapDetailSource;
+    QByteArray m_outingLapDetailKey;
+    quint64 m_outingLapDetailGeneration = 0;
+    quint64 m_outingLapDetailRequest = 0;
+    bool m_outingLapDetailPending = false;
+    QString m_outingLapDetailState = QStringLiteral("idle");
+    QString m_outingLapDetailError;
+    QStringList m_outingLapChannels;
+    QVariantList m_outingLapTrack;
+    double m_outingLapCursor = 0;
     struct OutingLapResult {
         QVector<OutingLapRow> rows;
         QStringList messages;

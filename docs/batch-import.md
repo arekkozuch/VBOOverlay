@@ -29,6 +29,22 @@ Analysis then uses VBO; RCZ remains attached as an alternative source.
 5. **Add files…** extends the outing. Save the project to retain its source
    references; reopening rebuilds the entire list from verified sources.
 
+Click any row (or focus it with Tab and press Enter/Space) to open that section.
+The detail view shows its run, type and duration, a map of the selected section,
+and recorded speed/lateral/longitudinal acceleration charts when those channels
+exist. Move across a chart or drag the section-time slider to inspect values and
+the matching point on the map. **← All laps** or Escape returns to the same list
+and scroll position. OUT, IN and UNKNOWN sections can be inspected too.
+
+The detail cursor uses source telemetry time within the selected boundaries.
+Opening a lap from another run does not change the editor's active run, playback,
+sync transform or project dirty state. One cancellable detail worker verifies the
+primary source fingerprint and loads it independently of video. A later selection,
+Back or a changed document/source invalidates old results. Missing/changed files
+produce an explicit error with a working Back action. Missing channels and GPS
+remain no data; no channels or brake signal are invented. Charts retain gap
+segments, and cursor movement does not rebuild static map/chart geometry.
+
 OUT is the recording start through its first accepted start/finish crossing;
 LAP is a complete interval between crossings; IN is the final crossing through
 recording end. Zero-length fragments are omitted. A recording without reliable

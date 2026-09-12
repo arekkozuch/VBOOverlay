@@ -276,6 +276,26 @@ This validates boundary-fragment classification; it does not establish pit-lane
 or intermediate-pause detection. No fresh real-GoPro synchronization or private
 recording export was performed for this iteration.
 
+## September 12 clickable lap detail acceptance
+
+The follow-up build and all five local CTest registrations passed on macOS with
+Qt 6.11.1 (311 Qt Test passes; six optional private-fixture skips). The production
+AnalysisWindow test now clicks an actual ListView delegate, waits for its detail
+view, clicks Back, opens it with Enter and returns with Escape. Controller coverage
+opens a lap from another run with a nonzero editor sync transform, checks the
+bounded raw-time series/cursor, and verifies the editor document, active run and
+playback remain unchanged. Delayed stale completion, rapid replacement selection,
+Back cancellation and missing/replaced source errors are covered.
+
+A separate temporary Cocoa/Metal harness clicked LAP 2 in the private matched
+VBO/RCZ outing. The selected 1:49.898 lap displayed its map and velocity,
+latacc-calc and longacc-calc charts. A real mouse movement over a plot advanced
+the common cursor and map marker; Back restored the list. Screenshots were
+inspected at 1240×760 and 760×480. Private fixtures/captures remain uncommitted.
+The ordinary analysis chart renderer is shared with this view, and static map
+paths stay separate from cursor updates. No private GoPro synchronization or
+recording export was run; the local synthetic VideoToolbox integration passed.
+
 ## Candidate acceptance
 
 See [beta-acceptance.md](beta-acceptance.md) for supported scope, archive identity, installation prerequisites, the real-media walkthrough and required evidence. Passing a hosted startup check with the build SDK hidden is useful deployment evidence; it does not replace testing on a clean physical machine or using the final hardware encoder.

@@ -26,7 +26,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: qsTr("Chronological order · UTC. OUT before the first start/finish crossing; IN after the last. Entries without a reliable clock or crossing are marked.")
+            text: qsTr("Click a row to open it. Chronological order · UTC. OUT before the first start/finish crossing; IN after the last. Entries without a reliable clock or crossing are marked.")
             wrapMode: Text.WordWrap
             color: "#657386"
             font.pixelSize: 11
@@ -77,7 +77,23 @@ Rectangle {
                 width: laps.width
                 height: 48
                 radius: 6
-                color: index % 2 ? "#0c131b" : "#101923"
+                objectName: "outingLapRow" + index
+                activeFocusOnTab: true
+                color: pointer.containsMouse || activeFocus ? "#193529" : index % 2 ? "#0c131b" : "#101923"
+                border.color: activeFocus ? "#55e6a5" : "transparent"
+                Accessible.role: Accessible.Button
+                Accessible.name: modelData.type + " " + modelData.lapNumber + " · " + modelData.runName
+                Accessible.onPressAction: appController.selectOutingLap(index)
+                Keys.onReturnPressed: appController.selectOutingLap(index)
+                Keys.onEnterPressed: appController.selectOutingLap(index)
+                Keys.onSpacePressed: appController.selectOutingLap(index)
+                MouseArea {
+                    id: pointer
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: { row.forceActiveFocus(); appController.selectOutingLap(row.index); }
+                }
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 12; anchors.rightMargin: 12

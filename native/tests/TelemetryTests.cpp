@@ -93,6 +93,7 @@ private slots:
     void importsAnalysisRunsAutomatically();
     void guardsAutomaticAnalysisImport();
     void startsOutingThroughAnalysisQml();
+    void opensOutingLapWithoutChangingEditor();
     void derivesOutingLapSections();
     void recordsVboUtcChronology();
     void ordersWholeOutingAndReopensSources();
@@ -913,7 +914,110 @@ void TelemetryTests::startsOutingThroughAnalysisQml()
     QCOMPARE(controller.eventName(), QStringLiteral("QML outing"));
     QVERIFY(window->property("hasWorkspace").toBool());
     QTRY_COMPARE(runs->property("count").toInt(), 1);
+    auto *quickWindow = qobject_cast<QQuickWindow *>(window.get());
+    QVERIFY(quickWindow);
+    quickWindow->show();
+    QVERIFY(QTest::qWaitForWindowExposed(quickWindow));
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(runs, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, 0)) && row);
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QVERIFY(window->property("showingLap").toBool());
+    auto *back = quickWindow->findChild<QQuickItem *>("backToOutingLaps");
+    QVERIFY(back); QVERIFY(back->isVisible());
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        back->mapToScene(QPointF(back->width() / 2, back->height() / 2)).toPoint());
+    QTRY_VERIFY(!window->property("showingLap").toBool());
+    QVERIFY(runs->property("visible").toBool());
+    row->forceActiveFocus();
+    QTest::keyClick(quickWindow, Qt::Key_Return);
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QTest::keyClick(quickWindow, Qt::Key_Escape);
+    QTRY_VERIFY(controller.selectedOutingLap().isEmpty());
     QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::opensOutingLapWithoutChangingEditor()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto recording = [](int base) {
+        auto text = EventProjectFixture::lapsVbo();
+        text.replace("time latitude longitude", "time latitude longitude velocity latacc-calc longacc-calc");
+        const auto at = text.indexOf("[data]\n") + 7;
+        auto lines = text.mid(at).split('\n');
+        QByteArray data;
+        for (const auto &line : lines) {
+            if (line.isEmpty()) continue;
+            const auto t = line.first(line.indexOf(' ')).toInt();
+            data += line + ' ' + QByteArray::number(base + t) + " 0.25 -0.5\n";
+        }
+        return text.first(at) + data;
+    };
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, recording(100))); QVERIFY(writeBytes(second, recording(200)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Clickable day", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.outingLaps().size(), 10);
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    controller.setSyncOffset(19); controller.setTimeScale(1.3); controller.setPlaybackTime(7);
+    const auto before = controller.currentProjectObject();
+    const auto active = controller.activeRunId();
+    const auto selected = controller.outingLaps()[6].toMap();
+    QVERIFY(controller.selectOutingLap(6));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QCOMPARE(controller.selectedOutingLap(), selected);
+    QCOMPARE(controller.outingLapChannels(), QStringList({"velocity", "latacc-calc", "longacc-calc"}));
+    QVERIFY(!controller.outingLapTrack().isEmpty());
+    const auto start = selected.value("startTime").toDouble();
+    const auto end = selected.value("endTime").toDouble();
+    controller.setOutingLapCursor((start + end) / 2);
+    QCOMPARE(controller.outingLapValueText("velocity"), QString::number(200 + (start + end) / 2, 'f', 2));
+    QCOMPARE(controller.outingLapValueText("longacc-calc"), QStringLiteral("-0.50"));
+    QVERIFY(!controller.outingLapTrackPoint().isEmpty());
+    const auto series = controller.outingLapSeries("velocity", 200);
+    QVERIFY(series.value("minimum").toDouble() >= 200 + start);
+    QVERIFY(series.value("maximum").toDouble() <= 200 + end);
+    const auto track = controller.outingLapTrack();
+    controller.setOutingLapCursor(-100); QCOMPARE(controller.outingLapCursor(), start);
+    controller.setOutingLapCursor(1000); QCOMPARE(controller.outingLapCursor(), end);
+    QCOMPARE(controller.outingLapTrack(), track);
+    QCOMPARE(controller.outingLapSeries("velocity", 200), series);
+    QCOMPARE(controller.currentProjectObject(), before);
+    QCOMPARE(controller.activeRunId(), active);
+    QCOMPARE(controller.playbackTime(), 7.0);
+    QVERIFY(!controller.selectOutingLap(-1));
+    QCOMPARE(controller.selectedOutingLap(), selected);
+    // Delay an old completion, choose a new row, then release the stale result.
+    AppController::OutingLapDetailResult stale;
+    stale.request = controller.m_outingLapDetailRequest;
+    stale.session = controller.m_outingLapDetailSession;
+    QPromise<AppController::OutingLapDetailResult> promise; promise.start();
+    controller.m_outingLapDetailPending = true;
+    controller.m_outingLapDetailWatcher.setFuture(promise.future());
+    QVERIFY(controller.selectOutingLap(0));
+    QVERIFY(controller.selectOutingLap(1));
+    promise.addResult(stale); promise.finish();
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QCOMPARE(controller.selectedOutingLap(), controller.outingLaps()[1].toMap());
+    QVERIFY(controller.outingLapSeries("velocity", 200).value("maximum").toDouble() < 200);
+    controller.closeOutingLap();
+    QVERIFY(controller.outingLapSeries("velocity", 200).isEmpty());
+    QVERIFY(QFile::remove(second));
+    QVERIFY(controller.selectOutingLap(6));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("error"));
+    QVERIFY(controller.outingLapDetailError().contains("missing"));
+    QVERIFY(controller.outingLapSeries("velocity", 200).isEmpty());
+    QVERIFY(writeBytes(second, recording(300)));
+    QVERIFY(controller.selectOutingLap(6));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("error"));
+    QVERIFY(controller.outingLapDetailError().contains("changed"));
+    QVERIFY(controller.selectOutingLap(1));
+    controller.closeOutingLap();
+    QTRY_VERIFY(!controller.m_outingLapDetailWatcher.isRunning());
+    QVERIFY(controller.selectedOutingLap().isEmpty());
+    QCOMPARE(controller.currentProjectObject(), before);
 }
 
 void TelemetryTests::derivesOutingLapSections()

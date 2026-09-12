@@ -28,6 +28,7 @@ Window {
     transientParent: null
     property bool wasShown: false
     readonly property bool hasWorkspace: appController.eventRuns.length > 0 || appController.sampleCount > 0
+    readonly property bool showingLap: Object.keys(appController.selectedOutingLap).length > 0
     readonly property bool importing: ["preparing", "validating", "cancelling"].indexOf(appController.batchImportState) >= 0
     readonly property bool canImport: !importing && !appController.projectLoading && !appController.exporting
         && !appController.recoveryPending && appController.pendingDestructiveAction === ""
@@ -101,13 +102,13 @@ Window {
         }
     }
 
-    Shortcut { sequence: "Space"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.togglePlaybackRequested() }
-    Shortcut { sequence: "Left"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(-5000) }
-    Shortcut { sequence: "Right"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(5000) }
-    Shortcut { sequence: "Shift+Left"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(-30000) }
-    Shortcut { sequence: "Shift+Right"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(30000) }
-    Shortcut { sequence: "Home"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekRequested(0) }
-    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: !root.playbackShortcutBlocked(); onActivated: root.seekRequested(Math.max(0, mediaDuration)) }
+    Shortcut { sequence: "Space"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.togglePlaybackRequested() }
+    Shortcut { sequence: "Left"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(-5000) }
+    Shortcut { sequence: "Right"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(5000) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(-30000) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.seekMainPlayback(30000) }
+    Shortcut { sequence: "Home"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.seekRequested(0) }
+    Shortcut { sequence: "End"; context: Qt.WindowShortcut; enabled: appController.eventRuns.length === 0 && !root.playbackShortcutBlocked(); onActivated: root.seekRequested(Math.max(0, mediaDuration)) }
 
     ColumnLayout {
         anchors.fill: parent
@@ -224,10 +225,16 @@ Window {
             onChooseFiles: outingFiles.open()
         }
 
+        OutingLapDetailPanel {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.showingLap
+        }
+
         OutingLapPanel {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: appController.eventRuns.length > 0
+            visible: appController.eventRuns.length > 0 && !root.showingLap
         }
 
         SplitView {

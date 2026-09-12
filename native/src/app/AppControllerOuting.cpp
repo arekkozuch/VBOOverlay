@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QtConcurrent>
+#include <algorithm>
+#include <cmath>
 
 namespace FlappedEar {
 
@@ -133,6 +135,187 @@ void AppController::refreshOutingLaps()
         catch (const std::exception &error) { result.rows.clear(); result.messages.append(QString::fromUtf8(error.what())); }
         return result;
     }));
+}
+
+void AppController::initializeOutingLapDetail()
+{
+    m_outingLapDetailTimer.setSingleShot(true);
+    m_outingLapDetailTimer.setInterval(0);
+    connect(&m_outingLapDetailTimer, &QTimer::timeout, this, &AppController::loadOutingLapDetail);
+    const auto invalidate = [this] {
+        if (!m_selectedOutingLap.isEmpty() && (m_outingLapDetailKey != outingLapKey()
+            || m_outingLapDetailGeneration != m_sourceGeneration)) closeOutingLap();
+    };
+    connect(this, &AppController::documentStateChanged, this, invalidate);
+    connect(this, &AppController::sourceLoadStateChanged, this, invalidate);
+    connect(&m_outingLapDetailWatcher, &QFutureWatcher<OutingLapDetailResult>::finished, this, [this] {
+        auto result = m_outingLapDetailWatcher.future().takeResult();
+        m_outingLapDetailPending = false;
+        if (result.request != m_outingLapDetailRequest) {
+            if (m_outingLapDetailState == "loading") m_outingLapDetailTimer.start();
+            return;
+        }
+        if (m_selectedOutingLap.isEmpty() || m_outingLapDetailKey != outingLapKey()
+            || m_outingLapDetailGeneration != m_sourceGeneration) { closeOutingLap(); return; }
+        m_outingLapDetailSession = std::move(result.session);
+        m_outingLapDetailGeometry = std::move(result.geometry);
+        m_outingLapTrack = std::move(result.track);
+        m_outingLapDetailError = result.error;
+        m_outingLapDetailState = m_outingLapDetailSession ? "ready" : "error";
+        m_outingLapChannels.clear();
+        if (m_outingLapDetailSession) {
+            for (const auto *alias : {"speed", "lateralAcceleration", "longitudinalAcceleration"}) {
+                const auto name = m_outingLapDetailSession->aliases.value(alias, alias);
+                if (m_outingLapDetailSession->channels.contains(name) && !m_outingLapChannels.contains(name))
+                    m_outingLapChannels.append(name);
+            }
+        }
+        emit outingLapDetailChanged();
+        emit outingLapCursorChanged();
+    });
+}
+
+bool AppController::selectOutingLap(int index)
+{
+    if (index < 0 || index >= m_outingLapRows.size() || m_outingLapsLoading || projectLoading()
+        || recoveryPending() || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None)
+        return false;
+    const auto row = m_outingLapRows[index].toMap();
+    QJsonObject source;
+    for (const auto &value : outingLapSources())
+        if (value.toObject().value("runId").toString() == row.value("runId").toString()) source = value.toObject();
+    if (source.isEmpty()) return false;
+    closeOutingLap();
+    m_selectedOutingLap = row;
+    m_outingLapDetailSource = source;
+    m_outingLapDetailKey = outingLapKey();
+    m_outingLapDetailGeneration = m_sourceGeneration;
+    m_outingLapCursor = row.value("startTime").toDouble();
+    m_outingLapDetailState = "loading";
+    m_outingLapDetailTimer.start();
+    emit outingLapDetailChanged();
+    emit outingLapCursorChanged();
+    return true;
+}
+
+void AppController::closeOutingLap()
+{
+    ++m_outingLapDetailRequest;
+    if (m_outingLapDetailCancellation) m_outingLapDetailCancellation->store(true);
+    m_outingLapDetailTimer.stop();
+    m_selectedOutingLap.clear();
+    m_outingLapDetailSession.reset();
+    m_outingLapDetailGeometry = {};
+    m_outingLapTrack.clear();
+    m_outingLapChannels.clear();
+    m_outingLapDetailState = "idle";
+    m_outingLapDetailError.clear();
+    emit outingLapDetailChanged();
+    emit outingLapCursorChanged();
+}
+
+void AppController::loadOutingLapDetail()
+{
+    // A rapid second click cancels the current parse and waits for it to finish;
+    // it cannot create concurrent parsers with multiplied source-memory budgets.
+    if (m_selectedOutingLap.isEmpty() || m_outingLapDetailPending) return;
+    const auto source = m_outingLapDetailSource;
+    const auto projectPath = m_documentState.projectPath();
+    const auto start = m_selectedOutingLap.value("startTime").toDouble();
+    const auto end = m_selectedOutingLap.value("endTime").toDouble();
+    const auto request = m_outingLapDetailRequest;
+    m_outingLapDetailCancellation = std::make_shared<std::atomic_bool>(false);
+    const auto cancellation = m_outingLapDetailCancellation;
+    m_outingLapDetailPending = true;
+    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, start, end, request, cancellation] {
+        OutingLapDetailResult result; result.request = request;
+        const auto cancelled = [cancellation] { return cancellation->load(); };
+        try {
+            throwIfCancelled(cancelled);
+            const auto json = source.value("reference").toObject();
+            const ProjectSourceReference reference{json.value("relativePath").toString(),
+                json.value("absolutePath").toString(), json.value("fingerprint").toObject()};
+            const auto path = ProjectSourceReferenceCodec::resolve(reference, projectPath);
+            if (path.isEmpty()) throw std::runtime_error("Recording is missing. Relink its source and try again.");
+            const auto bytes = QFileInfo(path).size();
+            if (bytes <= 0 || bytes > TelemetryImportLimits{}.maximumFileBytes)
+                throw ResourceLimitError("Recording exceeds the analysis size limit.");
+            auto session = std::make_shared<TelemetrySession>(TelemetrySource::load(path, cancelled));
+            throwIfCancelled(cancelled);
+            if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
+                ProjectSourceReferenceCodec::telemetryFingerprint(path, *session)) != SourceFingerprintMatch::Match)
+                throw std::runtime_error("Recording changed. Relink its source before opening this lap.");
+            if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end <= start || end > session->duration)
+                throw std::runtime_error("Lap range is no longer valid for this recording.");
+            // Build map bounds only from this section. Keep gaps as separate
+            // polylines; the dynamic marker shares the same normalization.
+            const auto latitude = session->sampledSegments("latitude", start, end, 2000);
+            TelemetrySession mapSession;
+            mapSession.aliases = {{"latitude", "lat"}, {"longitude", "lon"}};
+            mapSession.channels.insert("lat", {}); mapSession.channels.insert("lon", {});
+            auto &lat = mapSession.channels["lat"]; auto &lon = mapSession.channels["lon"];
+            QVector<QVector<double>> times;
+            for (const auto &segment : latitude) {
+                QVector<double> current;
+                for (const auto &point : segment) {
+                    throwIfCancelled(cancelled);
+                    const auto longitude = session->valueAt("longitude", point.x());
+                    if (!longitude) {
+                        if (!current.isEmpty()) times.append(std::exchange(current, {}));
+                        continue;
+                    }
+                    lat.values.append(static_cast<float>(point.y()));
+                    lon.values.append(static_cast<float>(*longitude));
+                    current.append(point.x());
+                }
+                if (!current.isEmpty()) times.append(std::move(current));
+            }
+            result.geometry = buildTrackGeometry(mapSession, cancelled);
+            for (const auto &segment : times) {
+                QVariantList points;
+                for (const auto time : segment) {
+                    throwIfCancelled(cancelled);
+                    const auto point = FlappedEar::currentTrackPoint(*session, time, result.geometry);
+                    if (point) points.append(QVariantMap{{"x", point->x()}, {"y", point->y()}});
+                }
+                if (!points.isEmpty()) result.track.append(QVariant::fromValue(points));
+            }
+            throwIfCancelled(cancelled);
+            result.session = std::move(session);
+        } catch (const std::exception &error) {
+            result.error = QString::fromUtf8(error.what()); result.track.clear(); result.geometry = {};
+        }
+        return result;
+    }));
+}
+
+QVariantMap AppController::outingLapSeries(const QString &channel, int maximumPoints) const
+{
+    if (!m_outingLapDetailSession || maximumPoints < 2) return {};
+    return sessionSeries(*m_outingLapDetailSession, channel,
+        m_selectedOutingLap.value("startTime").toDouble(), m_selectedOutingLap.value("endTime").toDouble(), maximumPoints);
+}
+
+QString AppController::outingLapValueText(const QString &channel) const
+{
+    const auto value = m_outingLapDetailSession ? m_outingLapDetailSession->valueAt(channel, m_outingLapCursor) : std::nullopt;
+    return value ? QString::number(*value, 'f', 2) : QStringLiteral("—");
+}
+
+QVariantMap AppController::outingLapTrackPoint() const
+{
+    if (!m_outingLapDetailSession) return {};
+    const auto point = FlappedEar::currentTrackPoint(*m_outingLapDetailSession, m_outingLapCursor, m_outingLapDetailGeometry);
+    return point ? QVariantMap{{"x", point->x()}, {"y", point->y()}} : QVariantMap{};
+}
+
+void AppController::setOutingLapCursor(double seconds)
+{
+    if (!m_outingLapDetailSession || !std::isfinite(seconds)) return;
+    seconds = std::clamp(seconds, m_selectedOutingLap.value("startTime").toDouble(), m_selectedOutingLap.value("endTime").toDouble());
+    if (seconds == m_outingLapCursor) return;
+    m_outingLapCursor = seconds;
+    emit outingLapCursorChanged();
 }
 
 } // namespace FlappedEar
