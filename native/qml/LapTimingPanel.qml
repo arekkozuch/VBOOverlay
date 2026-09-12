@@ -7,6 +7,16 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     signal seekRequested(real milliseconds)
+    // Lap timing is telemetry data; video coverage only controls seeking.
+    property var displayRows: {
+        appController.lapNavigationSegments;
+        return appController.lapSummaries.map(lap => ({
+            kind: "lap", label: qsTr("Lap %1").arg(lap.number),
+            durationSeconds: lap.durationSeconds,
+            deltaToBestSeconds: lap.deltaToBestSeconds, isBest: lap.isBest,
+            seekMilliseconds: appController.videoMillisecondsForTelemetryTime(lap.startTelemetryTime)
+        }));
+    }
 
     implicitHeight: 158
     radius: 8
@@ -49,8 +59,8 @@ Rectangle {
             }
             Item { Layout.fillWidth: true }
             Label {
-                visible: appController.lapNavigationSegments.length > 0
-                text: qsTr("Select a session section to seek")
+                visible: root.displayRows.some(row => row.seekMilliseconds >= 0)
+                text: qsTr("Select a lap to seek in video")
                 color: "#536172"
                 font.pixelSize: 9
             }
@@ -58,12 +68,13 @@ Rectangle {
 
         ListView {
             id: lapList
+            objectName: "timedLapList"
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: count > 0
             clip: true
             spacing: 2
-            model: appController.lapNavigationSegments
+            model: root.displayRows
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: Rectangle {
@@ -129,7 +140,7 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: appController.lapNavigationSegments.length === 0
+            visible: root.displayRows.length === 0
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             text: appController.lapTimingStatus

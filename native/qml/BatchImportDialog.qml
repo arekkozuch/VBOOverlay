@@ -7,7 +7,7 @@ import QtQuick.Layouts
 Dialog {
     id: root
     objectName: "batchImportDialog"
-    title: qsTr("Import telemetry runs")
+    title: qsTr("Import runs")
     modal: true
     closePolicy: Popup.CloseOnEscape
     width: Math.min(parent ? parent.width - 32 : 840, 840)
@@ -17,6 +17,11 @@ Dialog {
     property bool appendToEvent: destination.currentIndex === 1
     property bool reviewing: appController.batchImportState === "review"
     property var proposals: appController.batchImportRows.filter(row => row.status === "ready")
+    property bool showDetails: false
+    function duration(seconds) {
+        const total = Math.max(0, Math.round(Number(seconds || 0)));
+        return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+    }
 
     function choices() {
         return proposals.map(row => ({proposalId: row.proposalId,
@@ -28,6 +33,7 @@ Dialog {
     }
     onOpened: {
         assignments = ({});
+        showDetails = false;
         destination.currentIndex = appController.eventRuns.length > 0 ? 1 : 0;
         eventName.text = "";
     }
@@ -41,12 +47,13 @@ Dialog {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            text: qsTr("Review before changing the project. Files stay separate unless you explicitly group them. The selected primary supplies telemetry; alternatives are retained without channel fusion.")
+            text: qsTr("Import your runs into one track day. Each file becomes a separate run.")
         }
         RowLayout {
             Layout.fillWidth: true
-            ComboBox {
+            FeComboBox {
                 id: destination
+                Layout.preferredWidth: 225
                 objectName: "batchDestination"
                 model: appController.eventRuns.length > 0
                     ? [qsTr("Create a new event"), qsTr("Add runs to current event")]
@@ -82,7 +89,7 @@ Dialog {
                 ? qsTr("Preparing review · %1/%2 files parsed").arg(appController.batchImportProcessed).arg(appController.batchImportTotal)
                 : appController.batchImportState === "validating" ? qsTr("Rechecking selected files before commit…")
                 : appController.batchImportState === "cancelling" ? qsTr("Cancelling…")
-                : qsTr("%1 file results · %2 sources available for review").arg(appController.batchImportRows.length).arg(root.proposals.length)
+                : qsTr("%1 files · %2 ready to import").arg(appController.batchImportRows.length).arg(root.proposals.length)
         }
         ScrollView {
             id: results
@@ -105,13 +112,14 @@ Dialog {
                         contentItem: ColumnLayout {
                             Label {
                                 Layout.fillWidth: true
-                                text: (rowFrame.index + 1) + ". " + rowFrame.modelData.name + " — " + rowFrame.modelData.status
+                                text: (rowFrame.index + 1) + ". " + rowFrame.modelData.name
                                 font.bold: true
                                 elide: Text.ElideMiddle
                             }
                             Label {
                                 Layout.fillWidth: true
                                 text: rowFrame.modelData.path
+                                visible: root.showDetails
                                 elide: Text.ElideMiddle
                                 font.pixelSize: 10
                                 HoverHandler { id: pathHover }
@@ -120,17 +128,17 @@ Dialog {
                             }
                             Label {
                                 visible: rowFrame.modelData.status === "ready"
-                                text: qsTr("%1 s · %2 complete laps · %3 channels")
-                                    .arg(Number(rowFrame.modelData.duration || 0).toFixed(1))
-                                    .arg(rowFrame.modelData.laps || 0).arg(rowFrame.modelData.channels || 0)
+                                text: qsTr("%1 · %2 complete laps")
+                                    .arg(root.duration(rowFrame.modelData.duration))
+                                    .arg(rowFrame.modelData.laps || 0)
                             }
-                            ComboBox {
+                            FeComboBox {
                                 id: grouping
                                 Layout.fillWidth: true
                                 visible: rowFrame.modelData.status === "ready"
                                 enabled: root.reviewing && !(root.appendToEvent && rowFrame.modelData.existing)
-                                model: [qsTr("Separate run — use this file as primary"), qsTr("Skip this source")]
-                                    .concat(rowFrame.targets.map((row, i) => qsTr("Alternative of: %1 [%2]").arg(row.name).arg(i + 1)))
+                                model: [qsTr("Import as a run"), qsTr("Skip this file")]
+                                    .concat(rowFrame.targets.map(row => qsTr("Same run as: %1").arg(row.name)))
                                 currentIndex: {
                                     const selected = root.appendToEvent && rowFrame.modelData.existing ? "" : root.assignments[rowFrame.modelData.proposalId];
                                     if (selected === undefined || selected === rowFrame.modelData.proposalId) return 0;
@@ -147,7 +155,8 @@ Dialog {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: text.length > 0
+                                visible: text.length > 0 && (root.showDetails || rowFrame.modelData.status !== "ready"
+                                    || (root.appendToEvent && rowFrame.modelData.existing))
                                 text: rowFrame.modelData.message || ""
                                 wrapMode: Text.WordWrap
                             }
@@ -155,6 +164,18 @@ Dialog {
                     }
                 }
             }
+        }
+        CheckBox {
+            text: qsTr("Show file details and import warnings")
+            checked: root.showDetails
+            onToggled: root.showDetails = checked
+        }
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("Two exports of the same run? Choose ‘Same run as’. Analysis uses the file you link to; the other file is kept with that run.")
+            color: "#aab6c4"
+            font.pixelSize: 11
         }
         Label {
             Layout.fillWidth: true

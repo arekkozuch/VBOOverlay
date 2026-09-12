@@ -4,16 +4,22 @@
 
 1. Choose **File → Import telemetry runs…** and select multiple VBO/RCZ files
    in the native file dialog (up to 64).
-2. Review every result: successfully parsed sources, identical duplicates,
-   failures, duration, complete-lap count, available channel count, parser
-   warnings and possible same-run GPS matches.
-3. Keep a source as a separate run, skip it, or assign it as an alternative of
+2. Review the file names, durations in minutes:seconds and complete-lap counts.
+   Duplicates and failures remain visible. **Show file details and import warnings**
+   reveals paths, parser diagnostics and possible same-run GPS matches.
+3. Keep **Import as a run**, choose **Skip this file**, or **Same run as**
    another source. That other source must itself remain a separate primary run.
    Grouping is explicit and does not depend on filename, extension or a guessed
    recording date. Similar GPS traces are suggestions, not automatic merges.
 4. Choose **Create a new event** and supply a name, or **Add runs to current
    event**. Confirm. The files are rechecked before the document changes.
 5. Save the event. Use **Active run** in Analysis to switch recordings.
+
+The lap timing panel displays all complete telemetry laps even without video or
+when a lap falls outside video coverage. Video coverage only enables the seek
+action; video in/out fragments remain available through the existing video navigation.
+Import dropdowns use the application's explicit dark background and highlighted
+text colors, independent of the native macOS control palette.
 
 A new event starts without a video binding and with independent zero-offset,
 unit-scale transforms; the current widget layout and global analysis/settings

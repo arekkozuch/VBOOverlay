@@ -53,7 +53,15 @@ bridge a recording gap. Ordinary slow OBD/HR sampling remains interpolable.
 Only actual GPS speed, RPM, throttle, brake and HR channels receive those semantic
 aliases. Device-axis acceleration is not assigned to vehicle lateral/longitudinal G.
 RaceChrono-derived G/lean channels are absent from the verified archive and are not
-synthesized. The importer reports this limitation on load.
+synthesized. Import details explain this distinction and name the available raw
+device-axis channels (`x_acc-acc`, `y_acc-acc`, `z_acc-acc`, when recorded).
+The VBO reader recognizes `latacc` and `longacc` as lateral and longitudinal
+acceleration. Their presence in a VBO export does not establish that equivalent
+calculated channels are stored in its source RCZ archive.
+When a VBO contains `latacc-calc` / `longacc-calc`, these explicitly calculated
+channels supply the acceleration aliases ahead of generic `latacc` / `longacc`.
+The original columns remain independently selectable. Missing calculated samples
+remain missing; the aliases never fall back to a generic zero at those timestamps.
 
 For the verified unidirectional type-3 Start trap, the stored coordinate is the centre,
 width is millimetres, and bearing is the travel direction in thousandths of a degree.
