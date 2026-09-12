@@ -38,6 +38,11 @@ and more charts are foundations, not completion of this promise.
 
 All original capabilities stay visible here even when implementation is staged.
 Finishing an intermediate milestone does not close the full vision.
+The [current capability audit](product-delivery.md#actual-capability-audit) maps
+each ID below to its implementation state and concrete Jira work. The
+[M0–M6 queue](product-delivery.md#dependency-ordered-delivery) contains 100 separate
+Tasks plus seven milestone Epics. These links carry delivery status without
+changing the product outcomes defined here.
 
 | ID | Capability | Observable outcome |
 | --- | --- | --- |

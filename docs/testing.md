@@ -176,9 +176,11 @@ Ordinary import and explicit relink preserve the entire other pending request ac
 a source generation: path, fingerprint, mismatch-confirmation policy and dirty-state
 intent. Eight controller regressions cover both asset orders, import/relink and matching/
 mismatching project references. Replacing one asset must not strand the other or accept
-a mismatched reference without confirmation. These single-recording controller
-rules remain unchanged by the review-only event import planner; transactional
-batch integration is a later slice.
+a mismatched reference without confirmation. These source-loading rules also
+remain required by the integrated transactional multi-file import/review and
+whole-outing workflow. The planner, event persistence and controller integrations
+are described in [batch import](batch-import.md) and [event analysis](event-analysis-plan.md);
+they are present in the baseline recorded in the [delivery ledger](product-delivery.md).
 
 ## Original media timestamps
 
