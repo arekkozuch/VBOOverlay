@@ -4,19 +4,21 @@ Audit date: 12 September 2026. Product scope: [product contract](product-vision.
 This is the current delivery authority; old checkpoints and narrow beta documents
 must not override it. Feature implementation is not the same as runtime acceptance.
 
-## Baseline and incoming work
+## Baseline and current work
 
-- Audited main: `d7e195e`, containing PRs #7–#10 (events, import and UI/G fixes).
-- Incoming PR #11: `2e973b5`, chronological whole-outing import/list/detail. It is
-  included in this audit so it is not assigned again. At audit time macOS CI run
-  `34711964074` crashes in `startsOutingThroughAnalysisQml` on Qt 6.8.3. Root cause:
-  offscreen QPA supplies synthetic ID 1, while Metal expects a native NSView.
-  Follow-up `8aeb572` uses native Cocoa/Windows QPA for real window interaction,
-  retaining QRhi and pixel/export assertions; execution evidence is tracked in
-  [PR #11](https://github.com/arekkozuch/VBOOverlay/pull/11). Local
-  Qt 6.11.1 success recorded in that PR is not a pass for the CI configuration.
-- Current coordinated work: repair that blocker, harden GPS-reference eligibility,
-  correct production export-log retention and reconcile product documentation.
+- Original audit: `d7e195e`, containing PRs #7–#10. The integrated baseline is
+  now `a0122ab`, including [PR #11](https://github.com/arekkozuch/VBOOverlay/pull/11)
+  and its chronological whole-outing import/list/detail. The native-QPA fix in
+  `8aeb572` retained rendering/input assertions and passed PR CI;
+  [main run 34712830140](https://github.com/arekkozuch/VBOOverlay/actions/runs/34712830140)
+  also passed. The earlier Qt 6.8.3 QML crash is closed, not new work.
+- [KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5) owns completion of
+  [PR #12](https://github.com/arekkozuch/VBOOverlay/pull/12): GPS-reference
+  eligibility, production log retention and their verification. Its `504fe26`
+  CI compiled in all four jobs but failed seven lap-eligibility cases because
+  sparse fixture defects removed gate-passage evidence. The corrected fixture
+  tests interior defects without weakening the production eligibility policy.
+  Final PR and integrated-main verification records live in KAN-5.
 - This Work environment has no CMake/Qt. Attempting the native commands cannot
   establish a local pass; use exact-head CI and record physical Mac acceptance
   separately. Private telemetry files must not be committed.
@@ -49,7 +51,7 @@ must be extended, not replaced with another summary-loading architecture.
 
 | ID | Finding | Required closure / current action |
 | --- | --- | --- |
-| C01 | PR11 Qt6.8 Mac QML crash | Fix lifecycle/compatibility cause; retain UI coverage and production renderer tests; CI must pass before integration |
+| C01 | PR11 Qt6.8 Mac QML crash | Closed by native-QPA fix `8aeb572`, integrated at `a0122ab`; PR and main Native CI passed with rendering/input coverage retained |
 | C02 | Flat best-lap trace bridges missing GPS | Implemented in PR12: preserve timings, exclude invalid references before trace construction/ranking, expose reason/no-delta; focused tests await exact-head verification |
 | C03 | Log retention ignores canonical UUIDs | Implemented in PR12: match actual IDs, preserve unrelated/active files and symlinks; focused tests await exact-head verification |
 | C04 | Unix descendants outlive group leader | Supervise group through leader exit and stop descendants before owned-artifact cleanup; regression for TERM-resistant descendant; open |
@@ -106,6 +108,11 @@ counts and limitations. For M5 also record candidate archive hash and Mac/Qt/OS.
   existing candidate smoke tests are not a release approval.
 
 ## Coordination and handoff
+
+The [task delivery workflow](development-workflow.md) requires one active Jira
+task, an implementation PR, passing PR and integrated-main CI, and an exact-SHA
+handoff for local Codex compilation. All Jira content is English. KAN-5 starts
+the numbered backlog; milestone containers do not count towards its 100 tasks.
 
 Primary agent owns this ledger, integration, PR verification and reporting. Delegate
 bounded non-overlapping tasks, check current main/open PRs before work, and keep

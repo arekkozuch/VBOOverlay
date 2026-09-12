@@ -46,6 +46,9 @@ Development targets are macOS and Windows. CI pins Qt 6.8.3 and produces interna
 
 ## Build
 
+For the coordinator's per-task PR/CI gate and local Codex update/build/test
+handoff, see [task delivery and local acceptance](docs/development-workflow.md).
+
 On Apple Silicon with Homebrew Qt in `/opt/homebrew/opt/qt`:
 
 ```bash
