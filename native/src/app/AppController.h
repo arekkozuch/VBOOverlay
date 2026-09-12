@@ -4,6 +4,7 @@
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
+#include "telemetry/TelemetryImportPlan.h"
 #include "export/MediaProbe.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportOutputTransaction.h"
@@ -26,6 +27,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariant>
+#include <QSet>
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -84,6 +86,11 @@ class AppController final : public QObject {
     Q_PROPERTY(QString eventName READ eventName NOTIFY documentStateChanged)
     Q_PROPERTY(QVariantList eventRuns READ eventRuns NOTIFY documentStateChanged)
     Q_PROPERTY(QString activeRunId READ activeRunId NOTIFY documentStateChanged)
+    Q_PROPERTY(QString batchImportState READ batchImportState NOTIFY batchImportChanged)
+    Q_PROPERTY(QString batchImportError READ batchImportError NOTIFY batchImportChanged)
+    Q_PROPERTY(QVariantList batchImportRows READ batchImportRows NOTIFY batchImportChanged)
+    Q_PROPERTY(int batchImportProcessed READ batchImportProcessed NOTIFY batchImportChanged)
+    Q_PROPERTY(int batchImportTotal READ batchImportTotal NOTIFY batchImportChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY documentStateChanged)
     Q_PROPERTY(quint64 lastSavedRevision READ lastSavedRevision NOTIFY documentStateChanged)
     Q_PROPERTY(QString pendingDestructiveAction READ pendingDestructiveAction NOTIFY destructiveActionChanged)
@@ -174,6 +181,14 @@ public:
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
     Q_INVOKABLE bool selectEventRun(const QString &runId);
+    [[nodiscard]] QString batchImportState() const { return m_batchState; }
+    [[nodiscard]] QString batchImportError() const { return m_batchError; }
+    [[nodiscard]] QVariantList batchImportRows() const { return m_batchRows; }
+    [[nodiscard]] int batchImportProcessed() const { return m_batchProcessed; }
+    [[nodiscard]] int batchImportTotal() const { return m_batchTotal; }
+    Q_INVOKABLE bool beginBatchImport(const QList<QUrl> &urls);
+    Q_INVOKABLE void cancelBatchImport();
+    Q_INVOKABLE bool confirmBatchImport(const QString &name, bool append, const QVariantList &choices);
     Q_INVOKABLE void relinkVideo(const QUrl &url);
     Q_INVOKABLE void relinkVbo(const QUrl &url);
     Q_INVOKABLE void resolveSourceMismatch(bool acceptReplacement);
@@ -244,6 +259,8 @@ public slots:
     void setAnalysisVisible(bool visible);
 
 signals:
+    void batchImportChanged();
+    void batchImportCommitted();
     void videoSourceChanged();
     void telemetryChanged();
     void lapNavigationChanged();
@@ -381,6 +398,38 @@ private:
     [[nodiscard]] static QString syncCandidateLevelName(double confidence);
 
     QSettings m_settings;
+    struct BatchImportResult {
+        std::shared_ptr<TelemetryImportPlan> plan;
+        QHash<QString, QJsonObject> fingerprints;
+        QSet<QString> existing;
+        QJsonObject project;
+        QString error;
+        bool cancelled = false;
+        bool confirmation = false;
+        bool append = false;
+    };
+    void initializeBatchImport();
+    void invalidateBatchImport();
+    [[nodiscard]] bool batchContextMatches() const;
+    void publishBatchRows();
+    QFutureWatcher<BatchImportResult> m_batchWatcher;
+    QTimer m_batchProgressTimer;
+    std::shared_ptr<std::atomic_bool> m_batchCancellation;
+    std::shared_ptr<std::atomic_int> m_batchProgress;
+    std::shared_ptr<TelemetryImportPlan> m_batchPlan;
+    QHash<QString, QJsonObject> m_batchFingerprints;
+    QSet<QString> m_batchExisting;
+    QVariantList m_batchRows;
+    QString m_batchState = QStringLiteral("idle");
+    QString m_batchError;
+    QString m_batchDocumentId;
+    QString m_batchProjectPath;
+    quint64 m_batchRevision = 0;
+    quint64 m_batchGeneration = 0;
+    int m_batchProcessed = 0;
+    int m_batchTotal = 0;
+    bool m_batchApplying = false;
+    bool m_batchPending = false;
     QUrl m_videoSource;
     QString m_telemetryPath;
     ProjectSourceReference m_videoReference;

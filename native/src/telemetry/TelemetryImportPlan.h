@@ -5,6 +5,7 @@
 #include <QByteArray>
 #include <QStringList>
 #include <memory>
+#include <functional>
 
 namespace FlappedEar {
 
@@ -62,6 +63,7 @@ struct TelemetryImportLimits {
 [[nodiscard]] TelemetryImportPlan prepareTelemetryImport(
     const QStringList &paths,
     const TelemetryImportLimits &limits = {},
-    const CancellationCheck &cancelled = {});
+    const CancellationCheck &cancelled = {},
+    const std::function<void(qsizetype, qsizetype)> &progress = {});
 
 } // namespace FlappedEar

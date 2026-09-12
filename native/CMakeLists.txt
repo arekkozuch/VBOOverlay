@@ -144,6 +144,7 @@ elseif(WIN32)
 endif()
 
 qt_add_executable(flappedear_native MACOSX_BUNDLE
+    src/app/AppControllerImport.cpp
     src/app/AppController.cpp
     src/app/AppController.h
     src/main.cpp
@@ -173,6 +174,7 @@ qt_add_qml_module(flappedear_native
     QML_FILES
         qml/ColorField.qml
         qml/AnalysisPanel.qml
+        qml/BatchImportDialog.qml
         qml/AnalysisWindow.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml

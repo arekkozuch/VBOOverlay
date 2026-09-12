@@ -169,7 +169,8 @@ void findPossibleMatches(TelemetryImportPlan &plan, const CancellationCheck &can
 
 TelemetryImportPlan prepareTelemetryImport(const QStringList &paths,
                                           const TelemetryImportLimits &limits,
-                                          const CancellationCheck &cancelled)
+                                          const CancellationCheck &cancelled,
+                                          const std::function<void(qsizetype, qsizetype)> &progress)
 {
     throwIfCancelled(cancelled);
     validateLimits(limits);
@@ -180,6 +181,7 @@ TelemetryImportPlan prepareTelemetryImport(const QStringList &paths,
     QHash<QByteArray, QString> retainedDigests;
     qint64 inputBytes = 0;
     qsizetype retainedSamples = 0;
+    if (progress) progress(0, paths.size());
     for (const auto &path : paths) {
         throwIfCancelled(cancelled);
         TelemetryImportFileResult fileResult;
@@ -244,6 +246,7 @@ TelemetryImportPlan prepareTelemetryImport(const QStringList &paths,
             fileResult.message = QString::fromUtf8(error.what());
         }
         plan.files.append(std::move(fileResult));
+        if (progress) progress(plan.files.size(), paths.size());
     }
     findPossibleMatches(plan, cancelled);
     throwIfCancelled(cancelled);

@@ -51,6 +51,8 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
+#include <QQuickItem>
 #include <QSettings>
 #include <QScopeGuard>
 #include <QStandardPaths>
@@ -82,6 +84,11 @@ private slots:
     void rejectsInvalidEventWithoutReplacingDocument();
     void rejectsLateSourceResultsAfterRunSelection();
     void selectsEventRunThroughAnalysisQml();
+    void importsSixRunsAndAppendsWithoutDuplicates();
+    void confirmsExplicitSourceGroups();
+    void cancelsAndRejectsChangedBatchSources();
+    void invalidatesBatchReviewAfterDocumentChanges();
+    void reviewsBatchThroughProductionQml();
     void parsesRealisticFixture();
     void savesReopensAndRelinksRcz();
     void exportsSyntheticRczThroughWorker_data();
@@ -609,6 +616,183 @@ void TelemetryTests::selectsEventRunThroughAnalysisQml()
     QCOMPARE(picker->property("currentIndex").toInt(), 1);
     QCOMPARE(warnings.size(), 0);
     controller.cancelPendingDestructiveAction();
+}
+
+namespace {
+QVariantList independentBatchChoices(const QVariantList &rows, const bool skipExisting = false)
+{
+    QVariantList result;
+    for (const auto &value : rows) {
+        const auto row = value.toMap();
+        if (row.value("status") != "ready") continue;
+        result.append(QVariantMap{{"proposalId", row.value("proposalId")},
+            {"groupId", skipExisting && row.value("existing").toBool() ? QVariant(QString{}) : row.value("proposalId")}});
+    }
+    return result;
+}
+}
+
+void TelemetryTests::importsSixRunsAndAppendsWithoutDuplicates()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    QList<QUrl> urls;
+    for (int i = 0; i < 6; ++i) {
+        const auto path = directory.filePath(QStringLiteral("run-%1.vbo").arg(i));
+        QVERIFY(writeBytes(path, "[column names]\ntime velocity\n[data]\n0 " + QByteArray::number(40+i) + "\n1 50\n"));
+        urls.append(QUrl::fromLocalFile(path));
+    }
+    urls.append(urls[0]);
+    const auto bad = directory.filePath("bad.rcz"); QVERIFY(writeBytes(bad, "not a ZIP"));
+    urls.append(QUrl::fromLocalFile(bad));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    const auto original = controller.currentProjectObject();
+    QVERIFY(controller.beginBatchImport(urls));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QCOMPARE(controller.batchImportRows().size(), 8);
+    QCOMPARE(controller.batchImportProcessed(), 8);
+    QCOMPARE(controller.currentProjectObject(), original);
+    QCOMPARE(controller.batchImportRows()[6].toMap().value("status").toString(), QStringLiteral("duplicate"));
+    QCOMPARE(controller.batchImportRows()[7].toMap().value("status").toString(), QStringLiteral("error"));
+    QVERIFY(controller.confirmBatchImport("Track day", false, independentBatchChoices(controller.batchImportRows())));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("idle"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventRuns().size(), 6);
+    QVERIFY(controller.dirty()); QVERIFY(controller.projectPath().isEmpty());
+    QVERIFY(controller.videoSource().isEmpty());
+    const QString active = controller.activeRunId();
+    const auto projectPath = directory.filePath("day.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectPath)));
+    const auto savedRuns = EventProjectFixture::runs(controller.currentProjectObject());
+    const auto extra = directory.filePath("new.vbo"); QVERIFY(QFile::copy(QStringLiteral(TEST_FIXTURE_PATH), extra));
+    QVERIFY(controller.beginBatchImport({urls[0], QUrl::fromLocalFile(extra)}));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QVERIFY(controller.batchImportRows()[0].toMap().value("existing").toBool());
+    QVERIFY(!controller.confirmBatchImport({}, true, independentBatchChoices(controller.batchImportRows())));
+    QVERIFY(controller.confirmBatchImport({}, true, independentBatchChoices(controller.batchImportRows(), true)));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("idle"));
+    QCOMPARE(controller.eventRuns().size(), 7);
+    QCOMPARE(controller.activeRunId(), active);
+    const auto appended = EventProjectFixture::runs(controller.currentProjectObject());
+    for (int i = 0; i < 6; ++i) QCOMPARE(appended[i], savedRuns[i]);
+    QVERIFY(controller.saveCurrentProject());
+    QVERIFY(controller.beginProjectLoad(projectPath, QJsonDocument::fromJson(readBytes(projectPath)).object()));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventRuns().size(), 7);
+    QCOMPARE(controller.activeRunId(), active);
+    QVERIFY(!controller.dirty());
+}
+
+void TelemetryTests::confirmsExplicitSourceGroups()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto vbo = QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH));
+    const auto rcz = directory.filePath("alternative.rcz");
+    QVERIFY(writeBytes(rcz, RczFixture::zip(RczFixture::members())));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.beginBatchImport({vbo, QUrl::fromLocalFile(rcz)}));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    auto choices = independentBatchChoices(controller.batchImportRows());
+    QCOMPARE(choices.size(), 2);
+    const auto first = choices[0].toMap().value("proposalId");
+    const auto second = choices[1].toMap().value("proposalId");
+    // Cycles and duplicate choices must not silently lose sources.
+    QVERIFY(!controller.confirmBatchImport("Day", false, {QVariantMap{{"proposalId", first}, {"groupId", second}},
+        QVariantMap{{"proposalId", second}, {"groupId", first}}}));
+    QVERIFY(!controller.confirmBatchImport("Day", false, {choices[0], choices[0]}));
+    choices[1] = QVariantMap{{"proposalId", second}, {"groupId", first}};
+    QVERIFY(controller.confirmBatchImport("Day", false, choices));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("idle"));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QCOMPARE(controller.eventRuns().size(), 1);
+    QCOMPARE(controller.sampleCount(), 3); // Explicit VBO primary, not the RCZ alternative.
+    const auto runs = EventProjectFixture::runs(controller.currentProjectObject());
+    QCOMPARE(runs[0].toObject().value("sources").toObject().value("telemetry").toArray().size(), 2);
+    QVERIFY(controller.m_batchPlan == nullptr);
+}
+
+void TelemetryTests::cancelsAndRejectsChangedBatchSources()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    const auto source = directory.filePath("source.vbo");
+    QVERIFY(QFile::copy(QStringLiteral(TEST_FIXTURE_PATH), source));
+    const auto before = controller.currentProjectObject();
+    QVERIFY(controller.beginBatchImport({QUrl::fromLocalFile(source)}));
+    controller.cancelBatchImport();
+    QTRY_VERIFY(!controller.m_batchPending);
+    QCOMPARE(controller.batchImportState(), QStringLiteral("idle"));
+    QCOMPARE(controller.currentProjectObject(), before);
+    QVERIFY(controller.beginBatchImport({QUrl::fromLocalFile(source)}));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    const auto choices = independentBatchChoices(controller.batchImportRows());
+    QVERIFY(writeBytes(source, "changed"));
+    QVERIFY(controller.confirmBatchImport("Day", false, choices));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QVERIFY(!controller.batchImportError().isEmpty());
+    QCOMPARE(controller.currentProjectObject(), before);
+    QVERIFY(writeBytes(source, readBytes(QStringLiteral(TEST_FIXTURE_PATH))));
+    QVERIFY(controller.confirmBatchImport("Day", false, choices));
+    controller.cancelBatchImport();
+    QTRY_VERIFY(!controller.m_batchPending);
+    QCOMPARE(controller.currentProjectObject(), before);
+    QVERIFY(controller.eventRuns().isEmpty());
+}
+
+void TelemetryTests::invalidatesBatchReviewAfterDocumentChanges()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    const QList<QUrl> urls{QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH))};
+    QVERIFY(controller.beginBatchImport(urls));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    controller.setSyncOffset(8);
+    QCOMPARE(controller.batchImportState(), QStringLiteral("error"));
+    QCOMPARE(controller.syncOffset(), 8.0);
+    QVERIFY(controller.beginBatchImport(urls));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QVERIFY(!controller.confirmBatchImport("Day", false, independentBatchChoices(controller.batchImportRows())));
+    QVERIFY(controller.batchImportError().contains("Save"));
+    controller.cancelBatchImport();
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("old.fetproject"))));
+    QVERIFY(controller.beginBatchImport(urls));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("new.fetproject"))));
+    QCOMPARE(controller.batchImportState(), QStringLiteral("error"));
+    // Source generation invalidates preparation even if its file finishes later.
+    QVERIFY(controller.beginBatchImport(urls));
+    controller.loadVbo(urls[0]);
+    QTRY_VERIFY(!controller.m_batchPending);
+    QCOMPARE(controller.batchImportState(), QStringLiteral("error"));
+}
+
+void TelemetryTests::reviewsBatchThroughProductionQml()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.beginBatchImport({QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH))}));
+    QTRY_COMPARE(controller.batchImportState(), QStringLiteral("review"));
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQuickWindow window;
+    window.resize(1180, 720);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(BATCH_IMPORT_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> dialog(component.createWithInitialProperties({{"parent", QVariant::fromValue(window.contentItem())}}));
+    QVERIFY2(dialog, qPrintable(component.errorString()));
+    QVERIFY(QMetaObject::invokeMethod(dialog.get(), "open"));
+    QCoreApplication::processEvents();
+    auto *name = dialog->findChild<QObject *>(QStringLiteral("batchEventName"));
+    QVERIFY(name); name->setProperty("text", "QML event");
+    QVERIFY(QMetaObject::invokeMethod(dialog.get(), "submit"));
+    QTRY_COMPARE(controller.eventName(), QStringLiteral("QML event"));
+    QCOMPARE(controller.eventRuns().size(), 1);
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::rejectsUnsafeExportPaths()

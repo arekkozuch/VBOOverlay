@@ -80,10 +80,10 @@ and alternative exports; overwrite consent cannot turn a source into an output.
    Keep the original source fixtures available. The scene is initially empty;
    apply a widget template if testing an overlay with your own video binding.
 
-Batch import/review and event creation UI are the next slice. The existing
-single-file telemetry picker replaces the active run's primary source; it does
-**not** add another run. The development fixture exposes this persistence slice
-without pretending that the multi-file workflow is already available.
+Use **File → Import telemetry runs…** to create an event from multiple VBO/RCZ
+files, or add runs to the current event. See [batch import review](batch-import.md).
+The separate single-file **Open telemetry…** picker still replaces the active
+run's primary source; it does **not** add another run.
 
 Automated coverage: `flappedear_event_project_tests` validates the schema,
 resource bounds, reference rebasing and recovery round trip; controller tests

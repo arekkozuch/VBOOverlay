@@ -65,6 +65,17 @@ QByteArray movingRcz(const bool stationary = false)
 class TelemetryImportTests : public QObject {
     Q_OBJECT
 private slots:
+    void reportsCompletedFileProgress()
+    {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto good = writeSource(directory, "good.vbo", vbo());
+        const auto bad = writeSource(directory, "bad.rcz", "invalid");
+        QList<qsizetype> counts;
+        const auto plan = prepareTelemetryImport({good, good, bad}, {}, {},
+            [&counts](qsizetype processed, qsizetype total) { if (total == 3) counts.append(processed); });
+        QCOMPARE(counts, QList<qsizetype>({0, 1, 2, 3}));
+        QCOMPARE(plan.files.size(), 3);
+    }
     void importsIndependentRunsWithoutCombiningClocks()
     {
         QTemporaryDir directory;
