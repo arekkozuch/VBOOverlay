@@ -1,6 +1,7 @@
 #pragma once
 
 #include "telemetry/LapTiming.h"
+#include <QJsonObject>
 
 namespace FlappedEar {
 
@@ -18,7 +19,16 @@ struct OutingLapRow {
     bool referenceEligible = false;
     LapReferenceIssue referenceIssue = LapReferenceIssue::None;
     bool bestOfRun = false;
+    QJsonObject reference;
 };
+
+// Portable references use exact telemetry bounds, not row indices or lap numbers.
+// Algorithm changes that can alter sections must bump this tag.
+inline constexpr auto lapReferenceAlgorithm = "source-laps-v1";
+[[nodiscard]] QString lapSectionName(LapSectionType type);
+[[nodiscard]] QJsonObject makeLapReference(const OutingLapRow &row, const QString &eventId,
+    const QString &sourceId, const QByteArray &sourceRevision, const QByteArray &derivationKey);
+[[nodiscard]] bool validLapReference(const QJsonObject &reference);
 
 inline constexpr qsizetype maximumOutingLapRows = 20'000;
 

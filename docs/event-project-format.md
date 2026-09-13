@@ -24,10 +24,9 @@ these IDs. Alternate exports are retained, but only the explicit primary source
 is loaded. There is no RCZ-over-VBO priority or channel fusion.
 
 Laps remain derived from the selected source and source gates, not serialized
-sample arrays or cached lap times. Published lap summaries include `runId`;
-`(runId, number)` identifies a lap within the current derivation. Replacing a
-source or changing gates can change lap numbering, so this is not yet a durable
-annotation/bookmark ID. Cross-run references will also need derivation identity.
+sample arrays or cached lap times. Published lap summaries include `runId` and a
+portable `reference` object. Display lap numbers and row indices are not durable
+annotation/bookmark identities; use the derivation-bound reference below.
 
 The widget scene, analysis channel selection and export/map settings are shared
 by the document. Per-run scenes and per-run export ranges are not implemented.
@@ -81,9 +80,58 @@ are excluded. Outing-analysis requests include this identity: changing layout,
 direction, gate revision or source cancels/rejects old work and closes stale lap
 detail. Analysis also checks asserted gate revisions against the loaded recording
 before publishing rows. Existing source fingerprint and generation checks remain.
-No cross-run comparison cache is persisted yet; compatibility groups and durable
-lap references are subsequent tasks. Unknown identities never establish that two
+No cross-run comparison cache is persisted yet; compatibility groups are a
+subsequent task. Portable lap references now bind to this derivation identity. Unknown identities never establish that two
 runs are compatible merely because their unknown values match.
+
+## Stable lap references (KAN-20)
+
+Every published OUT/LAP/IN/UNKNOWN section has a portable JSON `reference` with:
+
+| Field | Contract |
+| --- | --- |
+| `version` | Numeric `1`; this schema has exactly these ten fields |
+| `algorithm` | `source-laps-v1`; bump when lap detection/section semantics change |
+| `eventId`, `runId`, `sourceId` | Event/run/primary source identities, each a nonblank string up to 128 characters |
+| `sourceRevision` | Full-file SHA-256, 64 lowercase hex characters |
+| `derivationKey` | Step 009 run/source/configuration key, 64 lowercase hex characters |
+| `type` | `OUT`, `LAP`, `IN` or `UNKNOWN` |
+| `startTime`, `endTime` | Exact finite telemetry seconds; `0 <= startTime < endTime` |
+
+Store the whole object alongside a future annotation or selection. JSON number
+round trips preserve its bounds. Reopening the same event/source/derivation,
+Save As, same-content relocation, renaming a run and reordering display rows do
+not change the reference. Source replacement, gate/configuration edits or a new
+algorithm cannot silently rebind it to a matching lap number or nearby time.
+References to partial/unknown sections identify those sections; they do not make
+them eligible for rankings. No annotation/bookmark storage UI is added here.
+
+`resolveOutingLapReference(reference)` returns a `state` and, only when resolved,
+a current `index`. Failure states include a reason:
+
+| State | Meaning |
+| --- | --- |
+| `resolved` | Exactly one current derived row matches every reference field |
+| `invalid` | Malformed/unsupported schema, identity, digest, section or bounds |
+| `stale` | Different event/run/source/configuration/algorithm, changed content/bounds or ambiguous matches |
+| `loading` | Current derivation is not ready, including edits before the refresh timer runs |
+| `unavailable` | Referenced run exists but its recording has no available derivation |
+
+Resolution describes the current derived snapshot. `selectOutingLapReference`
+opens only resolved references; keyboard, mouse and accessibility row actions use
+this API. Invalid/stale/unavailable references never select a substitute. The
+index API also rejects outdated snapshots before a queued refresh can run.
+
+The worker computes full content identity before and after lap derivation, using
+the shared bounded/cancellable SHA-256 reader (128 MiB/file, 64 KiB blocks; existing
+256 MiB outing/batch limits remain). Detail loading checks the referenced digest
+again before parsing and verifies it afterward. An external edit since the last
+snapshot produces an explicit stale-reference error, with no old track/series
+published; a missing source produces an unavailable recording error. This closes
+the gap left by sampled fingerprints for same-size edits outside sampled blocks.
+The existing faster project fingerprint/relink policy remains in place. Full
+hashing adds bounded sequential reads; native/private-file performance acceptance
+is separate from synthetic correctness tests.
 
 ## Persistence and limits
 

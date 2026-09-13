@@ -549,3 +549,24 @@ the coordinator lacks CMake/CTest/Qt. Exact runs and results are recorded in
 [KAN-19](https://kozucharkadiusz.atlassian.net/browse/KAN-19). Windows execution
 remains paused. Synthetic coverage does not claim private-file or physical-Mac
 acceptance, track recognition, compatibility grouping or durable lap references.
+
+## KAN-20: stable lap references
+
+Thirteen malformed-reference cases reject unsupported versions, absent/oversized
+identities, invalid digests, invalid section types and non-finite/reversed bounds.
+Controller regressions cover JSON reference round trips through Save As/reopen,
+row reordering and display renumbering, exact matching, ambiguity, configuration
+and gate changes, source replacement, loading and missing-source states. Invalid
+or stale references cannot select a replacement row. Existing production QML
+keyboard/click coverage now opens rows through the reference API.
+
+A 512 KiB synthetic recording is edited outside the three sampled fingerprint
+blocks. Its sampled digest remains identical while its full content revision
+changes; detail rejects the old reference and a fresh derivation marks it stale.
+The shared full-digest reader retains size bounds, exact byte counts and explicit
+cancellation; batch import reuses that same reader.
+
+Exact macOS Debug/Release PR/main test and installed-startup evidence is recorded
+in [KAN-20](https://kozucharkadiusz.atlassian.net/browse/KAN-20). The coordinator
+lacks a native Qt/CMake/CTest toolchain. Windows remains paused; private recording
+performance and physical Mac acceptance are not inferred from hosted tests.

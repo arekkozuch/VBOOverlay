@@ -51,7 +51,7 @@ QJsonArray AppController::outingLapSources() const
         for (const auto &item : run.value("sources").toObject().value("telemetry").toArray()) {
             const auto source = item.toObject();
             if (source.value("id") != run.value("primaryTelemetrySourceId")) continue;
-            sources.append(QJsonObject{{"runId", run.value("id")}, {"name", run.value("name")},
+            sources.append(QJsonObject{{"eventId", project.value("event").toObject().value("id")}, {"runId", run.value("id")}, {"name", run.value("name")},
                 {"sourceId", source.value("id")}, {"reference", source.value("reference")},
                 {"trackConfiguration", EventProjectCodec::trackConfiguration(run)},
                 {"derivationKey", QString::fromLatin1(EventProjectCodec::lapDerivationKey(run))}});
@@ -84,13 +84,12 @@ void AppController::initializeOutingLaps()
         m_outingLapRows.clear();
         m_outingLapMessages = result.messages;
         for (const auto &row : result.rows) {
-            const QString type = row.type == LapSectionType::Out ? "OUT" : row.type == LapSectionType::In ? "IN"
-                : row.type == LapSectionType::Lap ? "LAP" : "UNKNOWN";
+            const QString type = lapSectionName(row.type);
             const QString clock = row.timestampMilliseconds
                 ? QDateTime::fromMSecsSinceEpoch(*row.timestampMilliseconds, QTimeZone::UTC).toString("yyyy-MM-dd HH:mm:ss.zzz")
                 : QStringLiteral("Time unavailable");
             m_outingLapRows.append(QVariantMap{{"runId", row.runId}, {"runName", row.runName},
-                {"type", type}, {"lapNumber", row.lapNumber}, {"startTime", row.start},
+                {"type", type}, {"reference", row.reference.toVariantMap()}, {"lapNumber", row.lapNumber}, {"startTime", row.start},
                 {"endTime", row.end}, {"durationSeconds", row.end - row.start}, {"clock", clock},
                 {"referenceEligible", row.referenceEligible}, {"bestOfRun", row.bestOfRun},
                 {"referenceIssue", row.referenceIssue == LapReferenceIssue::GpsGap ? QStringLiteral("GPS gap")
@@ -144,6 +143,7 @@ void AppController::refreshOutingLaps()
                         || size > TelemetryImportLimits{}.maximumBatchBytes - bytes)
                         throw ResourceLimitError("Recording exceeds the outing analysis size limit.");
                     bytes += size;
+                    const auto contentRevision = TelemetrySource::contentSha256(path, size, cancelled).toHex();
                     const auto session = TelemetrySource::load(path, cancelled);
                     throwIfCancelled(cancelled);
                     const auto fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(path, session);
@@ -154,10 +154,19 @@ void AppController::refreshOutingLaps()
                     if (gateRevision.isString() && gateRevision.toString() != timingGateRevision(session, cancelled))
                         throw std::runtime_error("Timing-gate revision changed; verify this recording before analysis.");
                     const auto laps = deriveSourceLapSession(session, {}, cancelled);
-                    const auto rows = outingLapRows(session, laps, source.value("runId").toString(),
+                    auto rows = outingLapRows(session, laps, source.value("runId").toString(),
                         source.value("name").toString(), index, cancelled);
                     if (rows.size() > maximumOutingLapRows - result.rows.size())
                         throw ResourceLimitError("Outing exceeds the 20,000 lap-section limit.");
+                    if (TelemetrySource::contentSha256(path, size, cancelled).toHex() != contentRevision)
+                        throw std::runtime_error("Recording changed during lap derivation; reload this source.");
+                    for (auto &row : rows) {
+                        throwIfCancelled(cancelled);
+                        row.reference = makeLapReference(row, source.value("eventId").toString(),
+                            source.value("sourceId").toString(), contentRevision,
+                            source.value("derivationKey").toString().toLatin1());
+                        if (row.reference.isEmpty()) throw std::runtime_error("Cannot identify this lap section.");
+                    }
                     result.rows.append(rows);
                     if (!recordingTimestamp(session)) result.messages.append(source.value("name").toString()
                         + ": recording date/time unavailable; listed after chronological records in import order.");
@@ -223,9 +232,55 @@ void AppController::initializeOutingLapDetail()
     });
 }
 
+QVariantMap AppController::resolveOutingLapReference(const QVariantMap &value) const
+{
+    const auto reference = QJsonObject::fromVariantMap(value);
+    const auto result = [](const char *state, const char *reason) {
+        return QVariantMap{{"state", state}, {"reason", reason}};
+    };
+    if (!validLapReference(reference)) return result("invalid", "Malformed or unsupported lap reference.");
+    if (reference.value("algorithm").toString() != lapReferenceAlgorithm)
+        return result("stale", "Lap derivation algorithm changed.");
+    const auto project = currentProjectObject();
+    const auto event = project.value("event").toObject();
+    if (reference.value("eventId") != event.value("id"))
+        return result("stale", "Lap reference belongs to another event.");
+    QJsonObject run;
+    for (const auto &candidate : event.value("runs").toArray())
+        if (candidate.toObject().value("id") == reference.value("runId")) run = candidate.toObject();
+    if (run.isEmpty()) return result("stale", "Referenced run no longer exists.");
+    if (run.value("primaryTelemetrySourceId") != reference.value("sourceId"))
+        return result("stale", "Primary telemetry source changed.");
+    if (QString::fromLatin1(EventProjectCodec::lapDerivationKey(run)) != reference.value("derivationKey").toString())
+        return result("stale", "Source or track/gate configuration changed.");
+    // A document edit can precede the refresh timer: never search yesterday's rows.
+    if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
+        || m_outingLapGeneration != m_sourceGeneration)
+        return result("loading", "Current lap derivation is not ready.");
+    int match = -1;
+    bool runAvailable = false;
+    for (qsizetype i = 0; i < m_outingLapRows.size(); ++i) {
+        const auto row = m_outingLapRows[i].toMap();
+        runAvailable |= row.value("runId").toString() == reference.value("runId").toString();
+        if (QJsonObject::fromVariantMap(row.value("reference").toMap()) != reference) continue;
+        if (match >= 0) return result("stale", "Lap reference is ambiguous in this derivation.");
+        match = static_cast<int>(i);
+    }
+    if (match >= 0) return {{"state", "resolved"}, {"index", match}};
+    return runAvailable ? result("stale", "Source content or lap boundaries changed.")
+                        : result("unavailable", "Referenced recording has no available lap derivation.");
+}
+
+bool AppController::selectOutingLapReference(const QVariantMap &reference)
+{
+    const auto resolved = resolveOutingLapReference(reference);
+    return resolved.value("state").toString() == "resolved" && selectOutingLap(resolved.value("index").toInt());
+}
+
 bool AppController::selectOutingLap(int index)
 {
     if (index < 0 || index >= m_outingLapRows.size() || m_outingLapsLoading || projectLoading()
+        || m_outingLapRequestedKey != outingLapKey() || m_outingLapGeneration != m_sourceGeneration
         || recoveryPending() || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None)
         return false;
     const auto row = m_outingLapRows[index].toMap();
@@ -271,11 +326,12 @@ void AppController::loadOutingLapDetail()
     const auto projectPath = m_documentState.projectPath();
     const auto start = m_selectedOutingLap.value("startTime").toDouble();
     const auto end = m_selectedOutingLap.value("endTime").toDouble();
+    const auto lapReference = QJsonObject::fromVariantMap(m_selectedOutingLap.value("reference").toMap());
     const auto request = m_outingLapDetailRequest;
     m_outingLapDetailCancellation = std::make_shared<std::atomic_bool>(false);
     const auto cancellation = m_outingLapDetailCancellation;
     m_outingLapDetailPending = true;
-    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, start, end, request, cancellation] {
+    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, start, end, lapReference, request, cancellation] {
         OutingLapDetailResult result; result.request = request;
         const auto cancelled = [cancellation] { return cancellation->load(); };
         try {
@@ -288,7 +344,13 @@ void AppController::loadOutingLapDetail()
             const auto bytes = QFileInfo(path).size();
             if (bytes <= 0 || bytes > TelemetryImportLimits{}.maximumFileBytes)
                 throw ResourceLimitError("Recording exceeds the analysis size limit.");
+            const auto contentRevision = TelemetrySource::contentSha256(path, bytes, cancelled).toHex();
+            if (!validLapReference(lapReference)
+                || contentRevision != lapReference.value("sourceRevision").toString().toLatin1())
+                throw std::runtime_error("Lap reference is stale: recording content changed. Reload this source.");
             auto session = std::make_shared<TelemetrySession>(TelemetrySource::load(path, cancelled));
+            if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision)
+                throw std::runtime_error("Lap reference is stale: recording changed while opening it.");
             throwIfCancelled(cancelled);
             if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
                 ProjectSourceReferenceCodec::telemetryFingerprint(path, *session)) != SourceFingerprintMatch::Match)

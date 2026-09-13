@@ -1,11 +1,56 @@
 #include "telemetry/OutingLaps.h"
 
+#include <QRegularExpression>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 
 namespace FlappedEar {
+
+QString lapSectionName(const LapSectionType type)
+{
+    switch (type) {
+    case LapSectionType::Out: return "OUT";
+    case LapSectionType::Lap: return "LAP";
+    case LapSectionType::In: return "IN";
+    case LapSectionType::Unknown: return "UNKNOWN";
+    }
+    return {};
+}
+
+bool validLapReference(const QJsonObject &reference)
+{
+    if (reference.size() != 10 || !reference.value("version").isDouble()
+        || reference.value("version").toDouble() != 1.0) return false;
+    for (const auto *key : {"eventId", "runId", "sourceId", "algorithm"}) {
+        const auto value = reference.value(key);
+        if (!value.isString() || value.toString().trimmed().isEmpty()
+            || value.toString().size() > 128 || value.toString().contains(QChar::Null)) return false;
+    }
+    static const QRegularExpression digest("^[0-9a-f]{64}$");
+    for (const auto *key : {"sourceRevision", "derivationKey"}) {
+        const auto value = reference.value(key);
+        if (!value.isString() || !digest.match(value.toString()).hasMatch()) return false;
+    }
+    const auto type = reference.value("type");
+    if (!type.isString() || !QStringList{"OUT", "LAP", "IN", "UNKNOWN"}.contains(type.toString())) return false;
+    const auto start = reference.value("startTime"), end = reference.value("endTime");
+    return start.isDouble() && end.isDouble() && std::isfinite(start.toDouble())
+        && std::isfinite(end.toDouble()) && start.toDouble() >= 0 && end.toDouble() > start.toDouble();
+}
+
+QJsonObject makeLapReference(const OutingLapRow &row, const QString &eventId,
+    const QString &sourceId, const QByteArray &sourceRevision, const QByteArray &derivationKey)
+{
+    const QJsonObject reference{{"version", 1}, {"algorithm", lapReferenceAlgorithm},
+        {"eventId", eventId}, {"runId", row.runId}, {"sourceId", sourceId},
+        {"sourceRevision", QString::fromLatin1(sourceRevision)},
+        {"derivationKey", QString::fromLatin1(derivationKey)}, {"type", lapSectionName(row.type)},
+        {"startTime", row.start}, {"endTime", row.end}};
+    return validLapReference(reference) ? reference : QJsonObject{};
+}
 
 std::optional<qint64> recordingTimestamp(const TelemetrySession &session)
 {
@@ -28,7 +73,7 @@ QVector<OutingLapRow> outingLapRows(const TelemetrySession &session, const LapSe
         throwIfCancelled(cancelled);
         if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end > session.duration || end <= start)
             return;
-        OutingLapRow row{runId, runName, type, number, start, end, {}, sourceOrder};
+        OutingLapRow row{runId, runName, type, number, start, end, {}, sourceOrder, false, LapReferenceIssue::None, false, {}};
         if (lap) {
             row.referenceEligible = lap->referenceEligible();
             row.referenceIssue = lap->referenceIssue;

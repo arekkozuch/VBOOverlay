@@ -200,6 +200,9 @@ public:
     [[nodiscard]] QString batchImportError() const { return m_batchError; }
     [[nodiscard]] QStringList analysisImportMessages() const { return m_analysisImportMessages; }
     Q_INVOKABLE bool selectOutingLap(int index);
+    // Snapshot resolution: opening detail revalidates source content off-thread.
+    Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
+    Q_INVOKABLE bool selectOutingLapReference(const QVariantMap &reference);
     Q_INVOKABLE void closeOutingLap();
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QString outingLapValueText(const QString &channel) const;
