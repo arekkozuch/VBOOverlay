@@ -440,6 +440,7 @@ private:
     QSettings m_settings;
     struct OutingLapDetailResult {
         quint64 request = 0;
+        bool staleReference = false;
         std::shared_ptr<const TelemetrySession> session;
         TrackGeometry geometry;
         QVariantList track;
@@ -482,6 +483,7 @@ private:
     QByteArray m_outingLapRequestedKey;
     quint64 m_outingLapGeneration = 0;
     QVariantList m_outingLapRows;
+    QSet<QString> m_outingStaleRunIds;
     QStringList m_outingLapMessages;
     bool m_outingLapsLoading = false;
     struct BatchImportResult {

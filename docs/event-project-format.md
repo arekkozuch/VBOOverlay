@@ -127,7 +127,8 @@ the shared bounded/cancellable SHA-256 reader (128 MiB/file, 64 KiB blocks; exis
 256 MiB outing/batch limits remain). Detail loading checks the referenced digest
 again before parsing and verifies it afterward. An external edit since the last
 snapshot produces an explicit stale-reference error, with no old track/series
-published; a missing source produces an unavailable recording error. This closes
+published. The resolver then marks references to that run stale until a fresh
+derivation is published; a missing source produces an unavailable recording error. This closes
 the gap left by sampled fingerprints for same-size edits outside sampled blocks.
 The existing faster project fingerprint/relink policy remains in place. Full
 hashing adds bounded sequential reads; native/private-file performance acceptance

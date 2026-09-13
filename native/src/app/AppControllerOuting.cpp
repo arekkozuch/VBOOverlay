@@ -82,6 +82,7 @@ void AppController::initializeOutingLaps()
             return;
         }
         m_outingLapRows.clear();
+        m_outingStaleRunIds.clear();
         m_outingLapMessages = result.messages;
         for (const auto &row : result.rows) {
             const QString type = lapSectionName(row.type);
@@ -209,6 +210,10 @@ void AppController::initializeOutingLapDetail()
         m_outingLapDetailGeometry = std::move(result.geometry);
         m_outingLapTrack = std::move(result.track);
         m_outingLapDetailError = result.error;
+        if (result.staleReference) {
+            m_outingStaleRunIds.insert(m_selectedOutingLap.value("runId").toString());
+            emit outingLapsChanged();
+        }
         m_outingLapDetailState = m_outingLapDetailSession ? "ready" : "error";
         m_outingLapChannels.clear();
         if (m_outingLapDetailSession) {
@@ -253,6 +258,8 @@ QVariantMap AppController::resolveOutingLapReference(const QVariantMap &value) c
         return result("stale", "Primary telemetry source changed.");
     if (QString::fromLatin1(EventProjectCodec::lapDerivationKey(run)) != reference.value("derivationKey").toString())
         return result("stale", "Source or track/gate configuration changed.");
+    if (m_outingStaleRunIds.contains(reference.value("runId").toString()))
+        return result("stale", "Recording content changed since the last lap derivation.");
     // A document edit can precede the refresh timer: never search yesterday's rows.
     if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
         || m_outingLapGeneration != m_sourceGeneration)
@@ -346,11 +353,15 @@ void AppController::loadOutingLapDetail()
                 throw ResourceLimitError("Recording exceeds the analysis size limit.");
             const auto contentRevision = TelemetrySource::contentSha256(path, bytes, cancelled).toHex();
             if (!validLapReference(lapReference)
-                || contentRevision != lapReference.value("sourceRevision").toString().toLatin1())
+                || contentRevision != lapReference.value("sourceRevision").toString().toLatin1()) {
+                result.staleReference = true;
                 throw std::runtime_error("Lap reference is stale: recording content changed. Reload this source.");
+            }
             auto session = std::make_shared<TelemetrySession>(TelemetrySource::load(path, cancelled));
-            if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision)
+            if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision) {
+                result.staleReference = true;
                 throw std::runtime_error("Lap reference is stale: recording changed while opening it.");
+            }
             throwIfCancelled(cancelled);
             if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
                 ProjectSourceReferenceCodec::telemetryFingerprint(path, *session)) != SourceFingerprintMatch::Match)

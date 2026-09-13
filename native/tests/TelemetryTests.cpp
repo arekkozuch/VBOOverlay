@@ -500,7 +500,7 @@ void TelemetryTests::persistsEditableLapChannels()
         QTRY_COMPARE(controller.outingLaps().size(), 1);
         QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
         QVERIFY(controller.saveProject(QUrl::fromLocalFile(project)));
-        QVERIFY(controller.selectOutingLap(0));
+        QTRY_VERIFY(controller.selectOutingLap(0));
         QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
         const auto document = controller.currentProjectObject();
         const auto geometry = controller.outingLapTrack();
@@ -1412,7 +1412,11 @@ void TelemetryTests::lapReferencesRejectSourceAndGateChanges()
     QVERIFY(controller.selectOutingLapReference(reference)); QTRY_COMPARE(controller.outingLapDetailState(), QString("error"));
     QVERIFY(controller.outingLapDetailError().contains("stale"));
     QVERIFY(controller.outingLapSeries("latitude", 200).isEmpty());
-    controller.loadVbo(QUrl::fromLocalFile(path)); QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    controller.relinkVbo(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(controller.vboLoadState(), QString("mismatch"));
+    controller.resolveSourceMismatch(true);
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
     QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
     QVERIFY(!controller.selectOutingLapReference(reference));
     // Missing source data is unavailable, not reassigned to another section.
@@ -1445,6 +1449,8 @@ void TelemetryTests::lapReferencesDetectUnsampledContentChanges()
     QTRY_COMPARE(controller.outingLapDetailState(), QString("error"));
     QVERIFY(controller.outingLapDetailError().contains("stale"));
     QVERIFY(controller.outingLapTrack().isEmpty());
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    QVERIFY(!controller.selectOutingLapReference(reference));
     // Refreshing rows with an unchanged sampled fingerprint still yields new references.
     controller.m_outingLapRequestedKey.clear(); controller.refreshOutingLaps();
     QTRY_COMPARE(controller.outingLaps().size(), 5);
