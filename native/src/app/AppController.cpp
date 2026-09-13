@@ -1183,9 +1183,9 @@ QString AppController::valueText(const QString &channelName, const int decimals)
     if (!m_session) {
         return QStringLiteral("—");
     }
-    const auto value = m_session->valueAt(
-        channelName,
-        videoToTelemetryTime(m_playbackTime, m_sync));
+    const auto time = videoToTelemetryTime(m_playbackTime, m_sync);
+    if (!time) return QStringLiteral("—");
+    const auto value = m_session->valueAt(channelName, *time);
     return value ? QString::number(*value, 'f', qBound(0, decimals, 6)) : QStringLiteral("—");
 }
 
@@ -1194,8 +1194,9 @@ QVariant AppController::telemetryValue(const QString &channelName) const
     if (!m_session || channelName.isEmpty()) {
         return {};
     }
-    const auto value = m_session->valueAt(
-        channelName, videoToTelemetryTime(m_playbackTime, m_sync));
+    const auto time = videoToTelemetryTime(m_playbackTime, m_sync);
+    if (!time) return {};
+    const auto value = m_session->valueAt(channelName, *time);
     return value ? QVariant(*value) : QVariant();
 }
 
@@ -1209,9 +1210,10 @@ QVariantMap AppController::telemetrySeries(
         || !std::isfinite(videoEnd) || maximumPoints < 2) {
         return {};
     }
-    const double telemetryStart = videoToTelemetryTime(videoStart, m_sync);
-    const double telemetryEnd = videoToTelemetryTime(videoEnd, m_sync);
-    return sessionSeries(*m_session, channelName, telemetryStart, telemetryEnd, maximumPoints);
+    const auto telemetryStart = videoToTelemetryTime(videoStart, m_sync);
+    const auto telemetryEnd = videoToTelemetryTime(videoEnd, m_sync);
+    if (!telemetryStart || !telemetryEnd) return {};
+    return sessionSeries(*m_session, channelName, *telemetryStart, *telemetryEnd, maximumPoints);
 }
 
 QVariantMap AppController::sessionSeries(const TelemetrySession &session, const QString &channelName,
@@ -1263,7 +1265,7 @@ qint64 AppController::videoMillisecondsForTelemetryTime(const double telemetryTi
     const auto videoTime = telemetryToVideoTime(telemetryTime, m_sync);
     if (!videoTime || *videoTime < 0.0) return -1;
     const double milliseconds = *videoTime * 1'000.0;
-    if (!std::isfinite(milliseconds)
+    if (!std::isfinite(milliseconds) || milliseconds >= 0x1p63
         || milliseconds > static_cast<double>(previewEndPositionMilliseconds())) {
         return -1;
     }
@@ -2690,7 +2692,9 @@ QVariant AppController::semanticValue(const QString &alias) const
     if (!m_session) {
         return {};
     }
-    const auto value = m_session->valueAt(alias, videoToTelemetryTime(m_playbackTime, m_sync));
+    const auto time = videoToTelemetryTime(m_playbackTime, m_sync);
+    if (!time) return {};
+    const auto value = m_session->valueAt(alias, *time);
     return value ? QVariant(*value) : QVariant();
 }
 

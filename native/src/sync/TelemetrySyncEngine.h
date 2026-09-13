@@ -30,6 +30,11 @@ struct SyncCandidate {
 // real-recording result automatic while making weaker matches reviewable.
 inline constexpr double kAutomaticSyncConfidenceThreshold = 0.75;
 inline constexpr double kMinimumSyncOverlapSeconds = 20.0;
+// Resource budgets, not limits on saved manual transforms or recording length.
+inline constexpr qsizetype kMaximumSyncSignalSamples = 1'000'000;
+inline constexpr int kMaximumSyncGridSamples = 1'000'000;
+inline constexpr int kMaximumSyncOffsets = 100'001;
+inline constexpr qint64 kMaximumSyncSamplePairs = 50'000'000;
 
 enum class SyncConfidenceLevel { High, Medium, Low };
 

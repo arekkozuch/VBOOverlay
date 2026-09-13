@@ -473,6 +473,7 @@ int exportWorker(const QString &configPath)
                 : pipeline.stage == QStringLiteral("finalizing")
                     ? QStringLiteral("Flushing MP4 container")
                     : QStringLiteral("Encoding final HEVC video");
+            const auto telemetryTime = FlappedEar::videoToTelemetryTime(pipeline.sourceVideoTime, sync);
             QJsonObject event{{"type", "progress"}, {"state", eventStage},
                               {"operation", operation}, {"message", operationMessage},
                               {"renderedFrames", static_cast<qint64>(pipeline.submittedFrames)},
@@ -483,7 +484,7 @@ int exportWorker(const QString &configPath)
                               {"exportDuration", pipeline.exportDuration},
                               {"exportRelativeTime", pipeline.exportRelativeTime},
                               {"sourceVideoTime", pipeline.sourceVideoTime},
-                              {"telemetryTime", FlappedEar::videoToTelemetryTime(pipeline.sourceVideoTime, sync)},
+                              {"telemetryTime", telemetryTime ? QJsonValue(*telemetryTime) : QJsonValue(QJsonValue::Null)},
                               {"encodedFrames", static_cast<qint64>(pipeline.encodedFrames)},
                               {"encodedSeconds", pipeline.encodedSeconds},
                               {"encodedProgress", encodedPercent},

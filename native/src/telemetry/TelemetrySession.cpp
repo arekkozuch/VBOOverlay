@@ -226,9 +226,13 @@ QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
     return bounded;
 }
 
-double videoToTelemetryTime(const double videoTime, const SyncTransform &transform)
+std::optional<double> videoToTelemetryTime(const double videoTime, const SyncTransform &transform)
 {
-    return videoTime * transform.timeScale + transform.offset;
+    if (!std::isfinite(videoTime) || !std::isfinite(transform.offset)
+        || !std::isfinite(transform.timeScale) || transform.timeScale <= 0.0)
+        return std::nullopt;
+    const double telemetryTime = videoTime * transform.timeScale + transform.offset;
+    return std::isfinite(telemetryTime) ? std::optional<double>(telemetryTime) : std::nullopt;
 }
 
 std::optional<double> telemetryToVideoTime(

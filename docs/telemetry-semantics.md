@@ -91,3 +91,48 @@ Analysis navigation publishes only synchronized, video-overlapping fragments: Ou
 The Export dialog's **Single lap · hotlap** range is similarly C++ owned. It takes one completed lap and a selectable 5–8 second handle on each side, clamps to the source frame domain, then returns inclusive SMPTE IN/OUT timecodes for the existing frame-addressed exporter. Handles are presentation-time selection inputs only; the accepted export remains the exact inclusive integer frame range parsed from those C++ timecodes.
 
 Known audit limitation: best-lap reference traces still need explicit GPS-gap segment preservation; do not treat a displayed comparison across a recording gap as validated. Raw missing-data semantics above do not establish correctness of that derived comparison path.
+
+
+## Synchronization transforms and numeric bounds
+
+`videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;
+`telemetryToVideoTime(telemetry, sync)` computes `(telemetry - offset) / timeScale`.
+Both return an optional finite time. Non-finite inputs, non-positive scales and
+non-finite derived results return no data. There is no clamping to zero or a nearby
+sample, and no arbitrary cap on finite saved manual offsets/scales. Underflow to a
+finite value follows ordinary double arithmetic; these helpers do not claim an
+exact mathematical round trip at extreme precision limits.
+
+| Consumer | Transformation and unavailable behavior |
+| --- | --- |
+| Preview values and static-analysis queries | AppController uses the checked forward transform; invalid times/range endpoints return empty values/series or `—`. Finite but overflowing chart spans are rejected by sampledSegments. |
+| Preview and offscreen export widgets | Shared TelemetryRenderContext uses the checked forward transform. Its QML time/value is an invalid QVariant on overflow, the track marker is empty, and lap timing is unavailable. |
+| Export worker progress | Uses the same forward helper; an unavailable transformed time is explicit JSON null. Source video/frame scheduling continues independently. |
+| Lap seeking, analysis navigation and hotlap ranges | Use the checked inverse helper. Invalid/outside-video times are unavailable; millisecond conversion additionally rejects values at or above 2^63 before rounding. |
+| Event project persistence | EventProjectCodec already requires numeric finite offsets and positive finite scales. It preserves valid finite values, including extremes; consumers validate the actual time queried. The v3 schema is unchanged. |
+
+### Automatic synchronization
+
+KAN-17 closes demonstrated boundary gaps: the former forward expression could
+return infinity (for example `2 * DBL_MAX`), the search read first/last timestamps
+before checking empty/mismatched channels, and floating increments could stall
+(for example `1e16 + 0.1 == 1e16`). Confidence values outside finite `0..1` and
+invalid candidate transforms cannot qualify for automatic application.
+
+The search validates aligned speed channels with at least 20 samples, finite
+strictly increasing timestamps and at most 1,000,000 source samples per channel.
+Coarse (1 Hz) and fine (10 Hz) searches use bounded integer grids. Each phase is
+limited to 1,000,000 resampled times and 100,001 offsets; their combined budget is
+50,000,000 sample-pair evaluations. Counts are checked before integer conversion
+and allocation. Non-finite ranges or a grid whose timestamps cannot advance at
+the requested resolution fail explicitly. These are search resource/precision
+limits, not recording import or manual synchronization limits. Cancellation is
+checked during validation, each offset, sampling and correlation.
+
+The midpoint uses the standard overflow-safe operation; integer conversion must
+be range checked as specified by the [C++ numeric midpoint contract](https://eel.is/c++draft/numeric.ops.midpoint)
+and [floating-to-integer conversion rules](https://eel.is/c++draft/conv.fpint).
+The existing global ambiguity and minimum-overlap evidence still bound fine-search
+confidence. An ambiguous result remains reviewable without changing the confirmed
+transform. Source identity and timing-edit revision guards still reject stale
+results. Search failure likewise leaves the confirmed transform in place.

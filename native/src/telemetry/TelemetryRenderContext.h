@@ -40,7 +40,7 @@ public:
 
     Q_INVOKABLE QVariant telemetryValue(const QString &channelName) const;
     Q_INVOKABLE QString valueText(const QString &channelName, int decimals = 2) const;
-    Q_INVOKABLE double telemetryTime() const;
+    Q_INVOKABLE QVariant telemetryTime() const;
 
 public slots:
     void setTime(double time);

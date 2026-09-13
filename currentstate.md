@@ -44,7 +44,7 @@ evidence-linked report. Raw OBD/HR charts do not yet constitute vehicle/driver
 analysis. The full original vision remains itemized as F00–F20.
 
 The editor/export foundation should be preserved. Remaining hardening includes
-synchronization bounds, slow/full destinations and consistent user-facing package naming.
+slow/full destinations and consistent user-facing package naming.
 
 ## Subsequent task changes
 
@@ -83,6 +83,15 @@ quadrants, zero crossings, mixed axis magnitudes, conflicting evidence and bound
 Existing lap/pairing fixtures retain their assertions with explicit source units.
 Exact PR/main macOS Debug and Release CI evidence belongs in Jira; no new Windows,
 private-recording or physical-hardware verification is claimed.
+
+[KAN-17](https://kozucharkadiusz.atlassian.net/browse/KAN-17) adds checked optional
+forward/inverse synchronization times at preview, analysis and export boundaries.
+Overflow becomes explicit no data; valid finite project settings remain preserved.
+Auto-sync validates channels before access and uses bounded integer grids with
+source/grid/work budgets, avoiding non-advancing floating loops. Invalid confidence
+or transforms cannot auto-apply. Thirty-three new cases include an ambiguous engine
+result preserving confirmed controller settings. Exact macOS PR/main CI evidence
+is recorded in Jira; Windows and private/hardware acceptance remain separate.
 
 ## Evidence boundaries
 

@@ -153,7 +153,9 @@ QVariantMap TelemetryRenderContext::currentTrackPoint() const
     if (!m_session || !m_geometry) {
         return {};
     }
-    const auto point = FlappedEar::currentTrackPoint(*m_session, telemetryTime(), *m_geometry);
+    const auto time = videoToTelemetryTime(m_time, m_sync);
+    if (!time) return {};
+    const auto point = FlappedEar::currentTrackPoint(*m_session, *time, *m_geometry);
     return point ? QVariantMap{{"x", point->x()}, {"y", point->y()}} : QVariantMap();
 }
 
@@ -167,8 +169,10 @@ QVariantMap TelemetryRenderContext::lapTiming() const
         return result;
     }
 
+    const auto transformed = videoToTelemetryTime(m_time, m_sync);
+    if (!transformed) return result;
     result.insert(QStringLiteral("available"), true);
-    const double currentTime = telemetryTime();
+    const double currentTime = *transformed;
     const double firstPassTime = m_lapSession.acceptedPasses.constFirst().telemetryTime;
     if (!std::isfinite(currentTime) || currentTime < firstPassTime) {
         result.insert(QStringLiteral("state"), QStringLiteral("waiting"));
@@ -315,7 +319,9 @@ QVariant TelemetryRenderContext::telemetryValue(const QString &channelName) cons
     if (!m_session || channelName.isEmpty()) {
         return {};
     }
-    const auto value = presentationValueAt(*m_session, channelName, telemetryTime());
+    const auto time = videoToTelemetryTime(m_time, m_sync);
+    if (!time) return {};
+    const auto value = presentationValueAt(*m_session, channelName, *time);
     return value ? QVariant(*value) : QVariant();
 }
 
@@ -326,9 +332,10 @@ QString TelemetryRenderContext::valueText(const QString &channelName, const int 
                            : QStringLiteral("—");
 }
 
-double TelemetryRenderContext::telemetryTime() const
+QVariant TelemetryRenderContext::telemetryTime() const
 {
-    return videoToTelemetryTime(m_time, m_sync);
+    const auto time = videoToTelemetryTime(m_time, m_sync);
+    return time ? QVariant(*time) : QVariant();
 }
 
 void TelemetryRenderContext::setTime(const double time)

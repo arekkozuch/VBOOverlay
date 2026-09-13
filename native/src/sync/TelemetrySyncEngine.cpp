@@ -10,6 +10,8 @@ namespace FlappedEar {
 
 SyncConfidenceLevel syncConfidenceLevel(const double confidence)
 {
+    if (!std::isfinite(confidence) || confidence < 0.0 || confidence > 1.0)
+        return SyncConfidenceLevel::Low;
     if (confidence >= kAutomaticSyncConfidenceThreshold) {
         return SyncConfidenceLevel::High;
     }
@@ -20,10 +22,43 @@ SyncConfidenceLevel syncConfidenceLevel(const double confidence)
 
 bool shouldAutoApplySyncCandidate(const SyncCandidate &candidate)
 {
-    return syncConfidenceLevel(candidate.confidence) == SyncConfidenceLevel::High;
+    return std::isfinite(candidate.offset) && std::isfinite(candidate.timeScale)
+        && candidate.timeScale > 0.0
+        && syncConfidenceLevel(candidate.confidence) == SyncConfidenceLevel::High;
 }
 
 namespace {
+
+void validateSignal(const TelemetryChannel &signal, const CancellationCheck &cancelled)
+{
+    if (signal.timestamps.size() != signal.values.size() || signal.values.size() < 20)
+        throw std::runtime_error("Synchronization requires at least 20 aligned GPS speed samples.");
+    if (signal.values.size() > kMaximumSyncSignalSamples)
+        throw ResourceLimitError("Synchronization signal exceeds the 1000000-sample limit.");
+    for (qsizetype i = 0; i < signal.timestamps.size(); ++i) {
+        if ((i & 0xff) == 0) throwIfCancelled(cancelled);
+        const double time = signal.timestamps[i];
+        if (!std::isfinite(time) || (i && time <= signal.timestamps[i - 1]))
+            throw std::runtime_error("Synchronization timestamps must be finite and strictly increasing.");
+    }
+}
+
+int gridCount(const double span, const double step, const int maximum)
+{
+    const double intervals = std::floor(span / step);
+    if (!std::isfinite(span) || span < 0.0 || !std::isfinite(intervals)
+        || intervals >= maximum)
+        throw ResourceLimitError("Synchronization grid exceeds the supported time/search budget.");
+    return static_cast<int>(intervals) + 1;
+}
+
+double gridTime(const double start, const double step, const int index)
+{
+    const double value = start + index * step;
+    if (!std::isfinite(value) || (index && value <= start + (index - 1) * step))
+        throw std::runtime_error("Synchronization time grid exceeds supported numeric precision.");
+    return value;
+}
 
 struct Result {
     double offset = 0.0;
@@ -33,7 +68,7 @@ struct Result {
 
 std::optional<double> interpolate(const TelemetryChannel &signal, const double time)
 {
-    if (signal.timestamps.isEmpty() || time < signal.timestamps.constFirst()
+    if (!std::isfinite(time) || signal.timestamps.isEmpty() || time < signal.timestamps.constFirst()
         || time > signal.timestamps.constLast()) {
         return std::nullopt;
     }
@@ -45,7 +80,8 @@ std::optional<double> interpolate(const TelemetryChannel &signal, const double t
     const qsizetype low = high - 1;
     const double span = signal.timestamps[high] - signal.timestamps[low];
     const double ratio = span == 0.0 ? 0.0 : (time - signal.timestamps[low]) / span;
-    return signal.values[low] + (signal.values[high] - signal.values[low]) * ratio;
+    return static_cast<double>(signal.values[low])
+        + (static_cast<double>(signal.values[high]) - signal.values[low]) * ratio;
 }
 
 double correlation(
@@ -70,7 +106,7 @@ double correlation(
         varianceB += db * db;
     }
     return varianceA > 0.0 && varianceB > 0.0
-        ? numerator / std::sqrt(varianceA * varianceB)
+        ? std::clamp(numerator / std::sqrt(varianceA * varianceB), -1.0, 1.0)
         : -1.0;
 }
 
@@ -80,22 +116,36 @@ SyncCandidate calculate(
     const double searchWindow,
     const double sampleRate,
     const double centerOffset,
+    qint64 &remainingPairs,
     const CancellationCheck &cancelled)
 {
-    if (video.values.size() < 20 || telemetry.values.size() < 20) {
-        throw std::runtime_error("Insufficient usable GPS speed samples for synchronization.");
-    }
     const double step = 1.0 / sampleRate;
+    const double firstOffset = centerOffset - searchWindow;
+    const double lastOffset = centerOffset + searchWindow;
+    if (!std::isfinite(firstOffset) || !std::isfinite(lastOffset))
+        throw std::runtime_error("Synchronization offset range is not finite.");
+    const int offsets = gridCount(lastOffset - firstOffset + step / 2.0, step, kMaximumSyncOffsets);
+    const int samples = gridCount(video.timestamps.constLast() - video.timestamps.constFirst(),
+                                  step, kMaximumSyncGridSamples);
+    const qint64 pairs = static_cast<qint64>(offsets) * samples;
+    if (pairs > remainingPairs)
+        throw ResourceLimitError("Synchronization exceeds the 50000000 sample-pair work budget.");
+    remainingPairs -= pairs;
+    // Validate the grid's precision before allocating or doing correlation work.
+    (void) gridTime(firstOffset, step, offsets - 1);
+    (void) gridTime(video.timestamps.constFirst(), step, samples - 1);
     QVector<Result> results;
-    for (double offset = centerOffset - searchWindow;
-         offset <= centerOffset + searchWindow + step / 2.0;
-         offset += step) {
+    results.reserve(offsets);
+    for (int offsetIndex = 0; offsetIndex < offsets; ++offsetIndex) {
         throwIfCancelled(cancelled);
+        const double offset = gridTime(firstOffset, step, offsetIndex);
         QVector<double> a;
         QVector<double> b;
-        qsizetype sampleIndex = 0;
-        for (double time = video.timestamps.constFirst(); time <= video.timestamps.constLast(); time += step) {
-            if ((sampleIndex++ & 0xff) == 0) throwIfCancelled(cancelled);
+        a.reserve(samples);
+        b.reserve(samples);
+        for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex) {
+            if ((sampleIndex & 0xff) == 0) throwIfCancelled(cancelled);
+            const double time = gridTime(video.timestamps.constFirst(), step, sampleIndex);
             const auto av = interpolate(video, time);
             const auto bv = interpolate(telemetry, time + offset);
             if (av && bv && std::isfinite(*av) && std::isfinite(*bv)) {
@@ -121,7 +171,10 @@ SyncCandidate calculate(
     const double durationScore = std::min(1.0, best.samples / (sampleRate * 20.0));
     const double strength = std::clamp((best.score + 1.0) / 2.0, 0.0, 1.0);
     SyncCandidate candidate;
-    candidate.offset = std::round(best.offset * 1000.0) / 1000.0;
+    const double milliseconds = best.offset * 1000.0;
+    if (!std::isfinite(milliseconds))
+        throw std::runtime_error("Synchronization offset exceeds millisecond rounding range.");
+    candidate.offset = std::round(milliseconds) / 1000.0;
     candidate.confidence = std::round(
         100.0 * strength * (0.35 + 0.4 * uniqueness + 0.25 * durationScore))
         / 100.0;
@@ -149,16 +202,21 @@ SyncCandidate TelemetrySyncEngine::synchronize(
     }
     const TelemetryChannel &videoSpeed = *videoIt;
     const TelemetryChannel &telemetrySpeed = *telemetryIt;
+    validateSignal(videoSpeed, cancelled);
+    validateSignal(telemetrySpeed, cancelled);
     double minimum = telemetrySpeed.timestamps.constFirst() - videoSpeed.timestamps.constFirst();
     double maximum = telemetrySpeed.timestamps.constLast() - videoSpeed.timestamps.constLast();
     if (maximum < minimum) {
         minimum = telemetrySpeed.timestamps.constFirst() - videoSpeed.timestamps.constLast();
         maximum = telemetrySpeed.timestamps.constLast() - videoSpeed.timestamps.constFirst();
     }
-    const double center = (minimum + maximum) / 2.0;
+    if (!std::isfinite(minimum) || !std::isfinite(maximum))
+        throw std::runtime_error("Synchronization timestamp differences are not finite.");
+    const double center = std::midpoint(minimum, maximum);
     const double window = std::max(1.0, (maximum - minimum) / 2.0);
-    const SyncCandidate coarse = calculate(videoSpeed, telemetrySpeed, window, 1.0, center, cancelled);
-    SyncCandidate fine = calculate(videoSpeed, telemetrySpeed, 5.0, 10.0, coarse.offset, cancelled);
+    qint64 remainingPairs = kMaximumSyncSamplePairs;
+    const SyncCandidate coarse = calculate(videoSpeed, telemetrySpeed, window, 1.0, center, remainingPairs, cancelled);
+    SyncCandidate fine = calculate(videoSpeed, telemetrySpeed, 5.0, 10.0, coarse.offset, remainingPairs, cancelled);
     throwIfCancelled(cancelled);
     // Refinement estimates a more precise offset, but cannot erase competing
     // peaks outside its local window or improve the global evidence of uniqueness.
