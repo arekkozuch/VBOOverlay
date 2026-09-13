@@ -141,6 +141,19 @@ struct ParsedTimestamp {
     TimestampFormat format = TimestampFormat::RelativeSeconds;
 };
 
+double checkedTime(const double seconds)
+{
+    // ProjectSourceReferenceCodec fingerprints durations with llround(seconds
+    // * 1e6). Use strict bounds: double(qint64::max()) rounds up to 2^63.
+    constexpr double integerLimit = 0x1p63;
+    const double microseconds = seconds * 1'000'000.0;
+    if (!std::isfinite(seconds) || !std::isfinite(microseconds)
+        || microseconds <= -integerLimit || microseconds >= integerLimit) {
+        throw VboParseError("VBO timestamp exceeds the supported signed 64-bit microsecond range.");
+    }
+    return seconds;
+}
+
 // Clock syntax is deliberately recognized from the original field text. In
 // particular, 003059.500 is 00:30:59.500, not 3,059.5 relative seconds.
 std::optional<ParsedTimestamp> parseTimestamp(const QString &value)
@@ -548,39 +561,43 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
                               .arg(timestampText));
             continue;
         }
-        double absoluteTime = parsedTime->seconds;
+        double absoluteTime = checkedTime(parsedTime->seconds);
         if (parsedTime->format == TimestampFormat::Clock) {
             if (previousClockTime && previousAbsoluteTime
                 && parsedTime->seconds < *previousClockTime
                 && *previousClockTime >= lateDayThreshold
                 && parsedTime->seconds <= earlyDayThreshold) {
-                clockDayOffset += 24.0 * 3600.0;
+                clockDayOffset = checkedTime(clockDayOffset + 24.0 * 3600.0);
                 appendWarning(QStringLiteral("Row %1: midnight rollover detected.").arg(rowIndex + 1));
             }
-            absoluteTime += clockDayOffset;
+            absoluteTime = checkedTime(absoluteTime + clockDayOffset);
         }
         if (!origin) {
             origin = absoluteTime;
             originIsClock = parsedTime->format == TimestampFormat::Clock;
         }
+        const double timestamp = checkedTime(absoluteTime - *origin);
         if (previousAbsoluteTime) {
             if (absoluteTime == *previousAbsoluteTime) {
                 // Keep the first row and skip later duplicates so every
                 // emitted channel remains aligned on strictly increasing time.
                 appendWarning(QStringLiteral("Row %1: duplicate timestamp %2; later row skipped.")
                                   .arg(rowIndex + 1)
-                                  .arg(absoluteTime - *origin, 0, 'f', 3));
+                                  .arg(timestamp, 0, 'f', 3));
                 continue;
             }
             if (absoluteTime < *previousAbsoluteTime) {
                 appendWarning(QStringLiteral("Row %1: timestamp moved backward from %2 to %3; row skipped.")
                                   .arg(rowIndex + 1)
-                                  .arg(*previousAbsoluteTime - *origin, 0, 'f', 3)
-                                  .arg(absoluteTime - *origin, 0, 'f', 3));
+                                  .arg(rawTimes.back(), 0, 'f', 3)
+                                  .arg(timestamp, 0, 'f', 3));
                 continue;
             }
         }
-        const double timestamp = absoluteTime - *origin;
+        // Distinct absolute doubles can collapse to the same elapsed double
+        // after subtraction. Reject before publishing any channel sample.
+        if (timestamp < 0.0 || (!rawTimes.isEmpty() && timestamp <= rawTimes.back()))
+            throw VboParseError("VBO derived timestamps are not strictly increasing.");
         rawTimes.append(timestamp);
         for (qsizetype column = 0; column < names.size(); ++column) {
             bool valid = false;
@@ -630,8 +647,8 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
         channel.values = std::move(rawValues[column]);
         session.channels.insert(channel.name, std::move(channel));
     }
-    session.duration = rawTimes.back() - rawTimes.front();
-    session.startTime = origin.value_or(0.0);
+    session.duration = checkedTime(rawTimes.back() - rawTimes.front());
+    session.startTime = checkedTime(origin.value_or(0.0));
     // Only a recognized RaceChrono export with a valid date and clock establishes
     // UTC chronology. Relative seconds and arbitrary filenames do not establish it.
     session.metadata.remove("firstTimestampMilliseconds");
@@ -648,10 +665,17 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
             QDate date = QDate::fromString(match.captured(1), "dd/MM/yyyy");
             const QTime createdTime = QTime::fromString(match.captured(2), "HH:mm:ss");
             if (match.hasMatch() && date.isValid() && createdTime.isValid()) {
-                if (session.startTime + 12 * 3600 < QTime(0, 0).secsTo(createdTime)) date = date.addDays(1);
-                const auto midnight = QDateTime(date, QTime(0, 0), QTimeZone::UTC).toMSecsSinceEpoch();
+                if (checkedTime(session.startTime + 12 * 3600) < QTime(0, 0).secsTo(createdTime))
+                    date = date.addDays(1);
+                const QDateTime midnight(date, QTime(0, 0), QTimeZone::UTC);
+                // checkedTime establishes a stricter microsecond bound before
+                // this millisecond conversion; the first clock is nonnegative.
+                const qint64 offset = std::llround(session.startTime * 1000.0);
+                if (!midnight.isValid() || offset < 0
+                    || midnight.toMSecsSinceEpoch() > std::numeric_limits<qint64>::max() - offset)
+                    throw VboParseError("VBO UTC chronology exceeds the supported date range.");
                 session.metadata.insert("firstTimestampMilliseconds",
-                    QString::number(midnight + std::llround(session.startTime * 1000.0)));
+                    QString::number(midnight.toMSecsSinceEpoch() + offset));
             }
         }
     }

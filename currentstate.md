@@ -44,7 +44,7 @@ evidence-linked report. Raw OBD/HR charts do not yet constitute vehicle/driver
 analysis. The full original vision remains itemized as F00–F20.
 
 The editor/export foundation should be preserved. Remaining hardening includes
-VBO derived-time budgets, coordinate-unit
+Synchronization bounds, coordinate-unit
 ambiguity, slow/full destinations and consistent user-facing package naming.
 
 ## Subsequent task changes
@@ -65,6 +65,13 @@ validates ignored extra fields while preserving their warning counts. Existing
 size/count limits and timestamp calculations are unchanged. Synthetic boundary,
 format and cancellation regressions accompany the change; exact CI and merge
 evidence belongs in KAN-14.
+
+[KAN-15](https://kozucharkadiusz.atlassian.net/browse/KAN-15) validates VBO absolute
+and derived times against finite, signed 64-bit microsecond conversion bounds
+before publication. Rollover, elapsed time, duration and UTC chronology are checked;
+unsafe numeric ranges reject the parse. Chart sampling checks its derived range
+and integer bucket conversion. Boundary and mixed-format regressions accompany
+the changes; final PR/main CI evidence is recorded in Jira.
 
 ## Evidence boundaries
 
