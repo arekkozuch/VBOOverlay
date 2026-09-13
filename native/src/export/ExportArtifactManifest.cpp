@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QUuid>
+#include <limits>
 
 #ifdef Q_OS_UNIX
 #include <cerrno>
@@ -139,6 +140,15 @@ QStringList ExportArtifactManifest::recoverStale(QStringList *diagnostics)
         QString error;
         if (!read(path, &data, &error)) { if (diagnostics) diagnostics->append(QStringLiteral("Skipped %1: %2").arg(path, error)); continue; }
         if (processIsActive(data.workerPid)) { if (diagnostics) diagnostics->append(QStringLiteral("Kept active export manifest %1").arg(path)); continue; }
+#ifdef Q_OS_UNIX
+        // The worker PID is also its isolated process-group ID. A stale leader
+        // does not authorize deleting files still owned by surviving writers.
+        if (data.workerPid > 1 && data.workerPid <= std::numeric_limits<pid_t>::max()
+            && (::kill(-static_cast<pid_t>(data.workerPid), 0) == 0 || errno != ESRCH)) {
+            if (diagnostics) diagnostics->append(QStringLiteral("Kept active export group manifest %1").arg(path));
+            continue;
+        }
+#endif
         if (cleanupOwned(path, &error)) cleaned.append(path);
         else if (diagnostics) diagnostics->append(QStringLiteral("Could not clean %1: %2").arg(path, error));
     }

@@ -193,7 +193,9 @@ private slots:
     void supervisesUnixExportProcessTree();
     void stopsUnixWritersAcrossLeaderExit_data();
     void stopsUnixWritersAcrossLeaderExit();
+    void stopsUnixWritersBeforeControllerCleanup_data();
     void stopsUnixWritersBeforeControllerCleanup();
+    void boundsImmediateProcessTreeStop();
     void stopsExportWorkerWhenCancellationMarkerCannotBeCreated();
     void detectsHevcEncoders();
     void cancelsEncoderDiscovery();
@@ -3965,7 +3967,7 @@ void TelemetryTests::stopsUnixWritersAcrossLeaderExit()
     QVERIFY(writerPid > 1);
     QCOMPARE(process.write("R", 1), qint64(1));
     QVERIFY(process.waitForBytesWritten(2'000));
-    if (action != "grace") QVERIFY(process.waitForFinished(2'000));
+    if (action != "grace") QVERIFY(process.state() == QProcess::NotRunning || process.waitForFinished(2'000));
     QVERIFY(ExportArtifactManifest::processIsActive(writerPid));
 
     QElapsedTimer elapsed;
@@ -3998,9 +4000,17 @@ void TelemetryTests::stopsUnixWritersAcrossLeaderExit()
 #endif
 }
 
+void TelemetryTests::stopsUnixWritersBeforeControllerCleanup_data()
+{
+    QTest::addColumn<bool>("cancelled");
+    QTest::newRow("cancelled") << true;
+    QTest::newRow("reported-success-with-live-writer") << false;
+}
+
 void TelemetryTests::stopsUnixWritersBeforeControllerCleanup()
 {
 #ifdef Q_OS_UNIX
+    QFETCH(bool, cancelled);
     QSettings settings;
     settings.clear();
     settings.sync();
@@ -4017,8 +4027,8 @@ void TelemetryTests::stopsUnixWritersBeforeControllerCleanup()
     const QString overlay = QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv").arg(id));
     QVERIFY(writeBytes(overlay, "owned overlay"));
     controller.m_exportCancelPath = directory.filePath("cancel");
-    QVERIFY(writeBytes(controller.m_exportCancelPath, {}));
-    controller.m_exportState = QStringLiteral("cancelling");
+    if (cancelled) QVERIFY(writeBytes(controller.m_exportCancelPath, {}));
+    controller.m_exportState = cancelled ? QStringLiteral("cancelling") : QStringLiteral("complete");
     controller.m_exportProcess = std::make_unique<QProcess>();
     controller.m_exportSupervisor = std::make_unique<ExportProcessSupervisor>(*controller.m_exportProcess);
     const QString ready = directory.filePath("writer.ready");
@@ -4038,7 +4048,8 @@ void TelemetryTests::stopsUnixWritersBeforeControllerCleanup()
     controller.m_exportManifestPath = manifestPath;
     QCOMPARE(controller.m_exportProcess->write("R", 1), qint64(1));
     QVERIFY(controller.m_exportProcess->waitForBytesWritten(2'000));
-    QVERIFY(controller.m_exportProcess->waitForFinished(2'000));
+    QVERIFY(controller.m_exportProcess->state() == QProcess::NotRunning
+            || controller.m_exportProcess->waitForFinished(2'000));
 
     QVERIFY(!ExportArtifactManifest::recoverStale().contains(manifestPath));
     QVERIFY(QFileInfo::exists(staging));
@@ -4046,7 +4057,7 @@ void TelemetryTests::stopsUnixWritersBeforeControllerCleanup()
     QVERIFY(controller.exporting());
     controller.finishExport(0, QProcess::NormalExit);
     QVERIFY(!controller.exporting());
-    QCOMPARE(controller.exportState(), QStringLiteral("cancelled"));
+    QCOMPARE(controller.exportState(), cancelled ? QStringLiteral("cancelled") : QStringLiteral("failed"));
     QVERIFY(!ExportArtifactManifest::processIsActive(writerPid));
     QVERIFY(!QFileInfo::exists(manifestPath));
     QVERIFY(!QFileInfo::exists(overlay));
@@ -4057,6 +4068,21 @@ void TelemetryTests::stopsUnixWritersBeforeControllerCleanup()
 #else
     QSKIP("Unix controller cleanup after leader exit regression.");
 #endif
+}
+
+void TelemetryTests::boundsImmediateProcessTreeStop()
+{
+    QProcess process;
+    ExportProcessSupervisor supervisor(process);
+    QVERIFY(supervisor.stopAndWait(0, 0));
+    supervisor.start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH), {QStringLiteral("stall")});
+    QVERIFY(supervisor.waitForStarted());
+    QElapsedTimer elapsed;
+    elapsed.start();
+    static_cast<void>(supervisor.stopAndWait(-1, -1));
+    QVERIFY2(elapsed.elapsed() < 1'000, "Negative shutdown budgets must not become infinite Qt waits.");
+    QVERIFY(supervisor.stopAndWait(0, 2'000));
+    QVERIFY(!supervisor.isRunning());
 }
 
 void TelemetryTests::stopsExportWorkerWhenCancellationMarkerCannotBeCreated()

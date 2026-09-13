@@ -44,8 +44,19 @@ evidence-linked report. Raw OBD/HR charts do not yet constitute vehicle/driver
 analysis. The full original vision remains itemized as F00–F20.
 
 The editor/export foundation should be preserved. Remaining hardening includes
-Unix descendants after leader exit, VBO allocation/time budgets, coordinate-unit
+VBO allocation/time budgets, coordinate-unit
 ambiguity, slow/full destinations and consistent user-facing package naming.
+
+## Subsequent task changes
+
+[KAN-12](https://kozucharkadiusz.atlassian.net/browse/KAN-12) reconciled this
+baseline and the 100-task backlog in PR #13, merged at `a2fde85`.
+[KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13) / PR #14 adds bounded
+shutdown of export descendants after their leader exits. The controller waits
+for all writers before cleanup, rejects reported success with surviving writers,
+and keeps the export active while shutdown is unconfirmed. Startup recovery also
+retains manifests for surviving Unix groups. Exact PR/main CI and integration
+results are recorded in KAN-13; physical/private-media acceptance stays separate.
 
 ## Evidence boundaries
 

@@ -364,3 +364,15 @@ These Unix-specific cases run in macOS CI and are explicitly skipped on Windows;
 the existing cross-platform cancellation-marker and export tests remain required.
 Execution, final PR head and integrated-main evidence are recorded in
 [KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13).
+
+The controller cases cover both cancellation and reported success with a surviving
+writer; the latter must fail without replacing the user's existing target. A
+cross-platform case also verifies immediate/negative stop budgets and subsequent
+bounded cleanup, so negative inputs cannot request infinite Qt waits.
+
+The regression-only head `b7dc20c2e2ccaaf24eac89148d34ef5163e33348`
+was run against unchanged production code in
+[Native CI 34739681497](https://github.com/arekkozuch/VBOOverlay/actions/runs/34739681497).
+Both macOS Debug and Release compiled and failed exactly the four surviving-writer
+checks and the premature-recovery check; the existing cases had no new failures.
+Final passing-head and integrated-main results are recorded in KAN-13.

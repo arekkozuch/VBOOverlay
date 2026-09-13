@@ -20,10 +20,12 @@ public:
     [[nodiscard]] bool supervisionActive() const;
     [[nodiscard]] QString supervisionError() const;
 private:
+    [[nodiscard]] bool waitForStopped(int milliseconds);
     QProcess &m_process;
     bool m_isolateProcessGroup = true;
     qint64 m_pid = 0;
     bool m_supervisionActive = false;
+    bool m_stopping = false;
     QString m_supervisionError;
 #ifdef Q_OS_WIN
     void *m_job = nullptr;

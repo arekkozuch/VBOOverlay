@@ -37,7 +37,7 @@ environments, not physical acceptance of this baseline.
 - [x] Exclude GPS-incomplete laps from spatial references/ranking and expose no-delta/quality states ([KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5), PR #12 merged at `7138fbd`; PR/main CI passed).
 - [ ] Validate shared track-progress correspondence at nearby crossings for A/B comparison ([KAN-32](https://kozucharkadiusz.atlassian.net/browse/KAN-32)).
 - [ ] Bound VBO line splitting before bulk allocation; validate finite derived timestamps and synchronization bounds (KAN-14, KAN-15 and KAN-17 in the delivery ledger).
-- [ ] Terminate Unix descendants when the process-group leader has already exited; verify application cleanup ownership ([KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13)).
+- [x] Supervise Unix descendants after leader exit and stop remaining writers before commit/cleanup; retain owned artifacts if shutdown is unconfirmed ([KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13), PR #14; exact CI/integration evidence is recorded in the task).
 - [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (KAN-5, PR #12 merged at `7138fbd`; PR/main CI passed).
 - [ ] Validate coordinate-unit ambiguity near the equator/prime meridian across exporters ([KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16)).
 - [ ] Validate long final scans, slow destinations and a destination volume filling during Stage B ([KAN-75](https://kozucharkadiusz.atlassian.net/browse/KAN-75)).
@@ -56,7 +56,7 @@ Unchecked audit findings remain open. Their effect on the advertised product wor
 - [ ] Implement and validate color-managed HDR/HLG/PQ/Log preservation; current export rejects these sources without silent conversion.
 - [ ] Validate production 8K on representative renderer/encoder hardware; deterministic model and capability-decision coverage is complete.
 - [ ] Preserve rotation and sample-aspect-ratio display transforms end to end (probe/model retention is complete; export currently fails fast for non-zero rotation or non-square SAR rather than applying an implicit transform).
-- [x] Supervise live FFmpeg/ffprobe process trees on tested configurations; leader-exit descendant handling remains open above.
+- [x] Supervise live FFmpeg/ffprobe process trees on tested configurations; leader-exit handling is covered by KAN-13 above.
 - [x] Add disk-space preflight and manifest-owned temporary-file management policy, including representative FFV1 sampling.
 - [ ] Validate the QML preview/export result against broader real media.
 - [ ] Broaden Windows GPU/encoder and installed-dependency runtime coverage beyond the known configuration.
