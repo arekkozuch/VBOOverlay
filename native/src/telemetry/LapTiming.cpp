@@ -230,19 +230,7 @@ void deriveTimedLaps(const TelemetrySession &session, LapSession &result,
         auto &lap = result.timedLaps.last();
         lap.referenceIssue = referenceIssueForLap(session, lap, origin, cancelled);
     }
-    if (result.timedLaps.isEmpty()) return;
-    for (qsizetype index = 0; index < result.timedLaps.size(); ++index) {
-        if (result.timedLaps[index].referenceEligible()
-            && (!result.fastestLapIndex || result.timedLaps[index].durationSeconds
-                < result.timedLaps[*result.fastestLapIndex].durationSeconds)) {
-            result.fastestLapIndex = index;
-        }
-    }
-    if (!result.fastestLapIndex) return;
-    const double fastestDuration = result.timedLaps[*result.fastestLapIndex].durationSeconds;
-    for (TimedLap &lap : result.timedLaps) {
-        lap.deltaToBestSeconds = lap.durationSeconds - fastestDuration;
-    }
+    recomputeLapRanking(result);
 }
 
 void buildLapTraces(
@@ -321,6 +309,28 @@ void buildLapTraces(
 }
 
 } // namespace
+
+QVector<qsizetype> eligibleLapIndices(const LapSession &session)
+{
+    QVector<qsizetype> indices;
+    for (qsizetype i = 0; i < session.timedLaps.size(); ++i)
+        if (session.timedLaps[i].referenceEligible()) indices.append(i);
+    return indices;
+}
+
+void recomputeLapRanking(LapSession &session)
+{
+    session.fastestLapIndex.reset();
+    for (auto &lap : session.timedLaps) lap.deltaToBestSeconds = 0;
+    for (const auto i : eligibleLapIndices(session)) {
+        if (!session.fastestLapIndex || session.timedLaps[i].durationSeconds
+            < session.timedLaps[*session.fastestLapIndex].durationSeconds) session.fastestLapIndex = i;
+    }
+    if (!session.fastestLapIndex) return;
+    const auto best = session.timedLaps[*session.fastestLapIndex].durationSeconds;
+    for (auto &lap : session.timedLaps)
+        if (lap.referenceEligible()) lap.deltaToBestSeconds = lap.durationSeconds - best;
+}
 
 LapSession detectLaps(
     const TelemetrySession &session,

@@ -63,7 +63,8 @@ struct TimedLap {
     // A measured gate-to-gate interval remains visible even when its GPS
     // coverage cannot support ranking or a spatial reference.
     LapReferenceIssue referenceIssue = LapReferenceIssue::None;
-    [[nodiscard]] bool referenceEligible() const { return referenceIssue == LapReferenceIssue::None; }
+    QString userExclusionReason = {};
+    [[nodiscard]] bool referenceEligible() const { return referenceIssue == LapReferenceIssue::None && userExclusionReason.isEmpty(); }
 };
 
 struct LapTracePoint {
@@ -88,6 +89,10 @@ struct LapSession {
     std::optional<qsizetype> fastestLapIndex;
     LapDetectionDiagnostics diagnostics;
 };
+
+// Shared ranking/statistics/potential input policy. Measured laps and traces remain inspectable.
+[[nodiscard]] QVector<qsizetype> eligibleLapIndices(const LapSession &session);
+void recomputeLapRanking(LapSession &session);
 
 // Content revision of the ordered source gates in east-positive coordinates.
 // Empty means unresolved (missing/ambiguous start gate or invalid coordinates).

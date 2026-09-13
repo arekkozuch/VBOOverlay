@@ -203,6 +203,7 @@ public:
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
     Q_INVOKABLE bool selectOutingLapReference(const QVariantMap &reference);
+    Q_INVOKABLE bool setOutingLapExcluded(const QVariantMap &reference, bool excluded, const QString &reason = {});
     Q_INVOKABLE void closeOutingLap();
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QString outingLapValueText(const QString &channel) const;
@@ -359,6 +360,7 @@ private:
         TelemetrySession session;
         TrackGeometry geometry;
         LapSession lapSession;
+        QByteArray contentRevision;
         QString error;
         quint64 generation = 0;
         QJsonObject fingerprint;
@@ -475,6 +477,11 @@ private:
     };
     void initializeOutingLaps();
     void refreshOutingLaps();
+    void refreshLapExclusionPolicy();
+    [[nodiscard]] QJsonObject activeLapBinding() const;
+    QVector<OutingLapRow> m_outingRawLapRows;
+    QStringList m_outingSourceMessages;
+    QByteArray m_loadedSourceRevision;
     [[nodiscard]] QJsonArray outingLapSources() const;
     [[nodiscard]] QByteArray outingLapKey() const;
     QFutureWatcher<OutingLapResult> m_outingLapWatcher;

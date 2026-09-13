@@ -13,6 +13,7 @@
 #include "telemetry/TelemetrySource.h"
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/LapTiming.h"
+#include "telemetry/OutingLaps.h"
 #include "widgets/WidgetModel.h"
 
 #include <QGuiApplication>
@@ -359,8 +360,17 @@ int exportWorker(const QString &configPath)
         currentOperation = QStringLiteral("parseTelemetry");
         currentMessage = QStringLiteral("Reading telemetry data");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
-        const FlappedEar::TelemetrySession session = FlappedEar::TelemetrySource::load(
-            config.value("vboPath").toString(), cancelled);
+        const auto telemetryPath = config.value("vboPath").toString();
+        const auto binding = config.value("lapBinding").toObject();
+        const auto exclusions = config.value("lapExclusions");
+        if (!FlappedEar::validLapExclusions(exclusions, binding.value("eventId").toString()))
+            throw std::runtime_error("Export lap exclusions are invalid.");
+        const auto sourceSize = QFileInfo(telemetryPath).size();
+        const auto contentRevision = binding.isEmpty() ? QByteArray{}
+            : FlappedEar::TelemetrySource::contentSha256(telemetryPath, sourceSize, cancelled).toHex();
+        if (!binding.isEmpty() && contentRevision != binding.value("sourceRevision").toString().toLatin1())
+            throw std::runtime_error("Recording changed since preview; reload before exporting.");
+        const FlappedEar::TelemetrySession session = FlappedEar::TelemetrySource::load(telemetryPath, cancelled);
         FlappedEar::WidgetModel widgets;
         if (!widgets.fromJson(config.value("widgets").toArray())) {
             writeExportEvent({{"state", "failed"}, {"error", "Widget scene is invalid."}});
@@ -373,8 +383,10 @@ int exportWorker(const QString &configPath)
         currentOperation = QStringLiteral("deriveLapTiming");
         currentMessage = QStringLiteral("Deriving lap timing");
         emitEvent({{"type", "status"}, {"operation", currentOperation}, {"message", currentMessage}});
-        const FlappedEar::LapSession lapSession = FlappedEar::deriveSourceLapSession(
-            session, {}, cancelled);
+        auto lapSession = FlappedEar::deriveSourceLapSession(session, {}, cancelled);
+        if (!binding.isEmpty() && FlappedEar::TelemetrySource::contentSha256(telemetryPath, sourceSize, cancelled).toHex() != contentRevision)
+            throw std::runtime_error("Recording changed during export preparation.");
+        FlappedEar::applyLapExclusions(lapSession, binding, exclusions.toArray());
         const QJsonObject syncJson = config.value("sync").toObject();
         const FlappedEar::SyncTransform sync{
             syncJson.value("offset").toDouble(), syncJson.value("timeScale").toDouble(1.0)};

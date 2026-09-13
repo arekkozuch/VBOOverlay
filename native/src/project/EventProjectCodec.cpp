@@ -1,4 +1,5 @@
 #include "project/EventProjectCodec.h"
+#include "telemetry/OutingLaps.h"
 #include "project/ProjectLimits.h"
 
 #include <QCryptographicHash>
@@ -113,6 +114,8 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         || !event.value(QStringLiteral("runs")).isArray()) {
         return fail(error, QStringLiteral("Event metadata is missing or malformed."));
     }
+    if (!validLapExclusions(event.value("lapExclusions"), event.value("id").toString()))
+        return fail(error, QStringLiteral("Lap exclusions contain an invalid reference, duplicate or reason."));
     const QJsonArray runs = event.value(QStringLiteral("runs")).toArray();
     if (runs.isEmpty() || runs.size() > maximumRuns) return fail(error, QStringLiteral("An event must contain 1–64 runs."));
     QSet<QString> runIds;

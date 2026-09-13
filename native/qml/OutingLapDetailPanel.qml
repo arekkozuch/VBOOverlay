@@ -42,6 +42,41 @@ Rectangle {
                 }
             }
         }
+        RowLayout {
+            visible: root.ready && root.lap.type === "LAP"
+            Layout.fillWidth: true
+            Label {
+                text: root.lap.excluded ? qsTr("Excluded from comparisons") : qsTr("Lap eligibility")
+                color: root.lap.excluded ? "#ffb84d" : "#91a0b2"
+            }
+            TextField {
+                id: exclusionReason
+                objectName: "lapExclusionReason"
+                Layout.fillWidth: true
+                maximumLength: 256
+                placeholderText: qsTr("Reason, e.g. traffic or cooldown")
+                text: root.lap.exclusionReason || ""
+                readOnly: Boolean(root.lap.excluded)
+                Accessible.name: qsTr("Lap exclusion reason")
+            }
+            FeButton {
+                objectName: "toggleLapExclusion"
+                text: root.lap.excluded ? qsTr("Restore lap") : qsTr("Exclude lap")
+                enabled: Boolean(root.lap.excluded) || exclusionReason.text.trim().length > 0
+                onClicked: {
+                    if (!appController.setOutingLapExcluded(root.lap.reference, !root.lap.excluded, exclusionReason.text))
+                        exclusionError.text = qsTr("Could not change this lap. Reopen the lap and try again.");
+                    else exclusionError.text = "";
+                }
+            }
+        }
+        Label {
+            id: exclusionError
+            Layout.fillWidth: true
+            visible: text.length > 0
+            color: "#ffb84d"
+            wrapMode: Text.WordWrap
+        }
         BusyIndicator {
             Layout.alignment: Qt.AlignHCenter
             running: appController.outingLapDetailState === "loading"
