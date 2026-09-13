@@ -1394,6 +1394,15 @@ void TelemetryTests::opensRankedLapsAndRecomputesAfterExclusion()
     QVERIFY(day->property("text").toString().contains("No eligible lap"));
     QVERIFY(controller.setOutingLapExcluded(originalRef, false));
     QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap(), originalRef);
+    controller.m_outingStaleRunIds.insert(controller.activeRunId());
+    controller.refreshOutingCompatibility();
+    QCOMPARE(controller.outingRanking().value("state").toString(), QString("no-eligible-laps"));
+    for (const auto &row : controller.outingLaps()) {
+        QVERIFY(!row.toMap().value("bestOfRun").toBool());
+        QVERIFY(!row.toMap().value("bestOfDay").toBool());
+    }
+    controller.m_outingStaleRunIds.clear(); controller.refreshOutingCompatibility();
+    QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap(), originalRef);
     // Stale generations cannot expose a former winning result during async refresh.
     QVERIFY(controller.setRunTrackConfiguration(controller.activeRunId(), "Changed", "clockwise"));
     QCOMPARE(controller.outingRanking().value("state").toString(), QString("loading"));

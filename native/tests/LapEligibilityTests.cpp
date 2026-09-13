@@ -6,6 +6,7 @@
 
 #include <QtTest>
 #include <limits>
+#include <algorithm>
 
 using namespace FlappedEar;
 
