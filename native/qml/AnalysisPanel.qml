@@ -120,6 +120,8 @@ Rectangle {
                 FeComboBox {
                     id: channelPicker
                     objectName: "analysisChannelPicker"
+                    popupMinimumWidth: 320
+                    wrapPopupText: true
                     Layout.fillWidth: true
                     Layout.minimumWidth: 80
                     implicitHeight: 30
@@ -202,13 +204,15 @@ Rectangle {
                                 id: channelInfo
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: Math.min(112, parent.width * 0.18)
+                                width: Math.min(220, parent.width * 0.4, Math.max(160, parent.width * 0.24))
                                 spacing: 0
                                 Row {
                                     width: channelInfo.width
                                     spacing: 2
                                     FeComboBox {
                                         objectName: "analysisReplaceChannel-" + chartRow.channelName
+                                        popupMinimumWidth: 320
+                                        wrapPopupText: true
                                         width: channelInfo.width - 22
                                         implicitHeight: 26
                                         model: root.availableChannels.filter(channel => channel === chartRow.channelName || root.visibleChannels.indexOf(channel) < 0)

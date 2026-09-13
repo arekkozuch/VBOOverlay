@@ -3,6 +3,8 @@ import QtQuick.Controls
 
 ComboBox {
     id: control
+    property real popupMinimumWidth: 0
+    property bool wrapPopupText: false
     implicitHeight: 36
     leftPadding: 11
     rightPadding: 30
@@ -33,15 +35,16 @@ ComboBox {
         required property int index
         required property var modelData
         highlighted: control.highlightedIndex === index
-        width: control.width
-        height: 34
+        width: control.popup.availableWidth
+        height: control.wrapPopupText ? Math.max(34, contentItem.implicitHeight + topPadding + bottomPadding) : 34
         contentItem: Text {
             text: parent.modelData
             color: parent.highlighted ? "#07140f" : "#dce4ee"
             font.family: "Helvetica Neue"
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideMiddle
+            wrapMode: control.wrapPopupText ? Text.Wrap : Text.NoWrap
+            elide: control.wrapPopupText ? Text.ElideNone : Text.ElideMiddle
         }
         background: Rectangle {
             color: parent.highlighted ? "#55e6a5" : parent.hovered ? "#1a2430" : "#101720"
@@ -49,7 +52,9 @@ ComboBox {
     }
     popup: Popup {
         y: control.height + 4
-        width: control.width
+        width: Math.min(Math.max(control.width, control.popupMinimumWidth),
+            control.Window.window ? Math.max(0, control.Window.window.width - 16) : Infinity)
+        margins: 8
         implicitHeight: Math.min(contentItem.implicitHeight + 8, 280)
         padding: 4
         contentItem: ListView {
