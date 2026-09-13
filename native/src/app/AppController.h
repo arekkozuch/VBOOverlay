@@ -194,6 +194,8 @@ public:
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
     Q_INVOKABLE bool selectEventRun(const QString &runId);
+    Q_INVOKABLE bool setRunTrackConfiguration(
+        const QString &runId, const QString &layoutId, const QString &direction);
     [[nodiscard]] QString batchImportState() const { return m_batchState; }
     [[nodiscard]] QString batchImportError() const { return m_batchError; }
     [[nodiscard]] QStringList analysisImportMessages() const { return m_analysisImportMessages; }

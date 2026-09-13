@@ -179,6 +179,7 @@ private slots:
     void projectsWestPositiveTracksWithoutMirroring_data();
     void projectsWestPositiveTracksWithoutMirroring();
     void preservesLongitudeConventionInLapDetail();
+    void persistsAndInvalidatesRunTrackConfiguration();
     void cancelsTrackGeometryConstruction();
     void cachesStaticTrackGeometry();
     void keepsStaticTrackIndependentFromTime();
@@ -3899,6 +3900,71 @@ void TelemetryTests::preservesLongitudeConventionInLapDetail()
     QCOMPARE(controller.outingLapTrack(), track);
     QCOMPARE(controller.currentProjectObject(), document);
     QCOMPARE(readBytes(path), recording);
+}
+
+void TelemetryTests::persistsAndInvalidatesRunTrackConfiguration()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Identity", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLaps().isEmpty());
+    const auto runId = controller.activeRunId();
+    auto run = EventProjectFixture::runs(controller.currentProjectObject())[0].toObject();
+    const auto imported = EventProjectCodec::trackConfiguration(run);
+    QVERIFY(imported.value("layoutId").isNull());
+    QCOMPARE(imported.value("direction").toString(), QString("unknown"));
+    QCOMPARE(imported.value("gateRevision").toString(), timingGateRevision(*controller.m_session));
+    const auto before = controller.currentProjectObject();
+    QVERIFY(!controller.setRunTrackConfiguration("foreign-run", "layout", "clockwise"));
+    QVERIFY(!controller.setRunTrackConfiguration(runId, "layout", "forward"));
+    QCOMPARE(controller.currentProjectObject(), before);
+    QVERIFY(controller.selectOutingLap(0));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto generation = controller.m_sourceGeneration;
+    const auto oldKey = controller.outingLapKey();
+    QVERIFY(controller.setRunTrackConfiguration(runId, "jastrzab-full", "clockwise"));
+    QCOMPARE(controller.outingLapDetailState(), QString("idle"));
+    QVERIFY(controller.outingLapKey() != oldKey);
+    QCOMPARE(controller.m_sourceGeneration, generation); // Metadata edits do not reload the editor.
+    QTRY_VERIFY(!controller.outingLapsLoading() && !controller.outingLaps().isEmpty());
+    QVERIFY(controller.dirty());
+    const auto revision = controller.m_documentState.revision();
+    QVERIFY(controller.setRunTrackConfiguration(runId, "jastrzab-full", "clockwise"));
+    QCOMPARE(controller.m_documentState.revision(), revision);
+    const auto savedPath = directory.filePath("identity.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+    const auto saved = QJsonDocument::fromJson(readBytes(savedPath)).object();
+    AppController reopened(nullptr, directory.filePath("reopened-recovery.json"));
+    QVERIFY(reopened.beginProjectLoad(savedPath, saved));
+    QTRY_COMPARE(reopened.vboLoadState(), QString("ready"));
+    run = EventProjectFixture::runs(reopened.currentProjectObject())[0].toObject();
+    const auto config = EventProjectCodec::trackConfiguration(run);
+    QCOMPARE(config.value("layoutId").toString(), QString("jastrzab-full"));
+    QCOMPARE(config.value("direction").toString(), QString("clockwise"));
+    QCOMPARE(config.value("gateRevision"), imported.value("gateRevision"));
+    // Simulate an asserted gate revision edit without changing the recording:
+    // cache identity changes and the worker must refuse stale gate metadata.
+    auto stale = reopened.currentProjectObject(); auto runs = EventProjectFixture::runs(stale);
+    run = runs[0].toObject(); auto staleConfig = config;
+    staleConfig.insert("gateRevision", "gates-v1:" + QString(64, '0'));
+    run.insert("trackConfiguration", staleConfig); runs[0] = run; EventProjectFixture::setRuns(stale, runs);
+    const auto oldGateKey = reopened.outingLapKey();
+    reopened.m_projectTemplate = stale; reopened.markPersistentChange();
+    QVERIFY(reopened.outingLapKey() != oldGateKey);
+    QTRY_VERIFY(!reopened.outingLapsLoading() && reopened.outingLapMessages().join(" ").contains("Timing-gate revision"));
+    QVERIFY(reopened.outingLaps().isEmpty());
+    // Replacing the source clears the source-bound assertions in the real editor path.
+    reopened.loadVbo(QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH)));
+    QTRY_COMPARE(reopened.vboLoadState(), QString("ready"));
+    run = EventProjectFixture::runs(reopened.currentProjectObject())[0].toObject();
+    const auto unknown = EventProjectCodec::trackConfiguration(run);
+    QVERIFY(unknown.value("layoutId").isNull()); QVERIFY(unknown.value("gateRevision").isNull());
+    QCOMPARE(unknown.value("direction").toString(), QString("unknown"));
+    QString error; QVERIFY2(ProjectLimits::validateProject(reopened.currentProjectObject(), &error), qPrintable(error));
 }
 
 void TelemetryTests::cancelsTrackGeometryConstruction()

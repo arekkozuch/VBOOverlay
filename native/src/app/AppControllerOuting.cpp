@@ -1,4 +1,6 @@
 #include "app/AppController.h"
+#include "project/EventProjectCodec.h"
+#include "project/ProjectLimits.h"
 #include "telemetry/TelemetrySource.h"
 
 #include <QDateTime>
@@ -8,8 +10,37 @@
 #include <QtConcurrent>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace FlappedEar {
+
+bool AppController::setRunTrackConfiguration(
+    const QString &runId, const QString &layoutId, const QString &direction)
+{
+    if (!EventProjectCodec::isEvent(m_projectTemplate) || projectLoading() || exporting()
+        || recoveryPending() || m_batchPending
+        || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None
+        || m_documentState.revision() == std::numeric_limits<quint64>::max()) return false;
+    auto project = currentProjectObject();
+    auto event = project.value("event").toObject();
+    auto runs = event.value("runs").toArray();
+    for (qsizetype i = 0; i < runs.size(); ++i) {
+        auto run = runs[i].toObject();
+        if (run.value("id").toString() != runId) continue;
+        auto config = EventProjectCodec::trackConfiguration(run);
+        config.insert("layoutId", layoutId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(layoutId));
+        config.insert("direction", direction);
+        run.insert("trackConfiguration", config);
+        if (run == runs[i].toObject()) return true;
+        runs[i] = run; event.insert("runs", runs); project.insert("event", event);
+        QString error;
+        if (!ProjectLimits::validateProject(project, &error)) return false;
+        m_projectTemplate = project;
+        markPersistentChange();
+        return true;
+    }
+    return false;
+}
 
 QJsonArray AppController::outingLapSources() const
 {
@@ -21,7 +52,9 @@ QJsonArray AppController::outingLapSources() const
             const auto source = item.toObject();
             if (source.value("id") != run.value("primaryTelemetrySourceId")) continue;
             sources.append(QJsonObject{{"runId", run.value("id")}, {"name", run.value("name")},
-                {"sourceId", source.value("id")}, {"reference", source.value("reference")}});
+                {"sourceId", source.value("id")}, {"reference", source.value("reference")},
+                {"trackConfiguration", EventProjectCodec::trackConfiguration(run)},
+                {"derivationKey", QString::fromLatin1(EventProjectCodec::lapDerivationKey(run))}});
         }
     }
     return sources;
@@ -117,6 +150,9 @@ void AppController::refreshOutingLaps()
                     if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint, fingerprint)
                         != SourceFingerprintMatch::Match)
                         throw std::runtime_error("Source identity changed or is unknown; verify/relink this recording.");
+                    const auto gateRevision = source.value("trackConfiguration").toObject().value("gateRevision");
+                    if (gateRevision.isString() && gateRevision.toString() != timingGateRevision(session, cancelled))
+                        throw std::runtime_error("Timing-gate revision changed; verify this recording before analysis.");
                     const auto laps = deriveSourceLapSession(session, {}, cancelled);
                     const auto rows = outingLapRows(session, laps, source.value("runId").toString(),
                         source.value("name").toString(), index, cancelled);

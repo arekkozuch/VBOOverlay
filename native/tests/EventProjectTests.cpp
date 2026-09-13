@@ -10,8 +10,11 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <functional>
+#include <utility>
 #include <limits>
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/LapTiming.h"
+#include "telemetry/VboParser.h"
 
 using namespace FlappedEar;
 namespace Fixture = EventProjectFixture;
@@ -20,6 +23,12 @@ class EventProjectTests final : public QObject {
     Q_OBJECT
 private slots:
     void acceptsLegacyAndEventDocuments();
+    void persistsTrackConfigurationAndUnknownLegacyState();
+    void rejectsInvalidTrackConfigurations_data();
+    void rejectsInvalidTrackConfigurations();
+    void invalidatesDerivationOnConfigurationAndSourceChanges();
+    void clearsConfigurationOnSourceReplacementOnly();
+    void revisionsReflectPhysicalGatesWithoutInferringDirection();
     void preservesFiniteExtremeSyncForGuardedConsumers();
     void rejectsMalformedEvents_data();
     void rejectsMalformedEvents();
@@ -48,6 +57,141 @@ void EventProjectTests::acceptsLegacyAndEventDocuments()
     QVERIFY(example.open(QIODevice::ReadOnly));
     const auto sample = QJsonDocument::fromJson(example.readAll()).object();
     QVERIFY2(ProjectLimits::validateProject(sample, &error), qPrintable(error));
+}
+
+void EventProjectTests::persistsTrackConfigurationAndUnknownLegacyState()
+{
+    auto project = Fixture::project();
+    auto runs = Fixture::runs(project);
+    auto run = runs[0].toObject();
+    const auto unknown = EventProjectCodec::trackConfiguration(run);
+    QVERIFY(unknown.value("layoutId").isNull());
+    QVERIFY(unknown.value("gateRevision").isNull());
+    QCOMPARE(unknown.value("direction").toString(), QString("unknown"));
+    QVERIFY(!run.contains("trackConfiguration"));
+    auto config = unknown;
+    config.insert("layoutId", "jastrzab-full");
+    config.insert("direction", "clockwise");
+    config.insert("gateRevision", "gates-v1:" + QString(64, 'a'));
+    run.insert("trackConfiguration", config); runs[0] = run; Fixture::setRuns(project, runs);
+    QString error;
+    QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+    const auto reopened = QJsonDocument::fromJson(QJsonDocument(project).toJson()).object();
+    QCOMPARE(reopened, project);
+    QCOMPARE(EventProjectCodec::withEditorState(project, EventProjectCodec::editorProjection(project), {}, {}), project);
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    ProjectRecoveryStore store(directory.filePath("identity-recovery.json"));
+    const ProjectRecoverySnapshot snapshot{{}, "event-document", 5, 4, "2026-09-13T00:00:00.000Z", project, true};
+    QVERIFY2(store.write(snapshot, &error), qPrintable(error));
+    ProjectRecoverySnapshot restored;
+    QVERIFY2(store.load(&restored, &error), qPrintable(error));
+    QCOMPARE(restored.project, project);
+}
+
+void EventProjectTests::rejectsInvalidTrackConfigurations_data()
+{
+    QTest::addColumn<QString>("field"); QTest::addColumn<QJsonValue>("value");
+    QTest::newRow("foreign-source") << QString("sourceId") << QJsonValue("run-b-source");
+    QTest::newRow("alternative-source") << QString("sourceId") << QJsonValue("run-a-alternative");
+    QTest::newRow("stale-fingerprint") << QString("sourceFingerprint") << QJsonValue(QJsonObject{{"digest", "changed"}});
+    QTest::newRow("null-fingerprint") << QString("sourceFingerprint") << QJsonValue(QJsonValue::Null);
+    QTest::newRow("empty-layout") << QString("layoutId") << QJsonValue("  ");
+    QTest::newRow("oversized-layout") << QString("layoutId") << QJsonValue(QString(129, 'x'));
+    QTest::newRow("numeric-layout") << QString("layoutId") << QJsonValue(42);
+    QTest::newRow("missing-layout") << QString("layoutId") << QJsonValue(QJsonValue::Undefined);
+    QTest::newRow("direction-crossing-sign") << QString("direction") << QJsonValue(1);
+    QTest::newRow("unsupported-direction") << QString("direction") << QJsonValue("forward");
+    QTest::newRow("empty-revision") << QString("gateRevision") << QJsonValue("");
+    QTest::newRow("bad-revision") << QString("gateRevision") << QJsonValue("gates-v1:abc");
+}
+
+void EventProjectTests::rejectsInvalidTrackConfigurations()
+{
+    QFETCH(QString, field); QFETCH(QJsonValue, value);
+    auto project = Fixture::project(); auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+    auto config = EventProjectCodec::trackConfiguration(run); config.insert(field, value);
+    run.insert("trackConfiguration", config); runs[0] = run; Fixture::setRuns(project, runs);
+    QString error; QVERIFY(!ProjectLimits::validateProject(project, &error));
+    QVERIFY(error.contains("Track configuration"));
+}
+
+void EventProjectTests::invalidatesDerivationOnConfigurationAndSourceChanges()
+{
+    const auto original = Fixture::runs(Fixture::project())[0].toObject();
+    const auto key = EventProjectCodec::lapDerivationKey(original);
+    auto run = original;
+    run.insert("name", "Renamed"); run.insert("notes", "New notes");
+    run.insert("sync", QJsonObject{{"offset", 10}, {"timeScale", 2}});
+    QCOMPARE(EventProjectCodec::lapDerivationKey(run), key);
+    for (const QString &field : {QString("layoutId"), QString("direction"), QString("gateRevision")}) {
+        run = original; auto config = EventProjectCodec::trackConfiguration(run);
+        config.insert(field, field == "layoutId" ? "layout-b" : field == "direction" ? "counterclockwise" : "gates-v1:" + QString(64, 'b'));
+        run.insert("trackConfiguration", config);
+        QVERIFY(EventProjectCodec::lapDerivationKey(run) != key);
+    }
+    run = original; run.insert("primaryTelemetrySourceId", "run-a-alternative");
+    QVERIFY(EventProjectCodec::lapDerivationKey(run) != key);
+    run = original; auto sources = run.value("sources").toObject(); auto telemetry = sources.value("telemetry").toArray();
+    auto source = telemetry[0].toObject(); auto reference = source.value("reference").toObject();
+    reference.insert("relativePath", "moved.vbo"); source.insert("reference", reference); telemetry[0] = source;
+    sources.insert("telemetry", telemetry); run.insert("sources", sources);
+    QCOMPARE(EventProjectCodec::lapDerivationKey(run), key);
+    reference.insert("fingerprint", QJsonObject{{"digest", "new"}}); source.insert("reference", reference); telemetry[0] = source;
+    sources.insert("telemetry", telemetry); run.insert("sources", sources);
+    QVERIFY(EventProjectCodec::lapDerivationKey(run) != key);
+}
+
+void EventProjectTests::clearsConfigurationOnSourceReplacementOnly()
+{
+    auto project = Fixture::project(); auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+    auto config = EventProjectCodec::trackConfiguration(run); config.insert("layoutId", "known-layout");
+    config.insert("direction", "clockwise"); config.insert("gateRevision", "gates-v1:" + QString(64, 'a'));
+    run.insert("trackConfiguration", config); runs[0] = run; Fixture::setRuns(project, runs);
+    auto editor = EventProjectCodec::editorProjection(project); auto sources = editor.value("sources").toObject();
+    auto reference = sources.value("telemetry").toObject(); reference.insert("relativePath", "moved.vbo");
+    sources.insert("telemetry", reference); editor.insert("sources", sources);
+    auto saved = EventProjectCodec::withEditorState(project, editor, {}, {});
+    QCOMPARE(Fixture::runs(saved)[0].toObject().value("trackConfiguration").toObject(), config);
+    reference.insert("fingerprint", QJsonObject{{"digest", "replacement"}});
+    sources.insert("telemetry", reference); editor.insert("sources", sources);
+    saved = EventProjectCodec::withEditorState(project, editor, {}, {});
+    const auto replaced = Fixture::runs(saved)[0].toObject();
+    const auto unknown = EventProjectCodec::trackConfiguration(replaced);
+    QVERIFY(unknown.value("layoutId").isNull()); QVERIFY(unknown.value("gateRevision").isNull());
+    QCOMPARE(unknown.value("direction").toString(), QString("unknown"));
+    QVERIFY(EventProjectCodec::lapDerivationKey(replaced) != EventProjectCodec::lapDerivationKey(run));
+    QString error; QVERIFY2(ProjectLimits::validateProject(saved, &error), qPrintable(error));
+    QCOMPARE(Fixture::runs(saved)[1], runs[1]);
+}
+
+void EventProjectTests::revisionsReflectPhysicalGatesWithoutInferringDirection()
+{
+    auto east = VboParser::parse(QString::fromUtf8(Fixture::lapsVbo()));
+    const auto revision = timingGateRevision(east);
+    QCOMPARE(revision.size(), 73); QVERIFY(revision.startsWith("gates-v1:"));
+    auto west = east; west.metadata.insert("gpsLongitudeConvention", "west-positive");
+    for (auto &gate : west.timingGates) {
+        gate.endpointA.longitudeDegrees *= -1; gate.endpointB.longitudeDegrees *= -1;
+    }
+    QCOMPARE(timingGateRevision(west), revision);
+    auto changed = east; changed.timingGates[0].sourceName = "Renamed";
+    QCOMPARE(timingGateRevision(changed), revision);
+    changed.timingGates[0].endpointA.latitudeDegrees += .00001;
+    QVERIFY(timingGateRevision(changed) != revision);
+    changed = east; changed.timingGates[0].type = TimingGateType::Split;
+    QVERIFY(timingGateRevision(changed).isEmpty());
+    changed = east; changed.timingGates.append(changed.timingGates[0]);
+    QVERIFY(timingGateRevision(changed).isEmpty());
+    changed = east; changed.timingGates[0].endpointA.latitudeDegrees = std::numeric_limits<double>::quiet_NaN();
+    QVERIFY(timingGateRevision(changed).isEmpty());
+    changed = east; auto split = changed.timingGates[0]; split.type = TimingGateType::Split;
+    changed.timingGates.append(split); const auto withSplit = timingGateRevision(changed);
+    QVERIFY(withSplit != revision); QVERIFY(!withSplit.isEmpty());
+    std::swap(changed.timingGates[0], changed.timingGates[1]);
+    QVERIFY(timingGateRevision(changed) != withSplit);
+    changed.timingGates.resize(129); QVERIFY(timingGateRevision(changed).isEmpty());
+    QVERIFY(timingGateRevision(TelemetrySession{}).isEmpty());
+    QVERIFY_EXCEPTION_THROWN(timingGateRevision(east, [] { return true; }), OperationCancelled);
 }
 
 void EventProjectTests::preservesFiniteExtremeSyncForGuardedConsumers()
