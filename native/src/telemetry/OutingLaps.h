@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QHash>
+#include <QSet>
 
 namespace FlappedEar {
 
@@ -39,6 +40,11 @@ inline constexpr auto lapReferenceAlgorithm = "source-laps-v1";
     const QJsonObject &referenceConfiguration = {}, LapReferenceIssue issue = LapReferenceIssue::None,
     bool userExcluded = false);
 [[nodiscard]] QString lapCompatibilityReasonText(const QString &reason);
+
+// Ranking results retain exact lap references and all applied eligibility reasons.
+[[nodiscard]] QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &groupId,
+    const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
+    const QSet<QString> &staleRunIds = {});
 
 // Historical references are retained but only exact current references apply.
 using LapExclusionReasons = QHash<QByteArray, QString>;

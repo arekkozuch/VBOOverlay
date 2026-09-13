@@ -36,6 +36,13 @@ bool AppController::confirmRunTrackConfiguration(const QString &runId, const QSt
     return setRunTrackConfiguration(runId, layoutId.trimmed(), direction);
 }
 
+QVariantMap AppController::outingRanking() const
+{
+    if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
+        || m_outingLapGeneration != m_sourceGeneration) return {{"state", "loading"}};
+    return m_outingRanking;
+}
+
 QVariantList AppController::outingCompatibilityGroups() const
 {
     if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
@@ -116,6 +123,15 @@ void AppController::refreshOutingCompatibility()
             .arg(group.value("eligibleLapCount").toLongLong()).arg(group.value("lapCount").toLongLong()));
         m_outingCompatibilityGroups.append(group);
     }
+    m_outingRanking = rankOutingLaps(m_outingRawLapRows, m_outingComparisonGroupId, configurations,
+        currentProjectObject().value("event").toObject().value("lapExclusions").toArray(), m_outingStaleRunIds).toVariantMap();
+    m_outingRanking.insert("groupLabel", groups.value(m_outingComparisonGroupId).value("label"));
+    const auto bestReference = m_outingRanking.value("bestOfDay").toMap().value("reference").toMap();
+    QHash<QString, QVariantMap> bestRunReferences;
+    for (const auto &value : m_outingRanking.value("runs").toList()) {
+        const auto run = value.toMap();
+        bestRunReferences.insert(run.value("runId").toString(), run.value("bestLap").toMap().value("reference").toMap());
+    }
     for (auto &value : m_outingLapRows) {
         auto row = value.toMap(); const auto runId = row.value("runId").toString();
         const auto config = configurations.value(runId); const auto resolvedId = lapCompatibilityGroupId(config);
@@ -133,6 +149,12 @@ void AppController::refreshOutingCompatibility()
         row.insert("compatibilityReasons", reasons);
         row.insert("compatibilityReasonLabels", labels);
         row.insert("comparisonEligible", !referenceConfig.isEmpty() && reasons.isEmpty());
+        row.insert("bestOfDay", !bestReference.isEmpty() && row.value("reference").toMap() == bestReference);
+        if (id == m_outingComparisonGroupId) {
+            const auto runBest = bestRunReferences.value(runId);
+            row.insert("bestOfRun", !runBest.isEmpty() && row.value("reference").toMap() == runBest);
+        }
+        if (m_outingStaleRunIds.contains(runId)) row.insert("bestOfRun", false);
         value = row;
         if (!m_selectedOutingLap.isEmpty() && m_selectedOutingLap.value("reference") == row.value("reference")) {
             m_selectedOutingLap = row; emit outingLapDetailChanged();
@@ -316,6 +338,7 @@ void AppController::refreshOutingLaps()
     if (m_outingLapCancellation) m_outingLapCancellation->store(true);
     m_outingLapRows.clear();
     m_outingRawLapRows.clear();
+    m_outingRanking = {{"state", "selection-required"}};
     m_outingCompatibilityGroups.clear();
     m_outingSourceMessages.clear();
     m_outingLapMessages.clear();

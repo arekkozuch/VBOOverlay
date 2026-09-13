@@ -98,6 +98,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
     Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
+    Q_PROPERTY(QVariantMap outingRanking READ outingRanking NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingCompatibilityGroups READ outingCompatibilityGroups NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonGroupId READ outingComparisonGroupId NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingLaps READ outingLaps NOTIFY outingLapsChanged)
@@ -200,6 +201,7 @@ public:
     Q_INVOKABLE bool confirmRunTrackConfiguration(const QString &runId, const QString &expectedDerivationKey,
         const QString &layoutId, const QString &direction);
     Q_INVOKABLE bool selectOutingComparisonGroup(const QString &groupId);
+    [[nodiscard]] QVariantMap outingRanking() const;
     [[nodiscard]] QVariantList outingCompatibilityGroups() const;
     [[nodiscard]] QString outingComparisonGroupId() const;
     Q_INVOKABLE bool setRunTrackConfiguration(
@@ -488,6 +490,7 @@ private:
     void refreshLapExclusionPolicy();
     [[nodiscard]] QJsonObject activeLapBinding() const;
     void refreshOutingCompatibility();
+    QVariantMap m_outingRanking;
     QVariantList m_outingCompatibilityGroups;
     QString m_outingComparisonGroupId;
     QString m_outingCompatibilityDocumentId;

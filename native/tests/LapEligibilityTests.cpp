@@ -6,6 +6,7 @@
 
 #include <QtTest>
 #include <limits>
+#include <algorithm>
 
 using namespace FlappedEar;
 
@@ -40,6 +41,8 @@ TelemetrySession interiorGapFixture()
 class LapEligibilityTests final : public QObject {
     Q_OBJECT
 private slots:
+    void ranksCompatibleLapsDeterministically();
+    void rankingReportsAllAppliedExclusions();
     void separatesCompatibilityGroups_data();
     void separatesCompatibilityGroups();
     void preservesIndependentCompatibilityReasons();
@@ -53,6 +56,74 @@ private slots:
     void preservesNormalLapRanking();
     void rendererOmitsDeltaAtMissingCurrentCoordinate();
 };
+
+void LapEligibilityTests::ranksCompatibleLapsDeterministically()
+{
+    const QJsonObject config{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    auto opposite = config; opposite.insert("direction", "counterclockwise");
+    QHash<QString, QJsonObject> configs{{"a", config}, {"b", config}, {"c", opposite}, {"unknown", {}}};
+    const auto make = [](QString run, double start, double duration, int number, std::optional<qint64> clock) {
+        OutingLapRow row; row.runId = run; row.runName = run; row.type = LapSectionType::Lap;
+        row.start = start; row.end = start + duration; row.lapNumber = number; row.timestampMilliseconds = clock;
+        row.referenceEligible = true;
+        row.reference = makeLapReference(row, "event", run + "-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+        return row;
+    };
+    auto a = make("a", 20, 5, 2, 2000), b = make("b", 10, 5, 1, 1000);
+    const auto fasterOther = make("c", 0, 1, 1, 0), fasterUnknown = make("unknown", 0, .5, 1, 0);
+    QVector<OutingLapRow> rows{a, b, fasterOther, fasterUnknown};
+    const auto group = lapCompatibilityGroupId(config);
+    const auto ranked = rankOutingLaps(rows, group, configs, {});
+    QCOMPARE(ranked.value("state").toString(), QString("available"));
+    QCOMPARE(ranked.value("eligibleLapCount").toInt(), 2);
+    QCOMPARE(ranked.value("tieCount").toInt(), 2);
+    QCOMPARE(ranked.value("bestOfDay").toObject().value("reference").toObject(), b.reference);
+    QCOMPARE(ranked.value("runs").toArray().first().toObject().value("runId").toString(), QString("b"));
+    std::reverse(rows.begin(), rows.end());
+    QCOMPARE(rankOutingLaps(rows, group, configs, {}), ranked);
+    // With equal or absent clocks, stable run identity wins, not input order/name/number.
+    a.timestampMilliseconds.reset(); b.timestampMilliseconds.reset();
+    a.runName = "Zulu"; b.runName = "Alpha"; a.lapNumber = 99; b.lapNumber = 1;
+    QCOMPARE(rankOutingLaps({b, a}, group, configs, {}).value("bestOfDay").toObject().value("reference").toObject(), a.reference);
+    a.timestampMilliseconds = 3000;
+    QCOMPARE(rankOutingLaps({b, a}, group, configs, {}).value("bestOfDay").toObject().value("reference").toObject(), a.reference);
+    // Within one run, the earlier telemetry bounds win an otherwise exact tie.
+    auto earlier = make("a", 0, 5, 77, {}); a.timestampMilliseconds.reset();
+    QCOMPARE(rankOutingLaps({a, earlier}, group, configs, {}).value("bestOfDay").toObject().value("reference").toObject(), earlier.reference);
+    QVERIFY(rankOutingLaps(rows, "", configs, {}).value("bestOfDay").isNull());
+    QCOMPARE(rankOutingLaps(rows, "", configs, {}).value("state").toString(), QString("selection-required"));
+}
+
+void LapEligibilityTests::rankingReportsAllAppliedExclusions()
+{
+    const QJsonObject config{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    const auto group = lapCompatibilityGroupId(config);
+    QHash<QString, QJsonObject> configs{{"a", config}, {"b", config}};
+    OutingLapRow a; a.runId = "a"; a.runName = "Morning"; a.type = LapSectionType::Lap;
+    a.start = 0; a.end = 4; a.lapNumber = 1; a.referenceEligible = true;
+    a.reference = makeLapReference(a, "event", "a-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    auto b = a; b.runId = "b"; b.runName = "Afternoon"; b.end = 5;
+    b.reference = makeLapReference(b, "event", "b-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    const QJsonArray exclusions{QJsonObject{{"reference", a.reference}, {"reason", "Traffic"}}};
+    a.referenceIssue = LapReferenceIssue::GpsGap; a.referenceEligible = false;
+    auto ranked = rankOutingLaps({a, b}, group, configs, exclusions);
+    QCOMPARE(ranked.value("bestOfDay").toObject().value("reference").toObject(), b.reference);
+    QCOMPARE(ranked.value("lapCount").toInt(), 2); QCOMPARE(ranked.value("eligibleLapCount").toInt(), 1);
+    const auto rejected = ranked.value("excludedLaps").toArray().first().toObject();
+    QCOMPARE(rejected.value("reasons").toArray(), (QJsonArray{"incomplete-gps", "user-exclusion"}));
+    QCOMPARE(rejected.value("userReason").toString(), QString("Traffic"));
+    QCOMPARE(ranked.value("runs").toArray().last().toObject().value("state").toString(), QString("no-eligible-laps"));
+    ranked = rankOutingLaps({a, b}, group, configs, exclusions, {"b"});
+    QCOMPARE(ranked.value("state").toString(), QString("no-eligible-laps"));
+    QVERIFY(ranked.value("bestOfDay").isNull()); QCOMPARE(ranked.value("eligibleLapCount").toInt(), 0);
+    QCOMPARE(ranked.value("excludedLaps").toArray().size(), 2);
+    for (const auto &run : ranked.value("runs").toArray()) QVERIFY(run.toObject().value("bestLap").isNull());
+    b.reference = {}; ranked = rankOutingLaps({b}, group, configs, {});
+    QVERIFY(ranked.value("bestOfDay").isNull());
+    QVERIFY(ranked.value("excludedLaps").toArray().first().toObject().value("reasons").toArray().contains("invalid-reference"));
+    QVector<OutingLapRow> tooMany(maximumOutingLapRows + 1);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(rankOutingLaps(tooMany, group, configs, {})));
+}
 
 void LapEligibilityTests::separatesCompatibilityGroups_data()
 {
