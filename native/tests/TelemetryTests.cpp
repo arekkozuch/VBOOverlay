@@ -1104,7 +1104,7 @@ void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
         QVERIFY(controller.selectOutingLapReference(winner));
         QTRY_COMPARE(controller.outingLapDetailState(), QString("ready")); controller.setOutingLapCursor(1);
         const auto cursor = controller.outingLapCursor(); const auto track = controller.outingLapTrack();
-        const auto detail = controller.m_outingLapDetailSession; const auto session = controller.m_session;
+        const auto detail = controller.m_outingLapDetailSession; const auto *session = controller.m_session.get();
         const auto generation = controller.m_sourceGeneration; const auto key = controller.outingLapKey();
         const auto config = controller.runTrackConfiguration(runId);
         const auto before = controller.currentProjectObject(); const auto revision = controller.m_documentState.revision();
@@ -1125,7 +1125,7 @@ void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
         QVERIFY(controller.dirty()); QCOMPARE(controller.m_documentState.revision(), revision + 1);
         QVERIFY(!controller.updateRunMetadata(runId, token, "Stale overwrite", "", "", ""));
         QCOMPARE(controller.runMetadata(runId).value("name").toString(), QString("Renamed run"));
-        QCOMPARE(controller.m_sourceGeneration, generation); QCOMPARE(controller.m_session, session);
+        QCOMPARE(controller.m_sourceGeneration, generation); QCOMPARE(controller.m_session.get(), session);
         QCOMPARE(controller.outingLapKey(), key); QCOMPARE(controller.runTrackConfiguration(runId), config);
         QCOMPARE(controller.m_outingLapDetailSession, detail); QCOMPARE(controller.outingLapTrack(), track);
         QCOMPARE(controller.outingLapCursor(), cursor); QCOMPARE(controller.outingLapDetailState(), QString("ready"));
@@ -1150,7 +1150,7 @@ void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
         for (const auto &value : controller.eventRuns()) if (value.toMap().value("id").toString() != runId) inactive = value.toMap().value("id").toString();
         const auto inactiveMetadata = controller.runMetadata(inactive);
         QVERIFY(controller.updateRunMetadata(inactive, inactiveMetadata.value("editToken").toString(), "Second run", "", "", "Rear damping -1"));
-        QCOMPARE(controller.activeRunId(), runId); QCOMPARE(controller.m_session, session);
+        QCOMPARE(controller.activeRunId(), runId); QCOMPARE(controller.m_session.get(), session);
         QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath))); QVERIFY(!controller.dirty());
     }
     {
