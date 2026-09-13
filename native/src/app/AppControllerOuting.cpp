@@ -7,12 +7,138 @@
 #include <QTimeZone>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QMap>
 #include <QtConcurrent>
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace FlappedEar {
+
+QVariantMap AppController::runTrackConfiguration(const QString &runId) const
+{
+    for (const auto &value : outingLapSources()) {
+        const auto source = value.toObject();
+        if (source.value("runId").toString() != runId) continue;
+        auto config = source.value("trackConfiguration").toObject();
+        config.insert("derivationKey", source.value("derivationKey"));
+        return config.toVariantMap();
+    }
+    return {};
+}
+
+bool AppController::confirmRunTrackConfiguration(const QString &runId, const QString &expectedDerivationKey,
+    const QString &layoutId, const QString &direction)
+{
+    const auto current = runTrackConfiguration(runId);
+    if (current.isEmpty() || expectedDerivationKey.isEmpty()
+        || current.value("derivationKey").toString() != expectedDerivationKey) return false;
+    return setRunTrackConfiguration(runId, layoutId.trimmed(), direction);
+}
+
+QVariantList AppController::outingCompatibilityGroups() const
+{
+    if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
+        || m_outingLapGeneration != m_sourceGeneration) return {};
+    return m_outingCompatibilityGroups;
+}
+
+QString AppController::outingComparisonGroupId() const
+{
+    for (const auto &value : outingCompatibilityGroups())
+        if (value.toMap().value("id").toString() == m_outingComparisonGroupId) return m_outingComparisonGroupId;
+    return {};
+}
+
+bool AppController::selectOutingComparisonGroup(const QString &groupId)
+{
+    if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
+        || m_outingLapGeneration != m_sourceGeneration) return false;
+    if (!groupId.isEmpty()) {
+        bool found = false;
+        for (const auto &value : m_outingCompatibilityGroups) {
+            const auto group = value.toMap();
+            found |= group.value("id").toString() == groupId && group.value("resolved").toBool();
+        }
+        if (!found) return false;
+    }
+    m_outingComparisonGroupId = groupId;
+    refreshOutingCompatibility();
+    emit outingLapsChanged();
+    return true;
+}
+
+void AppController::refreshOutingCompatibility()
+{
+    if (m_outingLapRequestedKey != outingLapKey() || m_outingLapGeneration != m_sourceGeneration) return;
+    if (m_outingCompatibilityDocumentId != m_documentId) {
+        m_outingComparisonGroupId.clear(); m_outingCompatibilityDocumentId = m_documentId;
+    }
+    QHash<QString, QJsonObject> configurations;
+    for (const auto &value : outingLapSources()) {
+        const auto source = value.toObject();
+        configurations.insert(source.value("runId").toString(), source.value("trackConfiguration").toObject());
+    }
+    QMap<QString, QVariantMap> groups;
+    QHash<QString, QVariantList> membersByGroup, eligibleByGroup;
+    for (const auto &value : m_outingLapRows) {
+        const auto row = value.toMap(); const auto runId = row.value("runId").toString();
+        const auto config = configurations.value(runId);
+        const auto resolvedId = lapCompatibilityGroupId(config);
+        const auto id = resolvedId.isEmpty() ? "unresolved:" + runId : resolvedId;
+        auto &group = groups[id];
+        if (group.isEmpty()) group = {{"id", id}, {"resolved", !resolvedId.isEmpty()},
+            {"configuration", config.toVariantMap()}, {"runName", row.value("runName")},
+            {"members", QVariantList{}}, {"eligibleMembers", QVariantList{}}};
+        if (row.value("type") != "LAP") continue;
+        membersByGroup[id].append(row.value("reference"));
+        if (!resolvedId.isEmpty() && row.value("referenceEligible").toBool() && !m_outingStaleRunIds.contains(runId)) {
+            eligibleByGroup[id].append(row.value("reference"));
+        }
+    }
+    if (!groups.contains(m_outingComparisonGroupId)
+        || !groups.value(m_outingComparisonGroupId).value("resolved").toBool()) m_outingComparisonGroupId.clear();
+    const auto referenceConfig = QJsonObject::fromVariantMap(groups.value(m_outingComparisonGroupId).value("configuration").toMap());
+    m_outingCompatibilityGroups.clear();
+    int number = 0;
+    for (auto it = groups.begin(); it != groups.end(); ++it) {
+        auto &group = it.value(); const auto config = group.value("configuration").toMap();
+        group.insert("members", membersByGroup.value(it.key()));
+        group.insert("eligibleMembers", eligibleByGroup.value(it.key()));
+        group.insert("lapCount", group.value("members").toList().size());
+        group.insert("eligibleLapCount", group.value("eligibleMembers").toList().size());
+        const auto label = group.value("resolved").toBool()
+            ? QStringLiteral("Group %1 · %2 · %3").arg(++number).arg(config.value("layoutId").toString(),
+                config.value("direction") == "clockwise" ? QStringLiteral("Clockwise") : QStringLiteral("Counterclockwise"))
+            : QStringLiteral("Unresolved · %1").arg(group.value("runName").toString());
+        group.insert("label", label);
+        group.insert("summary", QStringLiteral("%1 · %2/%3 eligible laps").arg(label)
+            .arg(group.value("eligibleLapCount").toLongLong()).arg(group.value("lapCount").toLongLong()));
+        m_outingCompatibilityGroups.append(group);
+    }
+    for (auto &value : m_outingLapRows) {
+        auto row = value.toMap(); const auto runId = row.value("runId").toString();
+        const auto config = configurations.value(runId); const auto resolvedId = lapCompatibilityGroupId(config);
+        const auto id = resolvedId.isEmpty() ? "unresolved:" + runId : resolvedId;
+        const auto issue = row.value("referenceIssue") == "GPS gap" ? LapReferenceIssue::GpsGap
+            : row.value("referenceIssue") == "Invalid GPS" ? LapReferenceIssue::InvalidGps : LapReferenceIssue::None;
+        auto reasons = lapCompatibilityReasons(config, referenceConfig, issue, row.value("excluded").toBool());
+        if (row.value("type") != "LAP") reasons.append("not-timed-lap");
+        if (m_outingStaleRunIds.contains(runId)) reasons.append("stale-source");
+        QStringList labels;
+        for (const auto &reason : reasons) labels.append(lapCompatibilityReasonText(reason));
+        row.insert("compatibilityGroupId", id);
+        row.insert("compatibilityGroupLabel", groups.value(id).value("label"));
+        row.insert("compatibilityResolved", !resolvedId.isEmpty());
+        row.insert("compatibilityReasons", reasons);
+        row.insert("compatibilityReasonLabels", labels);
+        row.insert("comparisonEligible", !referenceConfig.isEmpty() && reasons.isEmpty());
+        value = row;
+        if (!m_selectedOutingLap.isEmpty() && m_selectedOutingLap.value("reference") == row.value("reference")) {
+            m_selectedOutingLap = row; emit outingLapDetailChanged();
+        }
+    }
+}
 
 QJsonObject AppController::activeLapBinding() const
 {
@@ -102,6 +228,7 @@ void AppController::refreshLapExclusionPolicy()
             emit outingLapDetailChanged();
         }
     }
+    refreshOutingCompatibility();
     emit outingLapsChanged();
 }
 
@@ -189,6 +316,7 @@ void AppController::refreshOutingLaps()
     if (m_outingLapCancellation) m_outingLapCancellation->store(true);
     m_outingLapRows.clear();
     m_outingRawLapRows.clear();
+    m_outingCompatibilityGroups.clear();
     m_outingSourceMessages.clear();
     m_outingLapMessages.clear();
     const auto sources = outingLapSources();
@@ -294,6 +422,7 @@ void AppController::initializeOutingLapDetail()
         m_outingLapDetailError = result.error;
         if (result.staleReference) {
             m_outingStaleRunIds.insert(m_selectedOutingLap.value("runId").toString());
+            refreshOutingCompatibility();
             emit outingLapsChanged();
         }
         m_outingLapDetailState = m_outingLapDetailSession ? "ready" : "error";

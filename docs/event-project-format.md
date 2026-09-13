@@ -71,8 +71,9 @@ relinking preserves it. Replacing source content clears its asserted fields to
 unknown and binds them to the replacement fingerprint. The controller API
 `setRunTrackConfiguration(runId, layoutId, direction)` supports validated explicit
 assignment or clearing (empty layout ID / `unknown` direction), records a normal
-persistent edit, and leaves the loaded editor source intact. This model step does
-not add a configuration UI or automatic track/direction recognition.
+persistent edit, and leaves the loaded editor source intact. Step 012 exposes this
+through the Track configuration dialog; automatic track/direction recognition is
+not implemented.
 
 `lapDerivationKey` combines a version tag, run ID, primary source ID/fingerprint
 and configuration. Names, notes, video synchronization and source path spelling
@@ -80,8 +81,8 @@ are excluded. Outing-analysis requests include this identity: changing layout,
 direction, gate revision or source cancels/rejects old work and closes stale lap
 detail. Analysis also checks asserted gate revisions against the loaded recording
 before publishing rows. Existing source fingerprint and generation checks remain.
-No cross-run comparison cache is persisted yet; compatibility groups are a
-subsequent task. Portable lap references now bind to this derivation identity. Unknown identities never establish that two
+Compatibility groups are derived in memory as described below. Portable lap
+references bind to this derivation identity. Unknown identities never establish that two
 runs are compatible merely because their unknown values match.
 
 ## Stable lap references (KAN-20)
@@ -222,3 +223,46 @@ Validation includes malformed documents, exact-reference invalidation, all-exclu
 ranking, shared render-context results, keyboard-operated production QML controls,
 and actual save/reopen/recovery flows. Native macOS Debug/Release CI provides the
 build/test gate; private recordings and physical-Mac acceptance remain separate.
+
+## Explicit compatibility groups (step 012)
+
+Open **Track configuration…** in All laps, choose a recording, enter a layout
+name, choose clockwise/counterclockwise and confirm. The entered name is the
+layout ID: leading/trailing whitespace is removed, but spelling and case must
+match to join the same layout. The decision applies to all laps in that recording
+and uses the existing persisted source-bound configuration. An outdated dialog
+cannot overwrite a changed derivation. Cancel leaves unresolved fields unchanged.
+Gate revisions come from verified source geometry, never from a user override.
+A recording without a verified gate revision remains unresolved even after its
+layout/direction are confirmed. Configuration changes can leave prior lap
+exclusions unmatched, as explained in the dialog.
+
+A resolved group requires an exact match of layout ID, direction and timing-gate
+revision. Its stable `compatibility-v1:` SHA-256 ID hashes only those fields and a
+version, so identical configurations can group different recordings. Unknown or
+malformed fields never compare equal for this purpose: unresolved recordings
+remain separate, visible entries and cannot be chosen for comparison.
+
+Choose a resolved comparison group to see each lap's reasons relative to it.
+All recorded sections remain visible and inspectable. Reasons are independent:
+different layout, opposite direction, different/unresolved gates, unresolved
+layout/direction, incomplete/invalid GPS, user exclusion, stale source and
+incomplete timed section. Several can apply to the same row. Tooltips expose
+reasons when the row label is too narrow.
+
+`outingCompatibilityGroups` supplies all LAP members and the eligible member
+references separately; OUT/IN/UNKNOWN sections never become comparison candidates.
+GPS/user exclusions do not redefine physical compatibility or hide group members.
+No group is selected implicitly, and `comparisonEligible` requires an explicit
+selected group plus no blocking reasons. Group choice is session-only; confirmed
+run configuration survives save/reopen/recovery. Missing, changed or in-flight
+source/derivation generations cannot serve stale group selections. Group membership
+and reasons are rebuilt from validated current lap references; they are not saved
+as an independent cache. This step does not add alignment, potential estimates,
+automatic direction inference or judgments about representative performance.
+
+Regression coverage verifies exact grouping boundaries, unknown-to-unknown
+rejection, simultaneous GPS/user/compatibility reasons, durable explicit decisions,
+generation invalidation, and keyboard interaction with the production QML dialog
+and group selector. Native verification uses macOS arm64 Debug and Release CI;
+physical-Mac and private-recording acceptance remain separate.

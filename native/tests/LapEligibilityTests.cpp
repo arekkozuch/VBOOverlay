@@ -40,6 +40,9 @@ TelemetrySession interiorGapFixture()
 class LapEligibilityTests final : public QObject {
     Q_OBJECT
 private slots:
+    void separatesCompatibilityGroups_data();
+    void separatesCompatibilityGroups();
+    void preservesIndependentCompatibilityReasons();
     void preservesTimingWhenDensifyingFixture();
     void retainsMeasuredLapWithInteriorGpsGap();
     void rejectsInvalidAndUnpairedCoordinates_data();
@@ -50,6 +53,48 @@ private slots:
     void preservesNormalLapRanking();
     void rendererOmitsDeltaAtMissingCurrentCoordinate();
 };
+
+void LapEligibilityTests::separatesCompatibilityGroups_data()
+{
+    QTest::addColumn<QString>("field"); QTest::addColumn<QJsonValue>("value");
+    QTest::addColumn<QString>("reason"); QTest::addColumn<bool>("resolved");
+    QTest::newRow("different-layout") << QString("layoutId") << QJsonValue("Short") << QString("changed-layout") << true;
+    QTest::newRow("opposite-direction") << QString("direction") << QJsonValue("counterclockwise") << QString("opposite-direction") << true;
+    QTest::newRow("different-gates") << QString("gateRevision") << QJsonValue("gates-v1:" + QString(64, 'b')) << QString("changed-timing-gate") << true;
+    QTest::newRow("unknown-layout") << QString("layoutId") << QJsonValue(QJsonValue::Null) << QString("layout-unresolved") << false;
+    QTest::newRow("blank-layout") << QString("layoutId") << QJsonValue(" ") << QString("layout-unresolved") << false;
+    QTest::newRow("unknown-direction") << QString("direction") << QJsonValue("unknown") << QString("direction-unresolved") << false;
+    QTest::newRow("unknown-gates") << QString("gateRevision") << QJsonValue(QJsonValue::Null) << QString("timing-gate-unresolved") << false;
+    QTest::newRow("malformed-gates") << QString("gateRevision") << QJsonValue("gates-v1:bad") << QString("timing-gate-unresolved") << false;
+}
+
+void LapEligibilityTests::separatesCompatibilityGroups()
+{
+    QFETCH(QString, field); QFETCH(QJsonValue, value); QFETCH(QString, reason); QFETCH(bool, resolved);
+    const QJsonObject reference{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    auto changed = reference; changed.insert(field, value);
+    QVERIFY(!lapCompatibilityGroupId(reference).isEmpty());
+    QVERIFY(lapCompatibilityGroupId(changed) != lapCompatibilityGroupId(reference));
+    QCOMPARE(!lapCompatibilityGroupId(changed).isEmpty(), resolved);
+    QCOMPARE(lapCompatibilityReasons(changed, reference), QStringList{reason});
+    QCOMPARE(lapCompatibilityReasons(reference, changed), QStringList{reason});
+    if (!resolved) QVERIFY(!lapCompatibilityReasons(changed, changed).isEmpty());
+}
+
+void LapEligibilityTests::preservesIndependentCompatibilityReasons()
+{
+    const QJsonObject reference{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    auto anotherSource = reference; anotherSource.insert("sourceId", "another"); anotherSource.insert("sourceFingerprint", QJsonObject{{"changed", true}});
+    QCOMPARE(lapCompatibilityGroupId(reference), lapCompatibilityGroupId(anotherSource));
+    QVERIFY(lapCompatibilityReasons(reference, anotherSource).isEmpty());
+    const QJsonObject changed{{"layoutId", "Short"}, {"direction", "counterclockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'b')}};
+    QCOMPARE(lapCompatibilityReasons(changed, reference, LapReferenceIssue::GpsGap, true),
+        (QStringList{"changed-layout", "opposite-direction", "changed-timing-gate", "incomplete-gps", "user-exclusion"}));
+    QCOMPARE(lapCompatibilityReasons(reference, reference, LapReferenceIssue::InvalidGps, true),
+        (QStringList{"invalid-gps", "user-exclusion"}));
+    QVERIFY(lapCompatibilityGroupId({}).isEmpty());
+    QCOMPARE(lapCompatibilityReasons({}, {}), (QStringList{"layout-unresolved", "direction-unresolved", "timing-gate-unresolved"}));
+}
 
 void LapEligibilityTests::preservesTimingWhenDensifyingFixture()
 {

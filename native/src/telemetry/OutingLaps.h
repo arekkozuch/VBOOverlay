@@ -32,6 +32,14 @@ inline constexpr auto lapReferenceAlgorithm = "source-laps-v1";
     const QString &sourceId, const QByteArray &sourceRevision, const QByteArray &derivationKey);
 [[nodiscard]] bool validLapReference(const QJsonObject &reference);
 
+// Compatibility is separate from GPS/user eligibility. Unknown fields never
+// create a shared group, even when two recordings have identical unknowns.
+[[nodiscard]] QString lapCompatibilityGroupId(const QJsonObject &configuration);
+[[nodiscard]] QStringList lapCompatibilityReasons(const QJsonObject &configuration,
+    const QJsonObject &referenceConfiguration = {}, LapReferenceIssue issue = LapReferenceIssue::None,
+    bool userExcluded = false);
+[[nodiscard]] QString lapCompatibilityReasonText(const QString &reason);
+
 // Historical references are retained but only exact current references apply.
 using LapExclusionReasons = QHash<QByteArray, QString>;
 [[nodiscard]] QByteArray lapReferenceKey(const QJsonObject &reference);

@@ -2,6 +2,7 @@
 
 #include <QRegularExpression>
 #include <QJsonDocument>
+#include <QCryptographicHash>
 #include <QSet>
 
 #include <algorithm>
@@ -52,6 +53,70 @@ QJsonObject makeLapReference(const OutingLapRow &row, const QString &eventId,
         {"derivationKey", QString::fromLatin1(derivationKey)}, {"type", lapSectionName(row.type)},
         {"startTime", row.start}, {"endTime", row.end}};
     return validLapReference(reference) ? reference : QJsonObject{};
+}
+
+namespace {
+bool knownLayout(const QJsonObject &config)
+{
+    const auto value = config.value("layoutId");
+    return value.isString() && !value.toString().trimmed().isEmpty()
+        && value.toString().size() <= 128 && !value.toString().contains(QChar::Null);
+}
+bool knownDirection(const QJsonObject &config)
+{
+    return config.value("direction") == "clockwise" || config.value("direction") == "counterclockwise";
+}
+bool knownGates(const QJsonObject &config)
+{
+    static const QRegularExpression pattern("^gates-v1:[0-9a-f]{64}$");
+    return pattern.match(config.value("gateRevision").toString()).hasMatch();
+}
+}
+
+QStringList lapCompatibilityReasons(const QJsonObject &config, const QJsonObject &reference,
+    const LapReferenceIssue issue, const bool userExcluded)
+{
+    QStringList reasons;
+    if (!knownLayout(config) || (!reference.isEmpty() && !knownLayout(reference))) reasons.append("layout-unresolved");
+    if (!knownDirection(config) || (!reference.isEmpty() && !knownDirection(reference))) reasons.append("direction-unresolved");
+    if (!knownGates(config) || (!reference.isEmpty() && !knownGates(reference))) reasons.append("timing-gate-unresolved");
+    if (!reference.isEmpty()) {
+        if (knownLayout(config) && knownLayout(reference) && config.value("layoutId") != reference.value("layoutId"))
+            reasons.append("changed-layout");
+        if (knownDirection(config) && knownDirection(reference) && config.value("direction") != reference.value("direction"))
+            reasons.append("opposite-direction");
+        if (knownGates(config) && knownGates(reference) && config.value("gateRevision") != reference.value("gateRevision"))
+            reasons.append("changed-timing-gate");
+    }
+    if (issue == LapReferenceIssue::GpsGap) reasons.append("incomplete-gps");
+    if (issue == LapReferenceIssue::InvalidGps) reasons.append("invalid-gps");
+    if (userExcluded) reasons.append("user-exclusion");
+    return reasons;
+}
+
+QString lapCompatibilityGroupId(const QJsonObject &configuration)
+{
+    if (!lapCompatibilityReasons(configuration).isEmpty()) return {};
+    const QJsonObject basis{{"version", 1}, {"layoutId", configuration.value("layoutId")},
+        {"direction", configuration.value("direction")}, {"gateRevision", configuration.value("gateRevision")}};
+    return "compatibility-v1:" + QString::fromLatin1(QCryptographicHash::hash(
+        QJsonDocument(basis).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
+}
+
+QString lapCompatibilityReasonText(const QString &reason)
+{
+    if (reason == "layout-unresolved") return "Layout needs confirmation";
+    if (reason == "direction-unresolved") return "Direction needs confirmation";
+    if (reason == "timing-gate-unresolved") return "Timing gates unresolved";
+    if (reason == "changed-layout") return "Different layout";
+    if (reason == "opposite-direction") return "Opposite direction";
+    if (reason == "changed-timing-gate") return "Different timing gates";
+    if (reason == "incomplete-gps") return "Incomplete GPS";
+    if (reason == "invalid-gps") return "Invalid GPS";
+    if (reason == "user-exclusion") return "User exclusion";
+    if (reason == "not-timed-lap") return "Not a complete timed lap";
+    if (reason == "stale-source") return "Source changed; reload recording";
+    return reason;
 }
 
 QByteArray lapReferenceKey(const QJsonObject &reference)
