@@ -107,7 +107,7 @@ exact mathematical round trip at extreme precision limits.
 | --- | --- |
 | Preview values and static-analysis queries | AppController uses the checked forward transform; invalid times/range endpoints return empty values/series or `—`. Finite but overflowing chart spans are rejected by sampledSegments. |
 | Preview and offscreen export widgets | Shared TelemetryRenderContext uses the checked forward transform. Its QML time/value is an invalid QVariant on overflow, the track marker is empty, and lap timing is unavailable. |
-| Export worker progress | Uses the same forward helper; an unavailable transformed time is explicit JSON null. Source video/frame scheduling continues independently. |
+| Export worker progress | Uses the same forward helper; an unavailable transformed time is explicit JSON null and the export details display `—`, including when formatting milliseconds would overflow. Source video/frame scheduling continues independently. |
 | Lap seeking, analysis navigation and hotlap ranges | Use the checked inverse helper. Invalid/outside-video times are unavailable; millisecond conversion additionally rejects values at or above 2^63 before rounding. |
 | Event project persistence | EventProjectCodec already requires numeric finite offsets and positive finite scales. It preserves valid finite values, including extremes; consumers validate the actual time queried. The v3 schema is unchanged. |
 
