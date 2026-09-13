@@ -345,3 +345,34 @@ Final CI and merge evidence for this task is recorded in
 [PR #12](https://github.com/arekkozuch/VBOOverlay/pull/12). Local CMake/CTest
 remain unavailable in this coordinator workspace; hosted checks do not establish
 new physical Mac or private-video acceptance.
+
+### KAN-13: export writers surviving their leader
+
+The native suite now includes a synchronized helper whose isolated group leader
+can exit before shutdown or during the grace period. Its descendant ignores
+SIGTERM and repeatedly reopens an owned-path fixture for writing. Readiness is
+explicitly acknowledged before the test releases the leader.
+
+Regressions cover explicit stop, grace-period leader exit, supervisor destruction,
+and cancellation-marker failure. They require the writer to be inactive when
+shutdown returns, exercise repeated stop, and reject recreation after cleanup.
+A controller regression checks that startup recovery retains an active group's
+manifest after leader exit, then cancellation stops the writer before removing
+owned artifacts and preserves an existing user target.
+
+These Unix-specific cases run in macOS CI and are explicitly skipped on Windows;
+the existing cross-platform cancellation-marker and export tests remain required.
+Execution, final PR head and integrated-main evidence are recorded in
+[KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13).
+
+The controller cases cover both cancellation and reported success with a surviving
+writer; the latter must fail without replacing the user's existing target. A
+cross-platform case also verifies immediate/negative stop budgets and subsequent
+bounded cleanup, so negative inputs cannot request infinite Qt waits.
+
+The regression-only head `b7dc20c2e2ccaaf24eac89148d34ef5163e33348`
+was run against unchanged production code in
+[Native CI 34739681497](https://github.com/arekkozuch/VBOOverlay/actions/runs/34739681497).
+Both macOS Debug and Release compiled and failed exactly the four surviving-writer
+checks and the premature-recovery check; the existing cases had no new failures.
+Final passing-head and integrated-main results are recorded in KAN-13.

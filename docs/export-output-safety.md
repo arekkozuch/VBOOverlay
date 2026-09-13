@@ -66,9 +66,30 @@ Before a worker is started, the controller writes an atomic versioned JSON manif
 
 The separate per-export diagnostic log is stored beneath the application-data `exports` directory, never beside the executable or selected output. Its retention cleanup recognizes only the application's `export-*.log` filename convention inside that dedicated directory; it does not authorize removal of output, manifest, or arbitrary support files.
 
-On normal success, cancellation, or failure the controller removes those owned artifacts and the manifest. Worker shutdown explicitly defers manifest-owned removal to that controller authority instead of reporting a false deletion failure. Cleanup is idempotent: an absent artifact or already-removed manifest is success, while a path that still exists and cannot be removed is a real failure and leaves the manifest for retry. At application startup the janitor reads only FlappedEar manifest files, rejects malformed records, skips a record whose PID is still active, and removes only paths proven by the valid manifest. Names such as `*.mkv` or `*.part.mp4` alone never authorize deletion.
+On normal success, cancellation, or failure the controller removes those owned artifacts and the manifest. Worker shutdown explicitly defers manifest-owned removal to that controller authority instead of reporting a false deletion failure. Cleanup is idempotent: an absent artifact or already-removed manifest is success, while a path that still exists and cannot be removed is a real failure and leaves the manifest for retry. At application startup the janitor reads only FlappedEar manifest files, rejects malformed records, skips a record whose PID or Unix process group is still active, and removes only paths proven by the valid manifest. Names such as `*.mkv` or `*.part.mp4` alone never authorize deletion.
 
 PID reuse can conservatively cause an old manifest to be retained when an unrelated process has reused its recorded PID. That may leave recoverable temporary files behind, but it never broadens deletion authority.
 # External input bounds
 
 Ownership manifests are external JSON inputs even though the application creates them. Reads are limited to 64 KiB and must prove exact transaction ownership before cleanup. An oversized or malformed manifest is skipped rather than being used to authorize deletion.
+
+## Process-tree completion before cleanup (KAN-13)
+
+A direct worker exit does not authorize commit or deletion. The supervisor retains
+its Unix process-group ID after that exit, sends TERM and then KILL under separate
+bounded deadlines, and succeeds only when the group is gone. Windows retains the
+kill-on-close Job Object and checks its active-process count. Unknown liveness is
+treated as active. Nonpositive stop budgets mean no wait, not an infinite Qt wait.
+
+The controller queues its finished handler so a blocking process wait cannot
+synchronously destroy the supervisor on its own stack. It remains exporting until
+finalization releases ownership. A failed shutdown retains transaction files and
+retries finalization; destruction defers file deletion to manifest recovery. A
+worker reporting success while descendants remain is treated as failed, preserving
+the existing user target. Cancellation cleanup occurs only after writers stop.
+
+These boundaries follow [QProcess wait/signal semantics](https://doc.qt.io/qt-6/qprocess.html#waitForFinished),
+[Unix group signaling and existence checks](https://man7.org/linux/man-pages/man2/kill.2.html),
+and [Windows Job Object active-process accounting](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information).
+Regressions and exact execution evidence are linked in
+[KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13).

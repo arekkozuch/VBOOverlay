@@ -286,6 +286,11 @@ void ExportOutputTransaction::cleanup()
     m_stagingPath.clear();
 }
 
+void ExportOutputTransaction::deferCleanup()
+{
+    m_ownedPaths.clear();
+}
+
 QString ExportOutputTransaction::userTargetPath() const { return m_userTargetPath; }
 QString ExportOutputTransaction::stagingPath() const { return m_stagingPath; }
 QString ExportOutputTransaction::transactionId() const { return m_transactionId; }

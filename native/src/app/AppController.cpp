@@ -28,6 +28,7 @@
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QScopedValueRollback>
+#include <QPointer>
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QThread>
@@ -340,17 +341,25 @@ AppController::~AppController()
         || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning()) {
         AppLog::warn(QStringLiteral("Source worker shutdown exceeded the bounded wait"));
     }
-    if (exporting()) {
+    bool exportStopped = true;
+    if (m_exportProcess) {
+        // Blocking waits can emit finished/readyRead during destruction.
+        disconnect(m_exportProcess.get(), nullptr, this, nullptr);
         QFile cancellationFile(m_exportCancelPath);
         if (cancellationFile.open(QIODevice::WriteOnly)) {
             cancellationFile.close();
         }
-        if (m_exportSupervisor) static_cast<void>(m_exportSupervisor->stopAndWait());
+        exportStopped = m_exportSupervisor && m_exportSupervisor->stopAndWait();
+    }
+    if (!exportStopped) {
+        if (m_exportOutputTransaction) m_exportOutputTransaction->deferCleanup();
+        if (m_exportConfig) m_exportConfig->setAutoRemove(false);
+        AppLog::warn(QStringLiteral("Export cleanup deferred: process tree shutdown was not confirmed"));
     }
     m_exportOutputTransaction.reset();
     // On abnormal destruction the manifest intentionally remains for startup
     // recovery. A normal finished callback performs the authorized cleanup.
-    if (!exporting() && !m_exportCancelPath.isEmpty()) QFile::remove(m_exportCancelPath);
+    if (exportStopped && !m_exportCancelPath.isEmpty()) QFile::remove(m_exportCancelPath);
 }
 
 QUrl AppController::videoSource() const { return m_videoSource; }
@@ -373,7 +382,7 @@ double AppController::playbackTime() const { return m_playbackTime; }
 double AppController::syncOffset() const { return m_sync.offset; }
 double AppController::timeScale() const { return m_sync.timeScale; }
 bool AppController::syncing() const { return m_syncWatcher.isRunning(); }
-bool AppController::exporting() const { return m_exportProcess && m_exportProcess->state() != QProcess::NotRunning; }
+bool AppController::exporting() const { return m_exportProcess != nullptr; }
 int AppController::exportProgress() const { return m_exportProgress; }
 QString AppController::exportState() const { return m_exportState; }
 QString AppController::exportError() const { return m_exportError; }
@@ -2059,7 +2068,10 @@ bool AppController::startExport(
         m_exportProcess.get(),
         qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
         this,
-        &AppController::finishExport);
+        [this, process = QPointer<QProcess>(m_exportProcess.get())](int code, QProcess::ExitStatus status) {
+            if (process && process == m_exportProcess.get()) finishExport(code, status);
+        },
+        Qt::QueuedConnection);
     m_exportSupervisor->start(
         QCoreApplication::applicationFilePath(), {"--export-worker", m_exportConfig->fileName()});
     if (!m_exportSupervisor->waitForStarted(5'000)) {
@@ -2069,14 +2081,7 @@ bool AppController::startExport(
             : QStringLiteral("Could not establish export process supervision: %1").arg(supervisionError);
         m_exportState = QStringLiteral("failed");
         AppLog::error(QStringLiteral("Export failed: %1").arg(m_exportError));
-        finishPersistentExportLog(QStringLiteral("FAILED"), m_exportError);
-        static_cast<void>(ExportArtifactManifest::cleanupOwned(m_exportManifestPath));
-        m_exportManifestPath.clear();
-        m_exportSupervisor.reset();
-        m_exportProcess.reset();
-        m_exportConfig.reset();
-        m_exportOutputTransaction.reset();
-        emit exportChanged();
+        finishExport(1, QProcess::CrashExit);
         return false;
     }
     if (!m_exportSupervisor->supervisionActive()) {
@@ -2483,8 +2488,27 @@ void AppController::handleExportOutput()
 
 void AppController::finishExport(const int exitCode, const QProcess::ExitStatus exitStatus)
 {
+    if (!m_exportProcess) return;
+    const bool remainingWriters = m_exportSupervisor && m_exportSupervisor->isRunning();
+    // A worker exit is not a process-tree completion boundary. Stop any
+    // remaining writers before reading their final output, committing or cleanup.
+    if (!m_exportSupervisor || !m_exportSupervisor->stopAndWait()) {
+        m_exportState = QStringLiteral("cancelling");
+        m_exportError = QStringLiteral("Export processes are still stopping; temporary files were retained.");
+        m_exportProgressInfo.insert("stage", m_exportState);
+        emit exportChanged();
+        QTimer::singleShot(1'000, this,
+            [this, process = QPointer<QProcess>(m_exportProcess.get()), exitCode, exitStatus] {
+                if (process && process == m_exportProcess.get()) finishExport(exitCode, exitStatus);
+            });
+        return;
+    }
     handleExportOutput();
     const bool cancelled = QFileInfo::exists(m_exportCancelPath);
+    if (remainingWriters && !cancelled) {
+        m_exportState = QStringLiteral("failed");
+        m_exportError = QStringLiteral("Export worker exited with child processes still running; output was not committed.");
+    }
     if (m_exportProcess) m_exportStderr.append(m_exportProcess->readAllStandardError());
     const QString workerError = m_exportStderr.text();
     QString persistentResult;
@@ -2494,7 +2518,7 @@ void AppController::finishExport(const int exitCode, const QProcess::ExitStatus 
         m_exportError.clear();
         setStatus("Export cancelled.");
         persistentResult = QStringLiteral("CANCELLED");
-    } else if (exitStatus == QProcess::NormalExit && exitCode == 0
+    } else if (exitStatus == QProcess::NormalExit && exitCode == 0 && m_exportError.isEmpty()
                && (m_exportState == QStringLiteral("complete")
                    || m_exportState == QStringLiteral("validationWarning"))) {
         QString commitError;

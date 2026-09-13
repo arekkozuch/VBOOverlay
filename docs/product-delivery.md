@@ -69,7 +69,7 @@ work, not evidence that a future capability already works. Ranges are inclusive.
 | F17 | Raw channels only: imported/plotted HR | Run/lap/sector summaries and comparisons: [KAN-69], [KAN-70]; acceptance: [KAN-74] |
 | F18 | Missing | Computed report, best results and click-through observations: [KAN-23], [KAN-71]–[KAN-74] |
 | F19 | Missing | Computed observation guidance: [KAN-73]; evidence package and Explain this lap: [KAN-108], [KAN-109] |
-| F20 | Substantial implementation: WidgetModel, shared TelemetryScene/FrameRenderer, transactions, recovery and verified UUID log retention | Descendants, time bounds and naming: [KAN-13], [KAN-17], [KAN-18]; export/installed-candidate acceptance: [KAN-75]–[KAN-85]; chapter export: [KAN-106] |
+| F20 | Substantial implementation: WidgetModel, shared TelemetryScene/FrameRenderer, transactions, recovery and verified UUID log retention | Descendant shutdown implementation: [KAN-13]; remaining time bounds and naming: [KAN-17], [KAN-18]; export/installed-candidate acceptance: [KAN-75]–[KAN-85]; chapter export: [KAN-106] |
 
 Core physical acceptance closes in [KAN-86]; full F00–F20 acceptance closes in
 [KAN-110]. Neither is complete at this baseline. Reuse PR #11's independent
@@ -82,7 +82,7 @@ verified-source loader, bounded row service and detail view for subsequent work.
 | C01 | PR #11 Qt 6.8 Mac QML crash | Closed by native-QPA fix `8aeb572`, integrated at `a0122ab`; PR and main Native CI passed with rendering/input coverage retained |
 | C02 | Flat best-lap trace bridges missing GPS | Closed in [KAN-5] / PR #12 at `7138fbd`: timings retained, invalid references excluded before trace/ranking, reason/no-delta exposed; focused regressions and PR/main CI passed |
 | C03 | Log retention ignores canonical UUIDs | Closed in [KAN-5] / PR #12 at `7138fbd`: actual IDs matched; unrelated/active files and symlinks protected; retention regressions and PR/main CI passed |
-| C04 | Unix descendants outlive group leader | Open: [KAN-13] supervises the group after leader exit and verifies shutdown before owned-artifact cleanup |
+| C04 | Unix descendants outlive group leader | Implemented in [KAN-13] / PR #14: retain group ownership after leader exit, bound escalation, gate controller commit/cleanup and stale recovery on group termination; exact CI/integration evidence is recorded in KAN-13 |
 | C05 | VBO bulk split/derived time budgets | Open: [KAN-14] bounds allocations; [KAN-15] checks derived timestamps; [KAN-17] separately verifies synchronization bounds |
 | C06 | Coordinate interpretation ambiguity | Open: [KAN-16] requires exporter evidence near equator/prime meridian |
 | C07 | Slow/full export destination behavior | Open: [KAN-75] exercises cancellation, scan and transaction cleanup under slow/filling volume |

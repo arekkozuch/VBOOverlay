@@ -33,6 +33,8 @@ public:
         bool overwriteAllowed);
     [[nodiscard]] bool commit(QString *error = nullptr);
     void cleanup();
+    // Keep manifest-owned artifacts for recovery if writers could not be stopped.
+    void deferCleanup();
 
     [[nodiscard]] QString userTargetPath() const;
     [[nodiscard]] QString stagingPath() const;
