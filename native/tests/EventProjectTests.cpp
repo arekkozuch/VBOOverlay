@@ -23,6 +23,7 @@ class EventProjectTests final : public QObject {
     Q_OBJECT
 private slots:
     void acceptsLegacyAndEventDocuments();
+    void boundsAndPreservesRunMetadata();
     void persistsTrackConfigurationAndUnknownLegacyState();
     void rejectsInvalidTrackConfigurations_data();
     void rejectsInvalidTrackConfigurations();
@@ -57,6 +58,40 @@ void EventProjectTests::acceptsLegacyAndEventDocuments()
     QVERIFY(example.open(QIODevice::ReadOnly));
     const auto sample = QJsonDocument::fromJson(example.readAll()).object();
     QVERIFY2(ProjectLimits::validateProject(sample, &error), qPrintable(error));
+}
+
+void EventProjectTests::boundsAndPreservesRunMetadata()
+{
+    const auto original = Fixture::project();
+    for (const auto *field : {"notes", "conditions", "setupChanges"}) {
+        for (const QJsonValue &value : {QJsonValue(QJsonValue::Undefined), QJsonValue(QJsonValue::Null),
+            QJsonValue(""), QJsonValue(QString(4096, 'x'))}) {
+            auto project = original; auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+            const auto key = EventProjectCodec::lapDerivationKey(run);
+            run.insert(field, value); run.insert("futureRun", QJsonObject{{"retained", true}});
+            runs[0] = run; Fixture::setRuns(project, runs);
+            QString error; QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+            QCOMPARE(EventProjectCodec::lapDerivationKey(run), key);
+            QCOMPARE(EventProjectCodec::withEditorState(project, EventProjectCodec::editorProjection(project), {}, {}), project);
+            QTemporaryDir directory; QVERIFY(directory.isValid());
+            ProjectRecoveryStore store(directory.filePath("recovery.json"));
+            const ProjectRecoverySnapshot snapshot{{}, "event-document", 5, 4, "2026-09-13T00:00:00.000Z", project, true};
+            QVERIFY2(store.write(snapshot, &error), qPrintable(error));
+            ProjectRecoverySnapshot restored; QVERIFY2(store.load(&restored, &error), qPrintable(error));
+            QCOMPARE(restored.project, project);
+        }
+        for (const QJsonValue &value : {QJsonValue(QString(4097, 'x')), QJsonValue(42), QJsonValue(false),
+            QJsonValue(QJsonObject{}), QJsonValue(QJsonArray{}), QJsonValue(QString("x") + QChar::Null)}) {
+            auto project = original; auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+            run.insert(field, value); runs[0] = run; Fixture::setRuns(project, runs);
+            QVERIFY(!ProjectLimits::validateProject(project));
+        }
+    }
+    for (const auto &name : {QString(" "), QString(161, 'x'), QString("x") + QChar::Null}) {
+        auto project = original; auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+        run.insert("name", name); runs[0] = run; Fixture::setRuns(project, runs);
+        QVERIFY(!ProjectLimits::validateProject(project));
+    }
 }
 
 void EventProjectTests::persistsTrackConfigurationAndUnknownLegacyState()

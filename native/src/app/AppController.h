@@ -197,6 +197,9 @@ public:
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
     Q_INVOKABLE bool selectEventRun(const QString &runId);
+    Q_INVOKABLE QVariantMap runMetadata(const QString &runId) const;
+    Q_INVOKABLE bool updateRunMetadata(const QString &runId, const QString &expectedToken,
+        const QString &name, const QString &notes, const QString &conditions, const QString &setupChanges);
     Q_INVOKABLE QVariantMap runTrackConfiguration(const QString &runId) const;
     Q_INVOKABLE bool confirmRunTrackConfiguration(const QString &runId, const QString &expectedDerivationKey,
         const QString &layoutId, const QString &direction);

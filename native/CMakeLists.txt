@@ -181,6 +181,7 @@ qt_add_qml_module(flappedear_native
         qml/BatchImportDialog.qml
         qml/AnalysisWindow.qml
         qml/AnalysisStartPanel.qml
+        qml/RunDetailsDialog.qml
         qml/OutingLapPanel.qml
         qml/OutingLapDetailPanel.qml
         qml/LapTimingPanel.qml

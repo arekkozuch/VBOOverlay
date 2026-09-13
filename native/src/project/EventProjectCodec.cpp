@@ -129,6 +129,15 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
             || !validText(run.value(QStringLiteral("primaryTelemetrySourceId")), ProjectLimits::maximumIdCharacters)) {
             return fail(error, QStringLiteral("Run metadata or identity is invalid."));
         }
+        if (run.value("name").toString().contains(QChar::Null))
+            return fail(error, QStringLiteral("Run name contains NUL."));
+        for (const auto *key : {"notes", "conditions", "setupChanges"}) {
+            const auto text = run.value(key);
+            if (!text.isUndefined() && !text.isNull() && (!text.isString()
+                || text.toString().size() > ProjectLimits::maximumStringCharacters
+                || text.toString().contains(QChar::Null)))
+                return fail(error, QStringLiteral("Run notes, conditions and setup changes must be bounded text or unknown."));
+        }
         runIds.insert(id);
         const QJsonObject sources = run.value(QStringLiteral("sources")).toObject();
         const QJsonValue telemetryValue = sources.value(QStringLiteral("telemetry"));

@@ -11,6 +11,7 @@ Rectangle {
         const minutes = Math.floor(seconds / 60);
         return minutes + ":" + (seconds - minutes * 60).toFixed(3).padStart(6, "0");
     }
+    RunDetailsDialog { id: runDetailsDialog }
     Dialog {
         id: rankingDialog
         objectName: "outingRankingDialog"
@@ -196,6 +197,13 @@ Rectangle {
             Layout.fillWidth: true
             Label { text: qsTr("All laps"); color: "#f2f6fb"; font.pixelSize: 24; font.weight: Font.DemiBold }
             Item { Layout.fillWidth: true }
+            FeButton {
+                objectName: "openRunDetails"
+                text: qsTr("Run details…")
+                compact: true
+                enabled: appController.eventRuns.length > 0 && !appController.projectLoading
+                onClicked: runDetailsDialog.open()
+            }
             Label {
                 text: qsTr("%1 runs · %2 recorded sections").arg(appController.eventRuns.length).arg(appController.outingLaps.length)
                 color: "#91a0b2"

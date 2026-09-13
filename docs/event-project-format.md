@@ -306,3 +306,32 @@ lap list are exercised at the analysis window's 760×480 minimum. The verbose
 chronology hint is hidden at short heights and notices remain scrollable so the
 lap list stays reachable. Native macOS Debug/Release CI is the build/test gate;
 private recordings and physical-Mac acceptance remain separate.
+
+## Run details editor (step 014)
+
+Each run owns its display `name` (required, nonblank, at most 160 UTF-16 code
+units) and optional plain-text `notes`, `conditions`, and `setupChanges` (at most
+4096 UTF-16 code units each). Embedded NUL is rejected. Optional fields may be
+absent or JSON null; empty legacy strings also remain readable. Clearing an
+existing value saves null. Opening or saving unchanged legacy details does not
+invent fields. Unknown conditions and setup stay blank, with no inference from
+lap times, filenames or recording dates. Unrelated unknown fields are preserved.
+
+**All laps → Run details…** opens a run selector and a scrollable editor. Save
+applies the draft as one persistent edit; Cancel/Escape discards it. Choose
+another run after saving or cancelling the current draft. Over-limit multiline
+text remains visible for correction and disables Save; it is not silently cut.
+Saving details marks the project dirty and uses the normal project Save, Save As
+and recovery paths. The fixed action row remains available at the 760×480
+minimum analysis-window size.
+
+An edit token binds the draft to the current document and run object. A stale
+edit or a project load/export/recovery/destructive operation cannot overwrite
+current data. Invalid edits are transactional; unchanged edits do not advance
+the document revision. Editing an inactive run does not select or reload it.
+
+Names and annotations are display metadata: they do not change source identity,
+lap references, derivation/cache keys, track configuration, exclusions or ranking
+eligibility. Current names are applied when publishing cached or newly derived
+rows, rankings and selected-lap labels, without resetting the detail session,
+track geometry or cursor.
