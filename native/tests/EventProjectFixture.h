@@ -56,7 +56,7 @@ inline QJsonObject reference(const QJsonObject &run, const qsizetype index = 0)
 
 inline QByteArray lapsVbo()
 {
-    return "[laptiming]\nStart 21.0000 52.0000 21.0000 52.0002 start\n"
+    return "[header]\ncoordinate units = degrees\n[laptiming]\nStart 21.0000 52.0000 21.0000 52.0002 start\n"
            "[column names]\ntime latitude longitude\n[data]\n"
            "0 52.0001 21.0002\n1 52.0001 21.0002\n2 52.0001 20.9998\n"
            "3 52.0008 20.9998\n4 52.0008 21.0002\n5 52.0001 21.0002\n"

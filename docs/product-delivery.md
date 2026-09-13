@@ -84,7 +84,7 @@ verified-source loader, bounded row service and detail view for subsequent work.
 | C03 | Log retention ignores canonical UUIDs | Closed in [KAN-5] / PR #12 at `7138fbd`: actual IDs matched; unrelated/active files and symlinks protected; retention regressions and PR/main CI passed |
 | C04 | Unix descendants outlive group leader | Implemented in [KAN-13] / PR #14: retain group ownership after leader exit, bound escalation, gate controller commit/cleanup and stale recovery on group termination; exact CI/integration evidence is recorded in KAN-13 |
 | C05 | VBO bulk split/derived time budgets | [KAN-14] / PR #15 implements bounded line/field scanning (integration evidence in Jira); [KAN-15] implements derived-time/conversion checks (integration evidence in Jira); [KAN-17] synchronization bounds remain open |
-| C06 | Coordinate interpretation ambiguity | Open: [KAN-16] requires exporter evidence near equator/prime meridian |
+| C06 | Coordinate interpretation ambiguity | [KAN-16] implements explicit exporter/header evidence shared by samples and gates; unresolved units withhold GPS with a warning. Quadrant, zero-crossing and conflict regressions; exact integration evidence in Jira |
 | C07 | Slow/full export destination behavior | Open: [KAN-75] exercises cancellation, scan and transaction cleanup under slow/filling volume |
 | C08 | User-visible name/package drift | Open: [KAN-18] coordinates Flapped Ear Telemetry display/bundle/package naming while preserving storage identity |
 

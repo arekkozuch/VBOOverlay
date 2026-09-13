@@ -44,8 +44,7 @@ evidence-linked report. Raw OBD/HR charts do not yet constitute vehicle/driver
 analysis. The full original vision remains itemized as F00–F20.
 
 The editor/export foundation should be preserved. Remaining hardening includes
-Synchronization bounds, coordinate-unit
-ambiguity, slow/full destinations and consistent user-facing package naming.
+synchronization bounds, slow/full destinations and consistent user-facing package naming.
 
 ## Subsequent task changes
 
@@ -72,6 +71,18 @@ before publication. Rollover, elapsed time, duration and UTC chronology are chec
 unsafe numeric ranges reject the parse. Chart sampling checks its derived range
 and integer bucket conversion. Boundary and mixed-format regressions accompany
 the changes; final PR/main CI evidence is recorded in Jira.
+
+[KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16) replaces coordinate
+magnitude guessing with a single explicit unit decision for GPS samples and gates.
+The verified RaceChrono Pro 10.2.4 marker means signed total arc-minutes; custom
+exports can declare degrees or arc-minutes through the documented FlappedEar
+header extension. Missing, unsupported or conflicting evidence withholds GPS and
+gates with a warning while retaining other valid telemetry. Track geometry and
+its current marker consume validated degrees. Synthetic regressions cover all
+quadrants, zero crossings, mixed axis magnitudes, conflicting evidence and bounds.
+Existing lap/pairing fixtures retain their assertions with explicit source units.
+Exact PR/main macOS Debug and Release CI evidence belongs in Jira; no new Windows,
+private-recording or physical-hardware verification is claimed.
 
 ## Evidence boundaries
 
