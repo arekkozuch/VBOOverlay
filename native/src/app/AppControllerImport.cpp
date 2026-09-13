@@ -379,6 +379,8 @@ bool AppController::confirmBatchImport(const QString &name, const bool append, c
         if (runName.isEmpty()) runName = QStringLiteral("Run");
         runs.append(QJsonObject{{"id", runId}, {"name", runName}, {"primaryTelemetrySourceId", primarySourceId},
             {"sources", QJsonObject{{"telemetry", sources}}},
+            {"trackConfiguration", EventProjectCodec::unknownTrackConfiguration(primarySourceId,
+                m_batchFingerprints.value(primary.id), timingGateRevision(*primary.telemetry))},
             {"sync", QJsonObject{{"offset", 0.0}, {"timeScale", 1.0}}}});
         if (!append && !event.contains("activeRunId")) event.insert("activeRunId", runId);
     }

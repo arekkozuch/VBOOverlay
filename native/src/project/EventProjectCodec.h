@@ -2,6 +2,7 @@
 
 #include "project/ProjectSourceReference.h"
 
+#include <QByteArray>
 #include <QJsonObject>
 #include <QStringList>
 
@@ -26,6 +27,14 @@ public:
     [[nodiscard]] static QJsonObject referenceForSave(
         const ProjectSourceReference &reference, const QString &previousProjectPath,
         const QString &targetProjectPath);
+    // Unknown fields are explicit for new imports; absent legacy configuration
+    // reads as unknown without modifying the document just by opening it.
+    [[nodiscard]] static QJsonObject unknownTrackConfiguration(
+        const QString &sourceId, const QJsonObject &fingerprint, const QString &gateRevision = {});
+    [[nodiscard]] static QJsonObject trackConfiguration(const QJsonObject &run);
+    // Opaque dependency identity, not a lap reference or compatibility decision.
+    // Excludes names, notes, video/sync and portable source paths.
+    [[nodiscard]] static QByteArray lapDerivationKey(const QJsonObject &run);
     // All referenced path candidates, including inactive sources, for export protection.
     [[nodiscard]] static QStringList referencedPaths(const QJsonObject &project, const QString &projectPath);
 };

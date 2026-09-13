@@ -2,6 +2,10 @@
 
 #include "telemetry/TelemetryGeometry.h"
 
+#include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+
 #include <algorithm>
 #include <cmath>
 #include <iterator>
@@ -490,6 +494,28 @@ LapSession detectLaps(
         result.status = LapSessionStatus::Available;
     }
     return result;
+}
+
+QString timingGateRevision(const TelemetrySession &session, const CancellationCheck &cancelled)
+{
+    throwIfCancelled(cancelled);
+    if (session.timingGates.size() > 128) return {};
+    QJsonArray gates;
+    int startCount = 0;
+    const bool west = session.metadata.value("gpsLongitudeConvention") == "west-positive";
+    for (const auto &gate : session.timingGates) {
+        throwIfCancelled(cancelled);
+        if (!isValidCoordinate(gate.endpointA) || !isValidCoordinate(gate.endpointB)
+            || gate.type == TimingGateType::Unknown) return {};
+        startCount += gate.type == TimingGateType::Start ? 1 : 0;
+        const auto longitude = [west](double value) { return west ? -value : value; };
+        gates.append(QJsonArray{gate.type == TimingGateType::Start ? "start" : "split",
+            gate.endpointA.latitudeDegrees, longitude(gate.endpointA.longitudeDegrees),
+            gate.endpointB.latitudeDegrees, longitude(gate.endpointB.longitudeDegrees)});
+    }
+    if (startCount != 1) return {};
+    return "gates-v1:" + QString::fromLatin1(QCryptographicHash::hash(
+        QJsonDocument(gates).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
 }
 
 LapSession deriveSourceLapSession(

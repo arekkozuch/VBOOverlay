@@ -1,6 +1,9 @@
 #include "project/EventProjectCodec.h"
 #include "project/ProjectLimits.h"
 
+#include <QCryptographicHash>
+#include <QJsonDocument>
+#include <QRegularExpression>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -37,6 +40,33 @@ bool validReference(const QJsonValue &value)
     if (!absolute.isEmpty() && !QDir::isAbsolutePath(absolute)) return false;
     return !reference.contains(QStringLiteral("fingerprint"))
         || reference.value(QStringLiteral("fingerprint")).isObject();
+}
+
+QJsonObject primaryFingerprint(const QJsonObject &run)
+{
+    for (const auto &value : run.value("sources").toObject().value("telemetry").toArray()) {
+        const auto source = value.toObject();
+        if (source.value("id") == run.value("primaryTelemetrySourceId"))
+            return source.value("reference").toObject().value("fingerprint").toObject();
+    }
+    return {};
+}
+
+bool validConfiguration(const QJsonObject &run)
+{
+    if (!run.contains("trackConfiguration")) return true;
+    if (!run.value("trackConfiguration").isObject()) return false;
+    const auto config = run.value("trackConfiguration").toObject();
+    const auto layout = config.value("layoutId");
+    const auto direction = config.value("direction");
+    const auto revision = config.value("gateRevision");
+    static const QRegularExpression revisionPattern("^gates-v1:[0-9a-f]{64}$");
+    return (layout.isNull() || validText(layout, ProjectLimits::maximumIdCharacters))
+        && direction.isString() && QStringList{"unknown", "clockwise", "counterclockwise"}.contains(direction.toString())
+        && (revision.isNull() || (revision.isString() && revisionPattern.match(revision.toString()).hasMatch()))
+        && config.value("sourceId") == run.value("primaryTelemetrySourceId")
+        && config.value("sourceFingerprint").isObject()
+        && config.value("sourceFingerprint").toObject() == primaryFingerprint(run);
 }
 
 ProjectSourceReference sourceReference(const QJsonObject &object)
@@ -117,6 +147,9 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         if (!primaryFound || sourceIds.size() > maximumTelemetrySources) {
             return fail(error, QStringLiteral("Primary telemetry source is missing or event source limit exceeded."));
         }
+        if (!validConfiguration(run)) {
+            return fail(error, QStringLiteral("Track configuration or its primary source binding is invalid."));
+        }
         if (sources.contains(QStringLiteral("video")) && !validReference(sources.value(QStringLiteral("video")))) {
             return fail(error, QStringLiteral("Run video reference is invalid."));
         }
@@ -132,6 +165,28 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         return fail(error, QStringLiteral("Active run does not belong to the event."));
     }
     return true;
+}
+
+QJsonObject EventProjectCodec::unknownTrackConfiguration(
+    const QString &sourceId, const QJsonObject &fingerprint, const QString &gateRevision)
+{
+    return {{"layoutId", QJsonValue::Null}, {"direction", "unknown"},
+        {"gateRevision", gateRevision.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(gateRevision)},
+        {"sourceId", sourceId}, {"sourceFingerprint", fingerprint}};
+}
+
+QJsonObject EventProjectCodec::trackConfiguration(const QJsonObject &run)
+{
+    return run.contains("trackConfiguration") ? run.value("trackConfiguration").toObject()
+        : unknownTrackConfiguration(run.value("primaryTelemetrySourceId").toString(), primaryFingerprint(run));
+}
+
+QByteArray EventProjectCodec::lapDerivationKey(const QJsonObject &run)
+{
+    return QCryptographicHash::hash(QJsonDocument(QJsonObject{{"version", "lap-derivation-v1"},
+        {"runId", run.value("id")}, {"sourceId", run.value("primaryTelemetrySourceId")},
+        {"sourceFingerprint", primaryFingerprint(run)}, {"trackConfiguration", trackConfiguration(run)}})
+        .toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex();
 }
 
 QJsonObject EventProjectCodec::editorProjection(const QJsonObject &project)
@@ -225,7 +280,14 @@ QJsonObject EventProjectCodec::withEditorState(
         } else if (sources.contains(QStringLiteral("video"))) {
             sources.insert(QStringLiteral("video"), rebaseReference(sources.value(QStringLiteral("video")).toObject(), previousProjectPath, targetProjectPath));
         }
+        const auto previousFingerprint = primaryFingerprint(run);
         run.insert(QStringLiteral("sources"), sources);
+        if (primaryFingerprint(run) != previousFingerprint) {
+            // A replacement source cannot inherit asserted layout/gate metadata.
+            // A same-content relink/Save As changes paths only and retains it.
+            run.insert("trackConfiguration", unknownTrackConfiguration(
+                run.value("primaryTelemetrySourceId").toString(), primaryFingerprint(run)));
+        }
         runs.append(run);
     }
     event.insert(QStringLiteral("runs"), runs);

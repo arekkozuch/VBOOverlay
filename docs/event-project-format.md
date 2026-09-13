@@ -14,6 +14,8 @@ An event owns an ordered list of runs and an `activeRunId`. Each run owns:
 - `sources.telemetry`: 1–8 source entries, each with an event-wide unique `id`
   and a `reference` containing relative/absolute paths and an optional fingerprint.
 - Optional `sources.video` reference and its `sync.offset`/`sync.timeScale`.
+- `trackConfiguration` on new imports: explicit layout/direction/gate identity,
+  bound to the primary source ID and fingerprint (details below).
 - Optional metadata such as `notes`; bounded unknown fields survive round trips.
 
 Event/run/source IDs are document identities, not filenames or import proposal
@@ -33,6 +35,55 @@ Only one run's telemetry and video are loaded at a time. Selection clears prior
 loaded data and starts cancellable, generation-guarded source loading; a missing
 primary stays missing even if an alternative exists. Missing external assets do
 not invalidate an otherwise valid event document.
+
+## Track configuration and derivation identity (KAN-19)
+
+New imports persist the following run-local configuration. Layout IDs are opaque
+identifiers assigned explicitly, not filenames, display names or inferred GPS
+clusters. Reuse an ID only for the same physical layout. Direction is independent
+of a gate's crossing sign and remains `unknown` until explicitly assigned.
+
+```json
+"trackConfiguration": {
+  "layoutId": null,
+  "direction": "unknown",
+  "gateRevision": null,
+  "sourceId": "primary-source-id",
+  "sourceFingerprint": {}
+}
+```
+
+`layoutId` is null or a nonblank ID up to 128 characters. Direction is `unknown`,
+`clockwise` or `counterclockwise`. `gateRevision` is null or `gates-v1:` followed by
+64 lowercase SHA-256 hex characters. Import derives a revision from the ordered
+source gate types and endpoints, normalizing explicit west-positive longitude to
+east-positive for identity only. Names/descriptions do not change the revision;
+endpoint, gate type/order or gate count changes do. Missing/ambiguous start gates,
+unknown gate types, invalid coordinates or more than 128 gates remain unresolved.
+A known revision identifies geometry; it does not establish lap eligibility.
+
+`sourceId` must name this run's primary source; `sourceFingerprint` must equal
+that source reference's fingerprint. Foreign, alternative or stale bindings are
+rejected before project commit. Legacy v3 runs without the object read as unknown;
+opening them alone does not assert a layout, direction or gate revision.
+
+Save, Save As, recovery and run switching retain the configuration. Same-content
+relinking preserves it. Replacing source content clears its asserted fields to
+unknown and binds them to the replacement fingerprint. The controller API
+`setRunTrackConfiguration(runId, layoutId, direction)` supports validated explicit
+assignment or clearing (empty layout ID / `unknown` direction), records a normal
+persistent edit, and leaves the loaded editor source intact. This model step does
+not add a configuration UI or automatic track/direction recognition.
+
+`lapDerivationKey` combines a version tag, run ID, primary source ID/fingerprint
+and configuration. Names, notes, video synchronization and source path spelling
+are excluded. Outing-analysis requests include this identity: changing layout,
+direction, gate revision or source cancels/rejects old work and closes stale lap
+detail. Analysis also checks asserted gate revisions against the loaded recording
+before publishing rows. Existing source fingerprint and generation checks remain.
+No cross-run comparison cache is persisted yet; compatibility groups and durable
+lap references are subsequent tasks. Unknown identities never establish that two
+runs are compatible merely because their unknown values match.
 
 ## Persistence and limits
 

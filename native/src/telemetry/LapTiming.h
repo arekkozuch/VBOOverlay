@@ -89,6 +89,12 @@ struct LapSession {
     LapDetectionDiagnostics diagnostics;
 };
 
+// Content revision of the ordered source gates in east-positive coordinates.
+// Empty means unresolved (missing/ambiguous start gate or invalid coordinates).
+// Gate crossing sign is not a clockwise/counterclockwise layout direction.
+[[nodiscard]] QString timingGateRevision(
+    const TelemetrySession &session, const CancellationCheck &cancelled = {});
+
 [[nodiscard]] LapSession detectLaps(
     const TelemetrySession &session,
     const TimingGate &startGate,

@@ -528,3 +528,24 @@ with private recordings. The coordinator has no CMake/CTest/Qt toolchain; exact
 macOS arm64 Debug/Release PR and main CI evidence is recorded in
 [KAN-112](https://kozucharkadiusz.atlassian.net/browse/KAN-112). Windows execution
 remains paused.
+
+## KAN-19: track configuration and source-bound derivation identity
+
+Event codec regressions cover legacy unknown state, explicit JSON/recovery/editor
+round trips, malformed layout/direction/revision fields, foreign/alternative
+source bindings and stale fingerprints. Dependency keys change on configuration
+or source changes while names, notes, synchronization and portable paths remain
+independent. Same-content relocation retains configuration; replacement clears it.
+
+Gate revision tests compare equivalent east/west-positive geometry, retain the
+revision on label edits, change it on endpoint edits and preserve unresolved
+states for missing, ambiguous and invalid gates; cancellation remains explicit.
+A controller regression imports source gates, edits configuration transactionally,
+invalidates open lap detail without reloading the editor, saves/reopens, rejects
+an asserted stale gate revision and clears metadata after source replacement.
+
+Native validation is performed by macOS arm64 Debug/Release PR and main CI because
+the coordinator lacks CMake/CTest/Qt. Exact runs and results are recorded in
+[KAN-19](https://kozucharkadiusz.atlassian.net/browse/KAN-19). Windows execution
+remains paused. Synthetic coverage does not claim private-file or physical-Mac
+acceptance, track recognition, compatibility grouping or durable lap references.
