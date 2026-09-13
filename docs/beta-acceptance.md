@@ -1,9 +1,9 @@
 # macOS product candidate acceptance
 
-> Current owner direction (13 September 2026): Cloud CI and Windows execution
-> are paused. New candidates require recorded local macOS build/test and
-> package/startup evidence. References below to hosted CI describe the previous
-> pipeline and do not authorize cloud execution. See [task delivery](development-workflow.md).
+> Current owner direction (13 September 2026): macOS Cloud CI is resumed;
+> Windows execution remains paused. Candidates require exact-revision macOS
+> Debug/Release CI and package/startup evidence, plus applicable local real-media
+> and interactive acceptance. See [task delivery](development-workflow.md).
 
 
 Updated 12 September 2026. Internal candidates are not approved for distribution
@@ -22,7 +22,7 @@ by event persistence. First core and full-vision acceptance are distinct.
 The delivery ledger's end-to-end checklist is mandatory for core completion.
 The existing installation/export/recovery procedures below remain useful gates;
 they do not by themselves prove A/B, corner analysis or reports are implemented.
-Existing Windows CI remains regression coverage, while new product focus is Mac.
+Earlier Windows CI results are historical; current execution and product focus are Mac.
 
 Advertise only OS/hardware combinations actually recorded for the candidate.
 Supported SDR/color and RCZ restrictions remain in their implementation contracts.
@@ -31,7 +31,7 @@ no broader support or public release is claimed by this document.
 
 ## Candidate builds
 
-Native CI runs Debug and Release tests on both platforms. Only successful Release
+Native CI runs Debug and Release tests on macOS; Windows execution remains paused. Only successful Release
 jobs deploy Qt with CMake, run the installed application from a separate working
 directory using the packaged Cocoa/Windows platform plugin with the build Qt SDK hidden, then upload `candidate-<runner>-<commit>`.
 The deployment uses [Qt's script API](https://doc.qt.io/qt-6.8/qt-generate-deploy-script.html), QML import scanning and runtime dependency deployment. The explicit `qt6_generate_deploy_script` function retains install-time variables and plugin lists. Executable paths use the configured install directory and explicit quoting because Qt 6.8's convenience generator splits names containing spaces.
@@ -85,7 +85,7 @@ an advertised platform or capability.
 | Gate | Required evidence | Current status |
 |---|---|---|
 | Identity | Archive SHA-256, manifest commit, OS build, CPU/GPU, driver, FFmpeg/ffprobe versions | Pending exact candidate |
-| Automated tests | Local macOS Debug/Release builds/tests, RCZ suite, startup, deployed startup | Required on candidate |
+| Automated tests | Exact-revision macOS Debug/Release CI, RCZ suite, startup, deployed startup; applicable local checks | Required on candidate |
 | Clean installation | Finder/Explorer launch without Qt SDK; media playback; missing/incompatible FFmpeg message | Pending physical machines |
 | Real media | Supplied RCZ/VBO plus matching real video through the full workflow below | Telemetry pair passed locally; matching video unavailable in this workspace |
 | Hardware export | Actual selected HEVC encoder, output metadata, decoded frames and audio alignment | Pending candidate run |

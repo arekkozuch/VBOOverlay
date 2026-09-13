@@ -7,9 +7,24 @@ cmake --build build-native --parallel
 ctest --test-dir build-native --output-on-failure
 ```
 
-Run the local gate appropriate to the change before claiming a behavior works. Cloud CI is paused by owner direction; do not run it. Follow the current [local task workflow](development-workflow.md).
+Run the local gate appropriate to the change before claiming a behavior works. Cloud CI is enabled for macOS Debug and Release by owner direction; Windows remains paused. Follow the current [local task workflow](development-workflow.md).
 
 The native suite assigns a unique test application identity and checks a default `QSettings` round trip before controller tests run. It retains the platform's native settings backend, including the Windows registry, and clears that test namespace afterward. Recovery cleanup failures use the existing injected deletion operation so stale-snapshot and Save As assertions run on every platform; these checks do not replace native Windows ACL-denial coverage. File-content checks close their read handles before attempting atomic replacement.
+
+## Video-free day-result states (KAN-27)
+
+`presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
+and production QML at 760×480. It covers initial empty state, automatic results,
+loading and repeated-retry rejection, partial availability with an identified
+missing run, restoration through the Retry recordings button, source-identity
+failure, all sources missing, and stale worker completion after New Project.
+It asserts that unaffected detail geometry/cursor, editor run/sync and the clean
+document revision survive retry and result inspection. Existing import, ranking,
+progression and project-reopen regressions remain part of the full native suite.
+
+This task restores macOS Debug/Release Cloud CI with owner authorization. No
+separate run is requested for task 016; task 017 runs include its committed base.
+Private recordings and GoPro hardware/interactive acceptance remain separate.
 
 ## Product naming and compatibility (KAN-18)
 
@@ -26,12 +41,12 @@ Windows naming edits are not Windows execution evidence.
 
 ## Cloud CI
 
-**Paused by owner on 13 September 2026 due to quota limits.** Push/PR triggers
-are removed and manual jobs are disabled. All descriptions and task delivery
-records below describe historical coverage, not permission to start cloud jobs.
-Use the [local task workflow](development-workflow.md) for new work.
+**Resumed by owner on 13 September 2026 after the quota pause.** Verify each
+published change against its own CI run; historical task records do not validate
+new code. Keep the [local task workflow](development-workflow.md) for implementation
+and private-media acceptance.
 
-Before the pause, [Native CI](../.github/workflows/build.yml) ran on pull requests, pushes to `main`, and manual dispatch. Two macOS arm64 jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows builds, tests and installer validation are paused by owner direction on 13 September 2026; resume them only when explicitly requested. Earlier Windows results below are historical. See [Windows installer](windows-installer.md).
+[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Two macOS arm64 jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows builds, tests and installer validation are paused by owner direction on 13 September 2026; resume them only when explicitly requested. Earlier Windows results below are historical. See [Windows installer](windows-installer.md).
 
 | Job | Renderer | Toolchain |
 | --- | --- | --- |
