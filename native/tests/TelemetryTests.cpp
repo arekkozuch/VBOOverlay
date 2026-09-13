@@ -1212,7 +1212,10 @@ void TelemetryTests::editsRunMetadataThroughQml()
     notes->setProperty("text", QString(4097, 'x')); QVERIFY(!save->isEnabled());
     QCOMPARE(notes->property("text").toString().size(), 4097); // Never silently truncate notes.
     notes->setProperty("text", "Notes"); conditions->setProperty("text", "Dry"); setup->setProperty("text", "Tyres changed");
-    QVERIFY(save->isEnabled()); QVERIFY(scroll->height() > 50);
+    QVERIFY(save->isEnabled());
+    QTRY_VERIFY2(scroll->height() > 50, qPrintable(QString("Scroll height %1; dialog %2x%3; window %4x%5")
+        .arg(scroll->height()).arg(dialog->property("width").toDouble()).arg(dialog->property("height").toDouble())
+        .arg(window->width()).arg(window->height())));
     QTRY_VERIFY(save->mapRectToScene(save->boundingRect()).top() >= 0
         && save->mapRectToScene(save->boundingRect()).bottom() <= window->height());
     cancel->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
