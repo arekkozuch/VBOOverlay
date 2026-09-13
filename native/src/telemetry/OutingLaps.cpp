@@ -199,7 +199,20 @@ QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &gro
     int lapCount = 0;
     for (const auto &id : runOrder) {
         const auto &run = runs[id]; lapCount += run.count;
-        rankedRuns.append(QJsonObject{{"runId", id}, {"runName", run.first->runName}, {"groupId", groupId},
+        QJsonValue distribution(QJsonValue::Null);
+        if (!run.eligible.isEmpty()) {
+            const auto quantile = [&run](const double fraction) {
+                const double position = fraction * static_cast<double>(run.eligible.size() - 1);
+                const auto lower = static_cast<qsizetype>(std::floor(position));
+                const auto upper = static_cast<qsizetype>(std::ceil(position));
+                const double a = run.eligible[lower]->end - run.eligible[lower]->start;
+                const double b = run.eligible[upper]->end - run.eligible[upper]->start;
+                return a + (b - a) * (position - static_cast<double>(lower));
+            };
+            distribution = QJsonObject{{"minimum", quantile(0)}, {"q1", quantile(.25)},
+                {"median", quantile(.5)}, {"q3", quantile(.75)}, {"maximum", quantile(1)}};
+        }
+        rankedRuns.append(QJsonObject{{"distribution", distribution}, {"runId", id}, {"runName", run.first->runName}, {"groupId", groupId},
             {"state", run.eligible.isEmpty() ? "no-eligible-laps" : "available"}, {"lapCount", run.count},
             {"eligibleLapCount", run.eligible.size()}, {"tieCount", ties(run.eligible)},
             {"bestLap", run.eligible.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(record(*run.eligible.first()))}});
@@ -209,6 +222,73 @@ QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &gro
     result.insert("lapCount", lapCount); result.insert("eligibleLapCount", eligible.size());
     result.insert("tieCount", ties(eligible));
     if (!eligible.isEmpty()) result.insert("bestOfDay", record(*eligible.first()));
+    return result;
+}
+
+QJsonObject summarizeOutingProgression(const QVector<OutingLapRow> &rows,
+    const QJsonObject &ranking, const QJsonArray &runMetadata)
+{
+    if (rows.size() > maximumOutingLapRows || runMetadata.size() > 64)
+        throw ResourceLimitError("Too many runs or lap sections for progression.");
+    QJsonObject result{{"state", ranking.value("state")}, {"groupId", ranking.value("groupId")},
+        {"groupLabel", ranking.value("groupLabel")}, {"runs", QJsonArray{}},
+        {"eligibleLapCount", ranking.value("eligibleLapCount")}, {"lapCount", ranking.value("lapCount")},
+        {"minimumSeconds", QJsonValue::Null}, {"maximumSeconds", QJsonValue::Null}};
+    const auto group = ranking.value("groupId").toString();
+    if (group.isEmpty() || (ranking.value("state") != "available" && ranking.value("state") != "no-eligible-laps")) return result;
+    QHash<QString, QJsonObject> ranked;
+    for (const auto &value : ranking.value("runs").toArray())
+        ranked.insert(value.toObject().value("runId").toString(), value.toObject());
+    QHash<QString, QJsonArray> rejected;
+    for (const auto &value : ranking.value("excludedLaps").toArray())
+        rejected[value.toObject().value("runId").toString()].append(value);
+    QHash<QString, qint64> clocks;
+    for (const auto &row : rows) {
+        if (row.timestampMilliseconds && (!clocks.contains(row.runId) || *row.timestampMilliseconds < clocks.value(row.runId)))
+            clocks.insert(row.runId, *row.timestampMilliseconds);
+    }
+    struct Run { QJsonObject value; std::optional<qint64> clock; qsizetype order; };
+    QVector<Run> runs;
+    for (qsizetype i = 0; i < runMetadata.size(); ++i) {
+        const auto metadata = runMetadata[i].toObject();
+        if (metadata.value("groupId").toString() != group) continue;
+        const auto id = metadata.value("id").toString();
+        auto item = ranked.value(id, QJsonObject{{"state", "no-recorded-laps"}, {"lapCount", 0},
+            {"eligibleLapCount", 0}, {"bestLap", QJsonValue::Null}, {"distribution", QJsonValue::Null}});
+        item.insert("runId", id); item.insert("runName", metadata.value("name")); item.insert("groupId", group);
+        for (const auto *field : {"notes", "conditions", "setupChanges"})
+            item.insert(field, metadata.value(field).isUndefined() ? QJsonValue(QJsonValue::Null) : metadata.value(field));
+        item.insert("excludedLaps", rejected.value(id));
+        const auto clock = clocks.contains(id) ? std::optional<qint64>(clocks.value(id)) : std::nullopt;
+        item.insert("chronologyKnown", clock.has_value());
+        // Preserve the integer clock as text; QML never reconstructs dates from filenames.
+        item.insert("firstSectionUtcMilliseconds", clock ? QJsonValue(QString::number(*clock)) : QJsonValue(QJsonValue::Null));
+        runs.append(Run{item, clock, i});
+        const auto distribution = item.value("distribution").toObject();
+        if (!distribution.isEmpty()) {
+            const double low = distribution.value("minimum").toDouble(), high = distribution.value("maximum").toDouble();
+            if (result.value("minimumSeconds").isNull() || low < result.value("minimumSeconds").toDouble()) result.insert("minimumSeconds", low);
+            if (result.value("maximumSeconds").isNull() || high > result.value("maximumSeconds").toDouble()) result.insert("maximumSeconds", high);
+        }
+    }
+    std::sort(runs.begin(), runs.end(), [](const Run &a, const Run &b) {
+        if (a.clock.has_value() != b.clock.has_value()) return a.clock.has_value();
+        if (a.clock && a.clock != b.clock) return *a.clock < *b.clock;
+        return a.order < b.order;
+    });
+    QJsonArray published;
+    QJsonObject previous;
+    for (auto &run : runs) {
+        const auto best = run.value.value("bestLap").toObject();
+        const auto previousBest = previous.value("bestLap").toObject();
+        run.value.insert("bestDeltaPreviousListedSeconds", !best.isEmpty() && !previousBest.isEmpty()
+            ? QJsonValue(best.value("durationSeconds").toDouble() - previousBest.value("durationSeconds").toDouble())
+            : QJsonValue(QJsonValue::Null));
+        run.value.insert("previousListedRunName", previous.value("runName"));
+        published.append(run.value);
+        previous = run.value; // A run without an eligible lap breaks the comparison; never fill gaps.
+    }
+    result.insert("runs", published);
     return result;
 }
 
