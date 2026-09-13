@@ -1,15 +1,24 @@
-# Task delivery and local acceptance
+# Task delivery and acceptance
 
 ## Current owner direction — 13 September 2026
 
-Cloud CI is paused because the account has reached its quota. The workflow has
-no push or pull-request triggers and its manual job is disabled. Do not dispatch,
-rerun or re-enable cloud jobs without explicit owner authorization. This
-supersedes earlier PR/main CI requirements in Jira and historical delivery notes.
-Tasks 001–015 retain their recorded CI evidence; it is not evidence for new code.
+The owner has resumed Cloud CI after the quota pause. Native CI runs on pull
+requests, pushes to `main`, and manual dispatch, with macOS Debug and Release
+builds/tests and Release deployment/startup validation. Verify successful runs
+for the exact published PR head and resulting main revision; earlier task CI
+results are not evidence for new code.
 Windows builds, tests and packaging remain paused. Development targets macOS.
 
-## One local Codex instruction per Jira task
+## One implementation task at a time
+
+The owner has authorized coordinator implementation again. For shared-repository
+work, implement the requested task, open a focused PR and validate it through
+macOS CI. If the local native toolchain is unavailable, say so; hosted CI supplies
+the synthetic build/test gate, not private-media or owner-operated acceptance.
+Do not start a separate CI run for task 016: the owner accepted its local report
+and requested moving directly to task 017. The next task's CI includes that base.
+
+When the owner requests local Codex execution, use the following handoff.
 
 The coordinator prepares one self-contained English implementation prompt for the
 next requested task in the ordered 100-task Jira backlog. The local Codex session
@@ -28,15 +37,16 @@ toolchain is unavailable, report what is missing and leave validation outstandin
 
 Keep one implementation task active. Review the local Codex result and actual
 changes before updating Jira. A code task is complete only when its acceptance
-criteria and applicable local build/tests pass. Run Debug application/tests as
+criteria and applicable build/tests pass. Run Debug application/tests as
 the default local gate; also validate Release and deployed startup for packaging,
 release-sensitive changes or when the task requires them. Keep private-media,
 physical hardware/encoder and interactive checks separate from synthetic tests.
 
 Local Codex must not push, open a PR, merge or publish unless the owner explicitly
-requests it. When publication is authorized, use a focused PR and record local
-verification for its exact head. After integration, verify the resulting main
-revision locally; never substitute old CI results or silently enable Cloud CI.
+requests it. When publication is authorized, use a focused PR and record applicable
+verification for its exact head and wait for its macOS CI jobs to pass before
+merging. After integration, verify CI on the resulting main revision. Local
+real-media and interactive acceptance remain separate; never substitute old CI results.
 All Jira content remains in English. Record the implementation SHA, local results,
 limitations and any authorized PR/merge links. No public releases or tags are
 implied. Historical CI wording elsewhere does not override this workflow.

@@ -524,6 +524,81 @@ QVariantList AppController::outingLaps() const
     return rows;
 }
 
+QVariantMap AppController::outingAnalysisStatus() const
+{
+    const bool loading = outingLapsLoading();
+    const auto reusable = reusableOutingRuns();
+    QVariantList runs;
+    QStringList notices = loading ? QStringList{} : m_outingLapMessages;
+    QString globalError;
+    if (!loading) {
+        for (const auto &message : m_outingSourceMessages) {
+            if (message.runId.isEmpty() && message.state == "error") {
+                globalError = message.text;
+                notices.removeAll(message.text);
+            }
+        }
+    }
+    int sectionCount = 0, readyCount = 0, missingCount = 0, errorCount = 0;
+    for (const auto &value : eventRuns()) {
+        const auto run = value.toMap();
+        const auto id = run.value("id").toString(), name = run.value("name").toString();
+        QString state = "empty", message = tr("No recorded sections in this run.");
+        int count = 0;
+        if (projectLoading() || (loading && !reusable.contains(id))) {
+            state = "loading";
+            message = tr("Reading recording and detecting laps…");
+        } else if (reusable.contains(id)) {
+            count = static_cast<int>(m_outingRunCache.value(id).rows.size());
+            if (count > 0) { state = "ready"; message = tr("%1 recorded sections available.").arg(count); }
+        }
+        if (!loading) {
+            if (!globalError.isEmpty()) { state = "error"; message = globalError; count = 0; }
+            for (const auto &notice : m_outingSourceMessages) {
+                if (notice.runId != id || notice.state.isEmpty()) continue;
+                state = notice.state; message = notice.text; count = 0;
+                notices.removeAll(name + ": " + notice.text);
+            }
+            if (m_outingStaleRunIds.contains(id)) {
+                state = "error"; message = tr("Recording changed; verify or relink its source before analysis."); count = 0;
+            }
+        }
+        sectionCount += count;
+        readyCount += state == "ready";
+        missingCount += state == "missing-source";
+        errorCount += state == "error";
+        runs.append(QVariantMap{{"runId", id}, {"runName", name}, {"state", state},
+            {"message", message}, {"sectionCount", count}});
+    }
+    // Partial results remain usable. Ready describes available sections, not
+    // ranking eligibility; GPS ambiguity and exclusions have their own policy.
+    const QString state = loading ? "loading" : sectionCount > 0 ? "ready"
+        : errorCount > 0 || !globalError.isEmpty() ? "error"
+        : missingCount > 0 ? "missing-source" : "empty";
+    QString message;
+    if (state == "loading") message = tr("Updating day results… Available recordings remain inspectable.");
+    else if (state == "error") message = tr("Day results unavailable. Review the affected recordings below.");
+    else if (state == "missing-source") message = tr("Recordings are missing. Restore their files or relink their sources, then retry.");
+    else if (state == "empty") message = tr("No recorded sections available. Add RCZ or VBO recordings; video is optional.");
+    else message = tr("%1 of %2 runs available · %3 recorded sections").arg(readyCount).arg(runs.size()).arg(sectionCount);
+    return {{"state", state}, {"message", message}, {"runs", runs}, {"notices", notices},
+        {"readyRunCount", readyCount}, {"missingRunCount", missingCount}, {"errorRunCount", errorCount},
+        {"sectionCount", sectionCount}, {"error", globalError},
+        {"partial", sectionCount > 0 && readyCount < runs.size()}};
+}
+
+bool AppController::retryOutingAnalysis()
+{
+    if (outingLapsLoading() || projectLoading() || exporting() || recoveryPending()
+        || m_batchPending || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None
+        || outingLapSources().isEmpty()) return false;
+    // Reuse the bounded worker and its full-content checks. Retrying does not
+    // select an editor run, alter synchronization or persist an analysis choice.
+    m_outingLapRequestedKey.clear();
+    refreshOutingLaps();
+    return true;
+}
+
 void AppController::initializeOutingLaps()
 {
     m_outingLapTimer.setSingleShot(true);
@@ -557,6 +632,8 @@ void AppController::initializeOutingLaps()
             closeOutingLap();
         emit outingLapsChanged();
     });
+    // A fresh document has no source-load signal to settle its empty state.
+    m_outingLapTimer.start();
 }
 
 void AppController::refreshOutingLaps()
@@ -586,7 +663,7 @@ void AppController::refreshOutingLaps()
     if (m_outingLapWatcher.isRunning()) return;
     m_outingLapRequestedKey = key;
     m_outingLapGeneration = m_sourceGeneration;
-    if (sources.isEmpty()) return;
+    if (sources.isEmpty()) { emit outingLapsChanged(); return; }
     m_outingLapCancellation = std::make_shared<std::atomic_bool>(false);
     const auto cancellation = m_outingLapCancellation;
     const auto generation = m_sourceGeneration;
@@ -605,12 +682,16 @@ void AppController::refreshOutingLaps()
                 throwIfCancelled(cancelled);
                 const auto source = sources[index].toObject();
                 const auto runId = source.value("runId").toString();
+                QString failureState = "error";
                 try {
                     const auto json = source.value("reference").toObject();
                     const ProjectSourceReference reference{json.value("relativePath").toString(),
                         json.value("absolutePath").toString(), json.value("fingerprint").toObject()};
                     const auto path = ProjectSourceReferenceCodec::resolve(reference, projectPath);
-                    if (path.isEmpty()) throw std::runtime_error("Recording is missing; locate its source to list laps.");
+                    if (path.isEmpty()) {
+                        failureState = "missing-source";
+                        throw std::runtime_error("Recording is missing; locate its source to list laps.");
+                    }
                     const auto size = QFileInfo(path).size();
                     if (size <= 0 || size > TelemetryImportLimits{}.maximumFileBytes
                         || size > TelemetryImportLimits{}.maximumBatchBytes - bytes)
@@ -668,7 +749,7 @@ void AppController::refreshOutingLaps()
                     result.runs.insert(runId, std::move(derived));
                 } catch (const OperationCancelled &) { throw; }
                 catch (const std::exception &error) {
-                    result.messages.append(OutingSourceMessage{source.value("runId").toString(), QString::fromUtf8(error.what())});
+                    result.messages.append(OutingSourceMessage{runId, QString::fromUtf8(error.what()), failureState});
                 }
             }
             throwIfCancelled(cancelled);
@@ -698,7 +779,10 @@ void AppController::refreshOutingLaps()
             }
             sortOutingLaps(result.rows);
         } catch (const OperationCancelled &) { result.cancelled = true; result.rows.clear(); result.runs.clear(); }
-        catch (const std::exception &error) { result.rows.clear(); result.runs.clear(); result.messages.append(OutingSourceMessage{{}, QString::fromUtf8(error.what())}); }
+        catch (const std::exception &error) {
+            result.rows.clear(); result.runs.clear(); result.groups = {};
+            result.messages.append(OutingSourceMessage{{}, QString::fromUtf8(error.what()), "error"});
+        }
         return result;
     }));
 }

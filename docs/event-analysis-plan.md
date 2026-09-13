@@ -28,9 +28,25 @@ available group results without per-run configuration. Manual correction remains
 an override for ambiguous or incorrect matches. See
 [the inference, persistence and invalidation contract](event-project-format.md#automatic-compatibility-groups-and-corrections-steps-012016).
 
+## Video-free day results (KAN-27)
+
+The Day results panel exposes `loading`, `empty`, `missing-source`, `error` and
+`ready` states with individual run identities and messages. A partial day retains
+available sections, rankings and progression while naming unavailable recordings.
+Ready means sections are available; eligibility still depends on route, direction,
+timing gates, source integrity and exclusions. Missing or failed sources are never
+presented as an ordinary empty day.
+
+After restoring a missing file, **Retry recordings** reruns the existing bounded,
+cancellable worker and full-content identity checks. A different file at the same
+path requires the existing explicit source verification/relink workflow. Retrying,
+choosing a result and inspecting a lap do not select an editor run or change its
+synchronization. Unaffected open details survive. Pending and failed run messages
+share a bounded scroll area, including at the 760×480 analysis-window minimum.
+
 ## Next product outcomes
 
-1. Quality-aware run/event results and progression, using the existing outing service.
+1. End-to-end acceptance of the implemented run/event results and progression.
 2. Independent cross-run A/B, shared track progress, delta and paired map/channels.
 3. Reviewed corners/sectors, metrics and sector theoretical.
 4. Ranked losses, consistency, G-G, available thermal/HR data and automatic report.

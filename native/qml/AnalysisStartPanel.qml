@@ -20,7 +20,7 @@ Item {
         }
         Label {
             Layout.fillWidth: true
-            text: qsTr("Name your track day, then add your RCZ or VBO files. All recorded laps will appear in one chronological list.")
+            text: qsTr("Add your day's RCZ or VBO recordings to see laps, best-day results and progression. Compatible routes are grouped automatically. No video is required.")
             wrapMode: Text.WordWrap
             color: "#91a0b2"
             font.pixelSize: 14

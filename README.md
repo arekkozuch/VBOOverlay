@@ -47,7 +47,7 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 - Qt 6.8 or newer with Concurrent, Core, Gui and matching GuiPrivate headers, Qml, Quick, Quick Controls 2, Multimedia, and Test; include the SVG and Shader Tools modules in binary SDK installations.
 - FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; the command-line tools are not bundled. A small production-filter preflight also requires explicit alpha-mode support.
 
-Current development uses local Codex on macOS. Cloud CI is paused by owner direction on 13 September 2026 due to quota limits; Windows builds and validation also remain paused. See [task delivery](docs/development-workflow.md) for local implementation and validation instructions. Existing [Windows NSIS packaging](docs/windows-installer.md) is retained for later resumption.
+Development targets macOS, with coordinator implementation and local Codex handoffs as requested. Cloud CI was resumed by owner direction on 13 September 2026 for macOS Debug and Release; Windows builds and validation remain paused. See [task delivery](docs/development-workflow.md) for local implementation and validation instructions. Existing [Windows NSIS packaging](docs/windows-installer.md) is retained for later resumption.
 
 For replacing an older named bundle without losing preferences or recovery, see
 [application identity and upgrades](docs/application-identity.md).
@@ -70,7 +70,7 @@ open "build-native/native/Flapped Ear Telemetry.app"
 
 ## Continuous integration
 
-[Native CI](.github/workflows/build.yml) is paused: push/PR triggers are removed and manual jobs are disabled. Do not dispatch, rerun or restore Cloud CI without explicit owner authorization. Use local builds and CTest; report hardware-encoder and private-media acceptance separately. The retained workflow and [historical CI guidance](docs/testing.md#cloud-ci) document the previous environment.
+[Native CI](.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. It builds and tests macOS Debug and Release; Release also validates deployed startup and produces an internal candidate. Windows remains paused. Keep local builds and CTest, and report hardware-encoder and private-media acceptance separately. See [CI guidance](docs/testing.md#cloud-ci).
 
 ## Architecture
 

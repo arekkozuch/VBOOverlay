@@ -66,6 +66,7 @@
 #include <QVideoFrame>
 #include <QtEndian>
 #include <QtTest>
+#include <qpa/qwindowsysteminterface.h>
 #include <cmath>
 #include <atomic>
 #include <array>
@@ -131,6 +132,7 @@ private slots:
     void lapReferencesDetectUnsampledContentChanges();
     void recordsVboUtcChronology();
     void ordersWholeOutingAndReopensSources();
+    void presentsDayResultStatesWithoutVideo();
     void groupsOnlyDatedUnambiguousAlternatives();
     void prefersRaceChronoCalculatedAcceleration();
     void presentsBrakingUpInGForceWidgets();
@@ -1379,7 +1381,7 @@ void TelemetryTests::startsOutingThroughAnalysisQml()
     // A shell-launched test cannot always take foreground focus on macOS.
     // Synthesize window activation as well as keyboard input so the production
     // WindowShortcut receives Escape, without calling its handler directly.
-    QtGuiTest::postFakeWindowActivation(quickWindow);
+    QWindowSystemInterface::handleFocusWindowChanged(quickWindow);
     QTRY_COMPARE(QGuiApplication::focusWindow(), quickWindow);
     QQuickItem *row = nullptr;
     QTRY_VERIFY(QMetaObject::invokeMethod(runs, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, 0)) && row);
@@ -2757,6 +2759,143 @@ void TelemetryTests::ordersWholeOutingAndReopensSources()
     QTRY_VERIFY(controller.outingLaps().isEmpty());
     QTRY_VERIFY(!controller.m_outingLapWatcher.isRunning());
     QVERIFY(controller.eventRuns().isEmpty());
+}
+
+void TelemetryTests::presentsDayResultStatesWithoutVideo()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("morning.vbo"), second = directory.filePath("afternoon.vbo");
+    const auto firstBytes = EventProjectFixture::routeVbo();
+    const auto secondBytes = EventProjectFixture::routeVbo(130, -2, 2);
+    QVERIFY(writeBytes(first, firstBytes)); QVERIFY(writeBytes(second, secondBytes));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QTRY_COMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("empty"));
+    QVERIFY(!controller.retryOutingAnalysis());
+    QVERIFY(controller.importAnalysisRuns("Video-free results", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_COMPARE(controller.outingRanking().value("state").toString(), QString("available"));
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("ready"));
+    QCOMPARE(controller.outingAnalysisStatus().value("readyRunCount").toInt(), 2);
+    QCOMPARE(controller.outingProgression().value("runs").toList().size(), 2);
+    const auto runA = controller.eventRuns()[0].toMap().value("id").toString();
+    const auto runB = controller.eventRuns()[1].toMap().value("id").toString();
+    const auto runStatus = [&controller](const QString &id) {
+        for (const auto &value : controller.outingAnalysisStatus().value("runs").toList())
+            if (value.toMap().value("runId") == id) return value.toMap();
+        return QVariantMap{};
+    };
+    controller.setSyncOffset(19); controller.setTimeScale(1.3); controller.setPlaybackTime(7);
+    const auto saved = directory.filePath("day.fetproject"); QVERIFY(controller.saveProject(QUrl::fromLocalFile(saved)));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto before = controller.currentProjectObject();
+    const auto revision = controller.m_documentState.revision();
+    const auto active = controller.activeRunId();
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings); QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 760; height: 480; OutingLapPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *status = window->findChild<QObject *>("outingAnalysisStatus");
+    auto *retry = window->findChild<QQuickItem *>("retryOutingAnalysis");
+    auto *best = window->findChild<QQuickItem *>("openBestDayLap");
+    auto *lapList = window->findChild<QQuickItem *>("outingLapList");
+    QVERIFY(status && retry && best && lapList);
+    QVERIFY(!retry->isVisible()); QVERIFY(best->isEnabled());
+
+    // Inspect the other run through the actual results control. This must not
+    // select its editor source or alter the editor synchronization.
+    best->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.activeRunId(), active);
+    QCOMPARE(controller.syncOffset(), 19.0); QCOMPARE(controller.timeScale(), 1.3);
+    controller.closeOutingLap();
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("runId") == runA && row.value("type") == "LAP") {
+            QVERIFY(controller.selectOutingLapReference(row.value("reference").toMap())); break;
+        }
+    }
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto detail = controller.m_outingLapDetailSession;
+    const auto track = controller.outingLapTrack();
+    const auto cursor = controller.outingLapCursor();
+
+    QVERIFY(QFile::remove(second));
+    QVERIFY(controller.retryOutingAnalysis());
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("loading"));
+    QVERIFY(!controller.retryOutingAnalysis()); // One bounded worker, even under repeated clicks.
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("ready"));
+    QVERIFY(controller.outingAnalysisStatus().value("partial").toBool());
+    QCOMPARE(runStatus(runB).value("state").toString(), QString("missing-source"));
+    QCOMPARE(runStatus(runA).value("state").toString(), QString("ready"));
+    QCOMPARE(controller.outingRanking().value("runs").toList().size(), 1);
+    QCOMPARE(controller.m_outingLapDetailSession, detail);
+    QCOMPARE(controller.outingLapTrack(), track); QCOMPARE(controller.outingLapCursor(), cursor);
+    QTRY_VERIFY(retry->isVisible() && retry->isEnabled());
+    auto *runStatuses = window->findChild<QObject *>("outingRunStatuses"); QVERIFY(runStatuses);
+    QTRY_COMPARE(runStatuses->property("count").toInt(), 1);
+    QQuickItem *missing = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(runStatuses, "itemAt", Q_RETURN_ARG(QQuickItem *, missing), Q_ARG(int, 0)) && missing);
+    QCOMPARE(missing->objectName(), "outingRunStatus_" + runB);
+    QVERIFY(missing->isVisible());
+    QVERIFY(missing->property("text").toString().contains("afternoon"));
+    QVERIFY(missing->property("text").toString().contains("missing"));
+    QTRY_VERIFY(lapList->height() > 30);
+    QVERIFY(retry->mapRectToScene(retry->boundingRect()).bottom() <= window->height());
+
+    // Restoring the exact file recovers from the production retry control.
+    QVERIFY(writeBytes(second, secondBytes));
+    retry->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(controller.outingAnalysisStatus().value("readyRunCount").toInt(), 2);
+    QTRY_VERIFY(!retry->isVisible());
+    QVERIFY(!controller.outingAnalysisStatus().value("partial").toBool());
+    QCOMPARE(controller.m_outingLapDetailSession, detail);
+
+    // A different file at the same path is an identity error, never an empty
+    // result or a silently accepted replacement. The other run stays usable.
+    QVERIFY(writeBytes(second, "not the original recording\n"));
+    QVERIFY(controller.retryOutingAnalysis()); QTRY_VERIFY(!controller.outingLapsLoading());
+    QCOMPARE(runStatus(runB).value("state").toString(), QString("error"));
+    QVERIFY(runStatus(runB).value("message").toString().contains("identity"));
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("ready"));
+    QVERIFY(QFile::remove(first));
+    QVERIFY(controller.retryOutingAnalysis()); QTRY_VERIFY(!controller.outingLapsLoading());
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("error"));
+    QVERIFY(!best->isEnabled());
+    QVERIFY(!status->property("text").toString().contains("No recorded sections"));
+    QVERIFY(QFile::remove(second));
+    QVERIFY(controller.retryOutingAnalysis()); QTRY_VERIFY(!controller.outingLapsLoading());
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("missing-source"));
+    QCOMPARE(controller.outingAnalysisStatus().value("missingRunCount").toInt(), 2);
+    QVERIFY(controller.outingLaps().isEmpty());
+
+    QVERIFY(writeBytes(first, firstBytes)); QVERIFY(writeBytes(second, secondBytes));
+    QVERIFY(controller.retryOutingAnalysis()); QTRY_VERIFY(!controller.outingLapsLoading());
+    QCOMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("ready"));
+    QCOMPARE(controller.currentProjectObject(), before);
+    QCOMPARE(controller.m_documentState.revision(), revision); QVERIFY(!controller.dirty());
+    QCOMPARE(controller.activeRunId(), active);
+    QCOMPARE(controller.syncOffset(), 19.0); QCOMPARE(controller.timeScale(), 1.3);
+
+    // A superseded worker must publish neither obsolete errors nor run names.
+    AppController::OutingLapResult stale;
+    stale.key = controller.outingLapKey(); stale.generation = controller.m_sourceGeneration;
+    stale.messages.append({runB, "Obsolete source error", "error"});
+    QPromise<AppController::OutingLapResult> promise; promise.start();
+    controller.m_outingLapWatcher.setFuture(promise.future());
+    controller.requestNewProject();
+    promise.addResult(stale); promise.finish();
+    QTRY_VERIFY(!controller.m_outingLapWatcher.isRunning());
+    QTRY_COMPARE(controller.outingAnalysisStatus().value("state").toString(), QString("empty"));
+    QVERIFY(controller.outingAnalysisStatus().value("runs").toList().isEmpty());
+    QVERIFY(controller.outingAnalysisStatus().value("notices").toStringList().isEmpty());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::presentsBrakingUpInGForceWidgets()

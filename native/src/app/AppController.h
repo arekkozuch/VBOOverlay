@@ -105,6 +105,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QString outingComparisonGroupId READ outingComparisonGroupId NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonSelectionState READ outingComparisonSelectionState NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingLaps READ outingLaps NOTIFY outingLapsChanged)
+    Q_PROPERTY(QVariantMap outingAnalysisStatus READ outingAnalysisStatus NOTIFY outingLapsChanged)
     Q_PROPERTY(QStringList outingLapMessages READ outingLapMessages NOTIFY outingLapsChanged)
     Q_PROPERTY(bool outingLapsLoading READ outingLapsLoading NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList batchImportRows READ batchImportRows NOTIFY batchImportChanged)
@@ -236,6 +237,8 @@ public:
     [[nodiscard]] double outingLapCursor() const { return m_outingLapCursor; }
     void setOutingLapCursor(double seconds);
     [[nodiscard]] QVariantList outingLaps() const;
+    [[nodiscard]] QVariantMap outingAnalysisStatus() const;
+    Q_INVOKABLE bool retryOutingAnalysis();
     [[nodiscard]] QStringList outingLapMessages() const { return m_outingLapMessages; }
     [[nodiscard]] bool outingLapsLoading() const {
         return projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
@@ -492,6 +495,7 @@ private:
     struct OutingSourceMessage {
         QString runId;
         QString text;
+        QString state = {};
     };
     struct OutingRunResult {
         QByteArray dependencyKey;

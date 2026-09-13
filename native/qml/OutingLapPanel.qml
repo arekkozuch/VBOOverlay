@@ -7,6 +7,8 @@ Rectangle {
     id: root
     color: "#090e14"
     readonly property var ranking: appController.outingRanking
+    readonly property var analysisStatus: appController.outingAnalysisStatus
+    readonly property var pendingRuns: (analysisStatus.runs || []).filter(run => run.state !== "ready")
     readonly property var resolvedGroups: appController.outingCompatibilityGroups.filter(group => group.resolved && group.available)
     function duration(seconds) {
         const minutes = Math.floor(seconds / 60);
@@ -243,7 +245,7 @@ Rectangle {
         spacing: 12
         RowLayout {
             Layout.fillWidth: true
-            Label { text: qsTr("All laps"); color: "#f2f6fb"; font.pixelSize: 24; font.weight: Font.DemiBold }
+            Label { text: qsTr("Day results"); color: "#f2f6fb"; font.pixelSize: 24; font.weight: Font.DemiBold }
             Item { Layout.fillWidth: true }
             FeButton {
                 objectName: "openRunDetails"
@@ -275,12 +277,15 @@ Rectangle {
                 model: root.resolvedGroups
                 textRole: "summary"
                 valueRole: "id"
+                enabled: !appController.outingLapsLoading && count > 0
                 currentIndex: model.findIndex(group => group.id === appController.outingComparisonGroupId)
                 displayText: currentIndex >= 0 ? currentText
                     : appController.outingLapsLoading ? qsTr("Detecting compatible groups…")
                     : appController.outingComparisonSelectionState === "loading" ? qsTr("Restoring saved group…")
                     : appController.outingComparisonSelectionState === "unavailable" ? qsTr("Saved group unavailable")
-                    : qsTr("Choose a comparison group")
+                    : root.analysisStatus.state === "missing-source" ? qsTr("Recordings missing")
+                    : root.analysisStatus.state === "error" ? qsTr("Recordings unavailable")
+                    : count === 0 ? qsTr("No compatible group available") : qsTr("Choose a comparison group")
                 onActivated: appController.selectOutingComparisonGroup(currentValue)
                 Accessible.name: qsTr("Comparison group")
             }
@@ -364,6 +369,9 @@ Rectangle {
                         .arg(root.ranking.bestOfDay.runName).arg(root.ranking.bestOfDay.lapNumber)
                     : root.ranking.state === "loading" ? qsTr("Updating rankings…")
                     : root.ranking.state === "no-eligible-laps" ? qsTr("No eligible lap in this group")
+                    : root.analysisStatus.state === "missing-source" ? qsTr("Best day unavailable · recordings missing")
+                    : root.analysisStatus.state === "error" ? qsTr("Best day unavailable · recording errors")
+                    : root.resolvedGroups.length === 0 ? qsTr("Best day unavailable · no compatible laps")
                     : qsTr("Choose a compatibility group for best-day results")
                 onClicked: appController.selectOutingLapReference(root.ranking.bestOfDay.reference)
                 ToolTip.visible: hovered
@@ -382,21 +390,71 @@ Rectangle {
                 onClicked: rankingDialog.open()
             }
         }
-        BusyIndicator { running: appController.outingLapsLoading; visible: running; Layout.alignment: Qt.AlignHCenter }
-        ScrollView {
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(root.height < 600 ? 40 : 80, notices.implicitHeight)
-            visible: appController.outingLapMessages.length > 0 || appController.outingComparisonSelectionState === "unavailable"
-            contentWidth: availableWidth
+            BusyIndicator {
+                running: appController.outingLapsLoading
+                visible: running
+                Layout.preferredWidth: 28
+                Layout.preferredHeight: 28
+            }
             Label {
-                id: notices
-                width: parent.width
-                text: (appController.outingComparisonSelectionState === "unavailable"
-                    ? [qsTr("Saved comparison group retained without applying. Verify missing or changed recordings and track configuration, choose another group, or clear the decision.")]
-                    : []).concat(appController.outingLapMessages).join("\n")
-                color: "#d6a457"
+                objectName: "outingAnalysisStatus"
+                Layout.fillWidth: true
+                text: root.analysisStatus.message || ""
                 wrapMode: Text.WordWrap
-                font.pixelSize: 11
+                color: root.analysisStatus.partial || ["error", "missing-source"].indexOf(root.analysisStatus.state) >= 0
+                    ? "#d6a457" : "#91a0b2"
+                font.pixelSize: 12
+            }
+            FeButton {
+                objectName: "retryOutingAnalysis"
+                text: qsTr("Retry recordings")
+                compact: true
+                visible: root.analysisStatus.missingRunCount > 0 || root.analysisStatus.errorRunCount > 0
+                    || !!root.analysisStatus.error
+                enabled: !appController.outingLapsLoading && !appController.projectLoading
+                onClicked: appController.retryOutingAnalysis()
+            }
+        }
+        ScrollView {
+            id: statusScroll
+            objectName: "outingAnalysisNotices"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(root.height < 600 ? 64 : 100, statusContent.implicitHeight)
+            visible: root.pendingRuns.length > 0 || (root.analysisStatus.notices || []).length > 0
+                || appController.outingComparisonSelectionState === "unavailable" || !!root.analysisStatus.error
+            contentWidth: availableWidth
+            clip: true
+            ColumnLayout {
+                id: statusContent
+                width: statusScroll.availableWidth
+                spacing: 6
+                Repeater {
+                    objectName: "outingRunStatuses"
+                    model: root.pendingRuns
+                    delegate: Label {
+                        required property var modelData
+                        objectName: "outingRunStatus_" + modelData.runId
+                        Layout.fillWidth: true
+                        text: modelData.runName + " · " + modelData.message
+                        color: ["error", "missing-source"].indexOf(modelData.state) >= 0 ? "#d6a457" : "#91a0b2"
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 11
+                    }
+                }
+                Label {
+                    id: notices
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    text: (appController.outingComparisonSelectionState === "unavailable"
+                        ? [qsTr("Saved comparison group retained without applying. Verify missing or changed recordings and track configuration, choose another group, or clear the decision.")]
+                        : []).concat(root.analysisStatus.error ? [root.analysisStatus.error] : [])
+                        .concat(root.analysisStatus.notices || []).join("\n")
+                    color: "#d6a457"
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 11
+                }
             }
         }
         Rectangle {
@@ -495,7 +553,7 @@ Rectangle {
             }
             Label {
                 anchors.centerIn: parent
-                visible: laps.count === 0 && !appController.outingLapsLoading
+                visible: laps.count === 0 && root.analysisStatus.state === "empty"
                 text: qsTr("No recorded lap sections available")
                 color: "#657386"
             }
