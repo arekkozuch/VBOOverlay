@@ -69,7 +69,7 @@ work, not evidence that a future capability already works. Ranges are inclusive.
 | F17 | Raw channels only: imported/plotted HR | Run/lap/sector summaries and comparisons: [KAN-69], [KAN-70]; acceptance: [KAN-74] |
 | F18 | Missing | Computed report, best results and click-through observations: [KAN-23], [KAN-71]–[KAN-74] |
 | F19 | Missing | Computed observation guidance: [KAN-73]; evidence package and Explain this lap: [KAN-108], [KAN-109] |
-| F20 | Substantial implementation: WidgetModel, shared TelemetryScene/FrameRenderer, transactions, recovery and verified UUID log retention | Descendant shutdown implementation: [KAN-13]; remaining time bounds and naming: [KAN-17], [KAN-18]; export/installed-candidate acceptance: [KAN-75]–[KAN-85]; chapter export: [KAN-106] |
+| F20 | Substantial implementation: WidgetModel, shared TelemetryScene/FrameRenderer, transactions, recovery and verified UUID log retention | Descendant shutdown implementation: [KAN-13]; time-bound and naming implementation: [KAN-17], [KAN-18]; export/installed-candidate acceptance: [KAN-75]–[KAN-85]; chapter export: [KAN-106] |
 
 Core physical acceptance closes in [KAN-86]; full F00–F20 acceptance closes in
 [KAN-110]. Neither is complete at this baseline. Reuse PR #11's independent
@@ -86,7 +86,7 @@ verified-source loader, bounded row service and detail view for subsequent work.
 | C05 | VBO bulk split/derived time budgets | [KAN-14] / PR #15 implements bounded line/field scanning (integration evidence in Jira); [KAN-15] implements derived-time/conversion checks (integration evidence in Jira); [KAN-17] adds checked bidirectional transforms and bounded auto-sync search (integration evidence in Jira) |
 | C06 | Coordinate interpretation ambiguity | [KAN-16] implements explicit exporter/header evidence shared by samples and gates; unresolved units withhold GPS with a warning. Quadrant, zero-crossing and conflict regressions; exact integration evidence in Jira |
 | C07 | Slow/full export destination behavior | Open: [KAN-75] exercises cancellation, scan and transaction cleanup under slow/filling volume |
-| C08 | User-visible name/package drift | Open: [KAN-18] coordinates Flapped Ear Telemetry display/bundle/package naming while preserving storage identity |
+| C08 | User-visible name/package drift | [KAN-18] standardizes Flapped Ear Telemetry display/About/bundle/package names with settings/recovery preservation checks; macOS integration evidence in Jira; Windows execution paused |
 
 Event ranking needs additional compatibility and exclusion rules beyond C02.
 Do not present a GPS-continuous interval as proof of a comparable racing lap.

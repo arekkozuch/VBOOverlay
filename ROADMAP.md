@@ -43,7 +43,7 @@ environments, not physical acceptance of this baseline.
 - [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (KAN-5, PR #12 merged at `7138fbd`; PR/main CI passed).
 - [x] Resolve VBO coordinate units from explicit evidence, with shared sample/gate conversion and equator/prime-meridian regressions ([KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16); exact integration evidence in Jira).
 - [ ] Validate long final scans, slow destinations and a destination volume filling during Stage B ([KAN-75](https://kozucharkadiusz.atlassian.net/browse/KAN-75)).
-- [ ] Standardize user-facing product and package names while preserving stored identity ([KAN-18](https://kozucharkadiusz.atlassian.net/browse/KAN-18)).
+- [x] Standardize user-facing product and package names while preserving stored identity ([KAN-18](https://kozucharkadiusz.atlassian.net/browse/KAN-18)).
 
 Unchecked audit findings remain open. Their effect on the advertised product workflow must be resolved or explicitly bounded before approval; a passing CI run does not close unrelated findings.
 

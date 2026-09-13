@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 1180
     minimumHeight: 720
     visible: true
-    title: "FlappedEar Telemetry"
+    title: Application.displayName
     color: "#070a0f"
     x: appController.windowX >= 0 ? appController.windowX : Screen.width / 2 - width / 2
     y: appController.windowY >= 0 ? appController.windowY : Screen.height / 2 - height / 2
@@ -378,7 +378,7 @@ ApplicationWindow {
         title: qsTr("Recover unsaved changes?")
         contentItem: Label {
             width: 400
-            text: qsTr("FlappedEar found changes that were not saved to the project file. Recover them as an unsaved document, or discard them and open the saved project?")
+            text: qsTr("Flapped Ear Telemetry found changes that were not saved to the project file. Recover them as an unsaved document, or discard them and open the saved project?")
             wrapMode: Text.WordWrap
             color: "#e8edf4"
         }
@@ -522,6 +522,28 @@ ApplicationWindow {
                 shortcut: "F1"
                 onTriggered: shortcutHelpDialog.open()
             }
+        }
+        Menu {
+            title: qsTr("Help")
+            Action {
+                text: qsTr("About %1").arg(Application.displayName)
+                onTriggered: productAboutDialog.open()
+            }
+        }
+    }
+
+    Dialog {
+        id: productAboutDialog
+        objectName: "productAboutDialog"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: Math.min(440, window.width - 40)
+        title: qsTr("About %1").arg(Application.displayName)
+        standardButtons: Dialog.Close
+        contentItem: Label {
+            text: qsTr("Video telemetry overlays and motorsport analysis.")
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -812,8 +834,8 @@ ApplicationWindow {
     }
     FileDialog {
         id: projectOpenDialog
-        title: qsTr("Open FlappedEar project")
-        nameFilters: [qsTr("FlappedEar projects (*.fetproject)")]
+        title: qsTr("Open Flapped Ear Telemetry project")
+        nameFilters: [qsTr("Flapped Ear Telemetry projects (*.fetproject)")]
         onAccepted: {
             window.clearWidgetSelection();
             appController.requestOpenProject(selectedFile);
@@ -821,10 +843,10 @@ ApplicationWindow {
     }
     FileDialog {
         id: projectSaveDialog
-        title: qsTr("Save FlappedEar project")
+        title: qsTr("Save Flapped Ear Telemetry project")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "fetproject"
-        nameFilters: [qsTr("FlappedEar projects (*.fetproject)")]
+        nameFilters: [qsTr("Flapped Ear Telemetry projects (*.fetproject)")]
         onAccepted: appController.saveProject(selectedFile)
         onRejected: {
             if (appController.pendingDestructiveAction.length > 0)
@@ -842,7 +864,7 @@ ApplicationWindow {
     FileDialog {
         id: templateImportDialog
         title: qsTr("Import layout template")
-        nameFilters: [qsTr("FlappedEar templates (*.fettemplate *.json)")]
+        nameFilters: [qsTr("Flapped Ear Telemetry templates (*.fettemplate *.json)")]
         onAccepted: {
             const templateId = appController.widgetModel.importTemplate(selectedFile);
             if (templateId)
@@ -854,7 +876,7 @@ ApplicationWindow {
         title: qsTr("Export layout template")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "fettemplate"
-        nameFilters: [qsTr("FlappedEar templates (*.fettemplate)")]
+        nameFilters: [qsTr("Flapped Ear Telemetry templates (*.fettemplate)")]
         onAccepted: {
             const item = window.selectedTemplate();
             if (item)
@@ -1697,14 +1719,14 @@ ApplicationWindow {
                 ColumnLayout {
                     spacing: -1
                     Label {
-                        text: "FlappedEar"
+                        text: "Flapped Ear"
                         color: "#f1f5fa"
                         font.family: "Helvetica Neue"
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
                     }
                     Label {
-                        text: "TELEMETRY STUDIO"
+                        text: "TELEMETRY"
                         color: "#647386"
                         font.family: "Helvetica Neue"
                         font.pixelSize: 9
@@ -2445,14 +2467,14 @@ ApplicationWindow {
                 ColumnLayout {
                     spacing: -2
                     Label {
-                        text: "FlappedEar"
+                        text: "Flapped Ear"
                         color: "#f2f6fb"
                         font.family: "Helvetica Neue"
                         font.pixelSize: 21
                         font.weight: Font.DemiBold
                     }
                     Label {
-                        text: "TELEMETRY STUDIO"
+                        text: "TELEMETRY"
                         color: "#718092"
                         font.pixelSize: 9
                         font.letterSpacing: 2

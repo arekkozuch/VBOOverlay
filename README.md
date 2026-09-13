@@ -44,6 +44,9 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 
 Current development and CI focus is macOS only, per owner direction on 13 September 2026. Windows builds and validation are paused until explicitly resumed. CI pins Qt 6.8.3 and produces internal macOS Release candidates with deployed Qt runtimes. Existing [Windows NSIS packaging](docs/windows-installer.md) remains available for later resumption. Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
 
+For replacing an older named bundle without losing preferences or recovery, see
+[application identity and upgrades](docs/application-identity.md).
+
 ## Build
 
 For the coordinator's per-task PR/CI gate and local Codex update/build/test
@@ -57,7 +60,7 @@ cmake -S . -B build-native \
   -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt
 cmake --build build-native --parallel
 ctest --test-dir build-native --output-on-failure
-open "build-native/native/FlappedEar Telemetry.app"
+open "build-native/native/Flapped Ear Telemetry.app"
 ```
 
 ## Continuous integration
@@ -120,6 +123,6 @@ For remaining work, see [ROADMAP.md](ROADMAP.md). Developer contribution rules a
 
 ### Editor instance and recovery
 
-Run one FlappedEar editor per user data directory. A second launch asks you to use
+Run one Flapped Ear Telemetry editor per user data directory. A second launch asks you to use
 or close the existing window, protecting unsaved recovery and custom templates.
 Export workers are unaffected. Close older builds before opening this version.

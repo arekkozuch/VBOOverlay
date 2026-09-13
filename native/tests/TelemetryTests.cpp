@@ -1,5 +1,6 @@
 #include "gopro/GoProTelemetrySource.h"
 #include "app/AppController.h"
+#include "app/ApplicationIdentity.h"
 #include "app/GuiSessionLock.h"
 #include "app/PreviewPlayback.h"
 #include "export/EncoderDetector.h"
@@ -83,6 +84,8 @@ class TelemetryTests final : public QObject {
 
 private slots:
     void initTestCase();
+    void preservesIdentityAcrossProductRename();
+    void reopensPreferencesProjectAndRecoveryAfterDisplayRename();
     void cleanupTestCase();
     void persistsEventSelectionAndRunLocalSync();
     void recoversEventAndRelinksOnlyActiveSource();
@@ -458,6 +461,78 @@ private:
 };
 
 } // namespace
+
+void TelemetryTests::preservesIdentityAcrossProductRename()
+{
+    const QString oldOrganization = QCoreApplication::organizationName();
+    const QString oldDomain = QCoreApplication::organizationDomain();
+    const QString oldApplication = QCoreApplication::applicationName();
+    const QString oldDisplay = QGuiApplication::applicationDisplayName();
+    const auto restore = qScopeGuard([&] {
+        QCoreApplication::setOrganizationName(oldOrganization);
+        QCoreApplication::setOrganizationDomain(oldDomain);
+        QCoreApplication::setApplicationName(oldApplication);
+        QGuiApplication::setApplicationDisplayName(oldDisplay);
+    });
+    // Compare production paths without reading or writing production preferences.
+    QCoreApplication::setOrganizationName("FlappedEar");
+    QCoreApplication::setOrganizationDomain("flappedear.com");
+    QCoreApplication::setApplicationName("FlappedEar Telemetry");
+    QGuiApplication::setApplicationDisplayName("FlappedEar Telemetry");
+    const QString settingsPath = QSettings().fileName();
+    const QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString recoveryPath = ProjectRecoveryStore().path();
+    ApplicationIdentity::initialize();
+    QCOMPARE(QGuiApplication::applicationDisplayName(), QString("Flapped Ear Telemetry"));
+    QCOMPARE(QCoreApplication::applicationName(), QString("FlappedEar Telemetry"));
+    QCOMPARE(QCoreApplication::organizationName(), QString("FlappedEar"));
+    QCOMPARE(QCoreApplication::organizationDomain(), QString("flappedear.com"));
+    QCOMPARE(QSettings().fileName(), settingsPath);
+    QCOMPARE(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation), dataPath);
+    QCOMPARE(ProjectRecoveryStore().path(), recoveryPath);
+}
+
+void TelemetryTests::reopensPreferencesProjectAndRecoveryAfterDisplayRename()
+{
+    const QString oldDisplay = QGuiApplication::applicationDisplayName();
+    const auto restore = qScopeGuard([&] { QGuiApplication::setApplicationDisplayName(oldDisplay); });
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings; settings.clear();
+    const QString projectPath = directory.filePath("existing.fetproject");
+    const QString recoveryPath = directory.filePath("recovery.json");
+    const QByteArray projectBytes = QJsonDocument(testProject(1.25)).toJson();
+    QVERIFY(writeBytes(projectPath, projectBytes));
+    settings.setValue("project/path", projectPath);
+    settings.setValue("analysis/windowWidth", 777);
+    settings.sync();
+    QGuiApplication::setApplicationDisplayName("FlappedEar Telemetry");
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 1.25);
+        controller.setSyncOffset(7.0);
+        controller.writeRecoverySnapshot();
+        QVERIFY(QFileInfo(recoveryPath).isFile());
+    }
+    QGuiApplication::setApplicationDisplayName(ApplicationIdentity::displayName);
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery("recover");
+        QTRY_VERIFY(!controller.projectLoading());
+        QCOMPARE(controller.syncOffset(), 7.0);
+        QCOMPARE(controller.analysisWindowWidth(), 777);
+        QCOMPARE(controller.projectPath().toLocalFile(), QFileInfo(projectPath).canonicalFilePath());
+        QVERIFY(controller.dirty());
+        QCOMPARE(readBytes(projectPath), projectBytes);
+        QVERIFY(controller.saveCurrentProject());
+    }
+    AppController reopened(nullptr, recoveryPath);
+    QTRY_VERIFY(!reopened.projectLoading());
+    QCOMPARE(reopened.syncOffset(), 7.0);
+    QVERIFY(!reopened.dirty());
+}
 
 void TelemetryTests::persistsEventSelectionAndRunLocalSync()
 {

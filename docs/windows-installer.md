@@ -8,6 +8,12 @@ Windows Release CI compiles `packaging/windows/installer.nsi` using
 [NSIS 3.12](https://nsis.sourceforge.io/Download). This is an unsigned internal
 candidate, not beta distribution approval. The existing portable ZIP remains available.
 
+KAN-18 updates the display name, executable, shortcuts and candidate filenames to
+**Flapped Ear Telemetry**. The legacy install directory and uninstall registry key
+remain unchanged so existing installations are still detected. These are static
+source changes; Windows build and installer execution remain unverified while
+the owner pause is active. See [identity and upgrades](application-identity.md).
+
 ## Installation and removal
 
 - Verify the `*-setup.exe.sha256` sidecar, then run `*-setup.exe` as your ordinary user.

@@ -11,6 +11,19 @@ Run the local gate appropriate to the change before claiming a behavior works. C
 
 The native suite assigns a unique test application identity and checks a default `QSettings` round trip before controller tests run. It retains the platform's native settings backend, including the Windows registry, and clears that test namespace afterward. Recovery cleanup failures use the existing injected deletion operation so stale-snapshot and Save As assertions run on every platform; these checks do not replace native Windows ACL-denial coverage. File-content checks close their read handles before attempting atomic replacement.
 
+## Product naming and compatibility (KAN-18)
+
+Two application regressions compare native settings/data/recovery locations before
+and after initialization of the new display name, then reopen a saved project,
+preferences and unsaved recovery across that rename. Production preference values
+are never read or changed by these tests. Existing test identities remain isolated.
+The production startup smoke checks the window and About titles, opens About and
+then exercises the existing welcome, scene and startup-error paths. Release
+packaging validates the renamed executable and bundle name, the stable bundle ID
+and the unchanged absence of document/URL registration before SDK-isolated startup.
+The `.fetproject` schema and File > Open Project workflow remain unchanged.
+Windows naming edits are not Windows execution evidence.
+
 ## Cloud CI
 
 [Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Two macOS arm64 jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows builds, tests and installer validation are paused by owner direction on 13 September 2026; resume them only when explicitly requested. Earlier Windows results below are historical. See [Windows installer](windows-installer.md).
@@ -49,9 +62,9 @@ A successful cloud run verifies this synthetic regression gate. It does not cert
 For broadcast-HUD visual changes, render the same production QML acceptance composition against both supplied synthetic backgrounds:
 
 ```bash
-"build-native/native/FlappedEar Telemetry.app/Contents/MacOS/FlappedEar Telemetry" \
+"build-native/native/Flapped Ear Telemetry.app/Contents/MacOS/Flapped Ear Telemetry" \
   --render-visual-smoke docs/assets/motorsport-broadcast-acceptance.png
-"build-native/native/FlappedEar Telemetry.app/Contents/MacOS/FlappedEar Telemetry" \
+"build-native/native/Flapped Ear Telemetry.app/Contents/MacOS/Flapped Ear Telemetry" \
   --render-visual-smoke-dark docs/assets/motorsport-broadcast-acceptance-dark.png
 ```
 

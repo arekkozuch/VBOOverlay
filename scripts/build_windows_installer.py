@@ -58,7 +58,7 @@ def main():
             remove.append(f'RMDir "$INSTDIR\\{nsis_literal(name)}"')
     for name, lines in [('payload.nsh', payload), ('remove.nsh', remove)]:
         (generated / name).write_text('\n'.join(lines) + '\n', encoding='utf-8-sig')
-    output = repo / f'native-dist/artifacts/FlappedEar-Telemetry-Windows-x64-{sha[:12]}-setup.exe'
+    output = repo / f'native-dist/artifacts/Flapped-Ear-Telemetry-Windows-x64-{sha[:12]}-setup.exe'
     output.parent.mkdir(parents=True, exist_ok=True)
     defines = {'OUTPUT_FILE': output, 'PAYLOAD_INCLUDE': generated / 'payload.nsh',
                'REMOVE_INCLUDE': generated / 'remove.nsh', 'APP_VERSION': version, 'COMMIT': sha[:12]}

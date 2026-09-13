@@ -1,3 +1,4 @@
+#include "app/ApplicationIdentity.h"
 #include "app/AppController.h"
 #include "app/AppLog.h"
 #include "app/GuiSessionLock.h"
@@ -621,9 +622,7 @@ int main(int argc, char *argv[])
     FlappedEar::AppLog::installQtMessageHandler();
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
-    QCoreApplication::setOrganizationName("FlappedEar");
-    QCoreApplication::setOrganizationDomain("flappedear.com");
-    QCoreApplication::setApplicationName("FlappedEar Telemetry");
+    FlappedEar::ApplicationIdentity::initialize();
     const bool applicationMode = !renderStillMode && !renderVisualSmokeMode && !renderVisualSmokeDarkMode
         && !exportTestMode && !exportWorkerMode
         && !benchmarkRenderMode && !startupSmokeMode;
@@ -716,6 +715,21 @@ int main(int argc, char *argv[])
             Qt::QueuedConnection);
         engine.loadFromModule("FlappedEar", "Main");
         if (startupSmokeMode && !engine.rootObjects().isEmpty()) {
+            QObject *root = engine.rootObjects().first();
+            QObject *about = root->findChild<QObject *>(QStringLiteral("productAboutDialog"));
+            const QString productName = QString::fromLatin1(FlappedEar::ApplicationIdentity::displayName);
+            if (root->property("title").toString() != productName || !about
+                || about->property("title").toString() != QStringLiteral("About %1").arg(productName)
+                || !QMetaObject::invokeMethod(about, "open")) {
+                qCritical() << "Startup smoke failed: product title or About dialog is invalid";
+                return EXIT_FAILURE;
+            }
+            QCoreApplication::processEvents();
+            if (!about->property("visible").toBool()) {
+                qCritical() << "Startup smoke failed: About dialog did not open";
+                return EXIT_FAILURE;
+            }
+            QMetaObject::invokeMethod(about, "close");
             if (!engine.rootObjects().first()->property("welcomeVisible").toBool()
                 || !engine.rootObjects().first()->findChild<QObject *>(QStringLiteral("welcomeLapAnalysis"))) {
                 qCritical() << "Startup smoke failed: fresh launch must offer Lap Analysis on the welcome screen";
