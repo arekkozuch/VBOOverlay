@@ -118,6 +118,11 @@ private slots:
     void samplesTelemetryRanges();
     void parsesTextFirstVboTimeFormats();
     void keepsVboTimestampsStrictlyMonotonic();
+    void rejectsUnsafeVboDerivedTimes_data();
+    void rejectsUnsafeVboDerivedTimes();
+    void acceptsVboMicrosecondConversionBoundary();
+    void preservesMixedVboClocksAcrossMidnight();
+    void rejectsOverflowingTelemetryChartRanges();
     void cancelsVboParsingDeterministically();
     void cachesTelemetryChannelCadence();
     void enforcesVboResourceLimits();
@@ -2055,6 +2060,85 @@ void TelemetryTests::keepsVboTimestampsStrictlyMonotonic()
         QVERIFY(speed.timestamps[index] > speed.timestamps[index - 1]);
     }
     QVERIFY(guarded.warnings.size() >= 6);
+}
+
+void TelemetryTests::rejectsUnsafeVboDerivedTimes_data()
+{
+    QTest::addColumn<QString>("rows");
+    QTest::newRow("positive-finite-extreme") << QStringLiteral("1e308 1\n1.1e308 2");
+    QTest::newRow("negative-finite-extreme") << QStringLiteral("-1e308 1\n1e308 2");
+    QTest::newRow("finite-elapsed-exceeds-microseconds")
+        << QStringLiteral("-6000000000000 1\n6000000000000 2");
+    QTest::newRow("finite-backward-difference-exceeds-range")
+        << QStringLiteral("6000000000000 1\n-6000000000000 2");
+    QTest::newRow("mixed-clock-extreme-relative")
+        << QStringLiteral("23:59:59 1\n00:00:00 2\n1e308 3");
+    QTest::newRow("elapsed-precision-collapse")
+        << QStringLiteral("-1000000000000 1\n0 2\n0.000001 3");
+    const double boundary = 0x1p63 / 1'000'000.0;
+    QTest::newRow("rounded-up-int64-boundary")
+        << QStringLiteral("0 1\n%1 2").arg(boundary, 0, 'g', 17);
+}
+
+void TelemetryTests::rejectsUnsafeVboDerivedTimes()
+{
+    QFETCH(QString, rows);
+    QVERIFY_THROWS_EXCEPTION(VboParseError,
+        (void) VboParser::parse(QStringLiteral("[column names]\ntime speed\n[data]\n") + rows));
+}
+
+void TelemetryTests::acceptsVboMicrosecondConversionBoundary()
+{
+    const double limit = 0x1p63;
+    const double safeSeconds = std::nextafter(limit / 1'000'000.0, 0.0);
+    QVERIFY(safeSeconds * 1'000'000.0 < limit);
+    const auto session = VboParser::parse(
+        QStringLiteral("[column names]\ntime speed\n[data]\n0 1\n%1 2")
+            .arg(safeSeconds, 0, 'g', 17));
+    QCOMPARE(session.sampleCount, 2);
+    QCOMPARE(session.duration, safeSeconds);
+    const auto fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(
+        QStringLiteral(TEST_FIXTURE_PATH), session);
+    const qint64 durationUs = fingerprint.value("durationUs").toInteger();
+    QVERIFY(durationUs > 0);
+    QCOMPARE(durationUs, static_cast<qint64>(std::llround(safeSeconds * 1'000'000.0)));
+    QCOMPARE(session.channels.value("speed").timestamps, QVector<double>({0, safeSeconds}));
+
+    const auto negativeOrigin = VboParser::parse(
+        u"[column names]\ntime speed\n[data]\n-1 1\n0 2\n0.000001 3");
+    QCOMPARE(negativeOrigin.startTime, -1.0);
+    QCOMPARE(negativeOrigin.channels.value("speed").timestamps, QVector<double>({0, 1, 1.000001}));
+}
+
+void TelemetryTests::preservesMixedVboClocksAcrossMidnight()
+{
+    const auto session = VboParser::parse(
+        u"[column names]\ntime speed rpm\n[data]\n"
+        "23:59:59 10 100\n0 20 200\n00:00:00 30 300\n"
+        "86401 40 400\n00:00:02 50 500\n00:00:02 60 600\n"
+        "00:00:01 70 700\n00:00:03 80 800");
+    QCOMPARE(session.duration, 4.0);
+    QCOMPARE(session.sampleCount, 5);
+    QCOMPARE(session.channels.value("speed").values, QVector<float>({10, 30, 40, 50, 80}));
+    QCOMPARE(session.channels.value("rpm").values, QVector<float>({100, 300, 400, 500, 800}));
+    for (const auto &channel : session.channels) {
+        QCOMPARE(channel.timestamps, QVector<double>({0, 1, 2, 3, 4}));
+        for (const double timestamp : channel.timestamps) QVERIFY(std::isfinite(timestamp));
+    }
+    QCOMPARE(session.warnings.size(), 4); // Backward, rollover, duplicate, backward.
+}
+
+void TelemetryTests::rejectsOverflowingTelemetryChartRanges()
+{
+    const auto session = VboParser::parse(u"[column names]\ntime speed\n[data]\n0 1\n1 2");
+    QVERIFY(session.sampledSegments("speed", -1e308, 1e308, 10).isEmpty());
+    QVERIFY(session.sampledSegments("speed", 1e308, -1e308, 10).isEmpty());
+    const auto segments = session.sampledSegments("speed", 0, 1, std::numeric_limits<int>::max());
+    QCOMPARE(segments.size(), 1);
+    QCOMPARE(segments[0], QVector<QPointF>({{0, 1}, {1, 2}}));
+    const auto point = session.sampledSegments("speed", 1, 1, 10);
+    QCOMPARE(point.size(), 1);
+    QCOMPARE(point[0], QVector<QPointF>({{1, 2}}));
 }
 
 void TelemetryTests::cancelsVboParsingDeterministically()

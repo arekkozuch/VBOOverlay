@@ -101,6 +101,10 @@ QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
     if (rangeStart > rangeEnd) {
         std::swap(rangeStart, rangeEnd);
     }
+    const double span = rangeEnd - rangeStart;
+    // Finite endpoints can still subtract to infinity. Reject before bucket
+    // arithmetic can produce NaN and reach a floating-to-integer conversion.
+    if (!std::isfinite(span)) return {};
     const QString resolved = aliases.value(channelName, channelName);
     const auto channelIterator = channels.constFind(resolved);
     if (channelIterator == channels.cend()) {
@@ -141,7 +145,6 @@ QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
         return {};
     }
 
-    const double span = rangeEnd - rangeStart;
     if (span <= 0.0) {
         return rawSegments;
     }
@@ -164,9 +167,10 @@ QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
             }
         };
         for (const QPointF &point : segment) {
-            const int bucket = std::clamp(
-                static_cast<int>((point.x() - rangeStart) / span * maximumPoints),
-                0, maximumPoints - 1);
+            const double bucketPosition = (point.x() - rangeStart) / span * maximumPoints;
+            if (!std::isfinite(bucketPosition)) return {};
+            const int bucket = static_cast<int>(std::clamp(
+                bucketPosition, 0.0, static_cast<double>(maximumPoints - 1)));
             if (bucket != activeBucket) {
                 flushBucket();
                 activeBucket = bucket;

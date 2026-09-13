@@ -398,3 +398,28 @@ recorded in [KAN-14](https://kozucharkadiusz.atlassian.net/browse/KAN-14) and
 The coordinator has no native CMake/Qt toolchain; actual compilation and CTest
 execution require the four Qt 6.8.3 Native CI jobs. No private recording or
 physical-hardware acceptance is claimed by these synthetic parser checks.
+
+
+### KAN-15: derived VBO times and consumer conversions
+
+Ten new Qt cases cover extreme finite inputs, elapsed differences beyond the
+signed 64-bit microsecond range, mixed clock/relative formats, precision collapse,
+the rounded-up integer boundary and its immediately preceding safe double,
+midnight rollover, duplicates/backward clocks and overflowing chart ranges. The
+safe boundary is exercised through the actual project telemetry fingerprint;
+chart coverage includes the maximum int point budget and a zero-width range.
+Existing timestamp text formats, UTC chronology and valid VBO fixtures stay in
+the complete native gate.
+
+Unsafe numeric ranges reject the complete parse with VboParseError before a
+session can be published. Ordinary malformed text and duplicate/backward rows
+inside the supported range retain warning/skip behavior. The numeric bound is
+required by the existing signed 64-bit microsecond fingerprint conversion; it is
+not a new recording-length product policy. Clock rollover and UTC date arithmetic
+are checked independently.
+
+The coordinator has no native CMake/Qt toolchain. Actual build/CTest evidence for
+the final PR head and merged main belongs in
+[KAN-15](https://kozucharkadiusz.atlassian.net/browse/KAN-15). Hosted validation does
+not replace private-media or physical-hardware acceptance. Synchronization-engine
+bounds remain the separate KAN-17 task.
