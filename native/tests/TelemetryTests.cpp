@@ -7656,7 +7656,7 @@ void TelemetryTests::boundsTimeTransforms()
 void TelemetryTests::exposesNoDataForOverflowingTransforms()
 {
     const auto session = VboParser::parse(
-        u"[header]\ncoordinate units = degrees\n[column names]\ntime speed latitude longitude\n[data]\n0 0 0 0\n10 100 .001 .001\n");
+        u"[header]\ncoordinate units = degrees\n[column names]\ntime speed latitude longitude\n[data]\n0 0 0 0\n2 20 .0002 .0002\n3 30 .0003 .0003\n10 100 .001 .001\n");
     const auto geometry = buildTrackGeometry(session);
     const auto laps = deriveSourceLapSession(VboParser::parse(QString::fromUtf8(EventProjectFixture::lapsVbo())));
     QVERIFY(laps.status == LapSessionStatus::Available);
