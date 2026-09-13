@@ -7,6 +7,7 @@
 #include <QTimeZone>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QCryptographicHash>
 #include <QMap>
 #include <QtConcurrent>
 #include <algorithm>
@@ -14,6 +15,59 @@
 #include <limits>
 
 namespace FlappedEar {
+
+QVariantMap AppController::runMetadata(const QString &runId) const
+{
+    const auto event = currentProjectObject().value("event").toObject();
+    for (const auto &value : event.value("runs").toArray()) {
+        const auto run = value.toObject();
+        if (run.value("id").toString() != runId) continue;
+        QJsonObject metadata{{"name", run.value("name")}};
+        for (const auto *key : {"notes", "conditions", "setupChanges"})
+            metadata.insert(key, run.contains(key) ? run.value(key) : QJsonValue(QJsonValue::Null));
+        const auto token = QCryptographicHash::hash(QJsonDocument(QJsonObject{
+            {"documentId", m_documentId}, {"run", run}}).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex();
+        metadata.insert("editToken", QString::fromLatin1(token));
+        return metadata.toVariantMap();
+    }
+    return {};
+}
+
+bool AppController::updateRunMetadata(const QString &runId, const QString &expectedToken,
+    const QString &name, const QString &notes, const QString &conditions, const QString &setupChanges)
+{
+    if (!EventProjectCodec::isEvent(m_projectTemplate) || projectLoading() || exporting()
+        || recoveryPending() || m_batchPending
+        || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None
+        || m_documentState.revision() == std::numeric_limits<quint64>::max()) return false;
+    const auto current = runMetadata(runId);
+    if (current.isEmpty() || expectedToken.isEmpty() || current.value("editToken").toString() != expectedToken
+        || name.trimmed().isEmpty() || name.size() > ProjectLimits::maximumTemplateNameCharacters) return false;
+    for (const auto &text : {name, notes, conditions, setupChanges})
+        if (text.size() > ProjectLimits::maximumStringCharacters || text.contains(QChar::Null)) return false;
+    auto project = currentProjectObject(); auto event = project.value("event").toObject();
+    auto runs = event.value("runs").toArray();
+    for (qsizetype i = 0; i < runs.size(); ++i) {
+        auto run = runs[i].toObject();
+        if (run.value("id").toString() != runId) continue;
+        const auto before = run;
+        run.insert("name", name.trimmed());
+        const QJsonObject values{{"notes", notes}, {"conditions", conditions}, {"setupChanges", setupChanges}};
+        for (auto it = values.begin(); it != values.end(); ++it) {
+            // Opening/saving an unchanged legacy record must not invent metadata.
+            if (run.value(it.key()).toString() == it.value().toString()) continue;
+            run.insert(it.key(), it.value().toString().trimmed().isEmpty() ? QJsonValue(QJsonValue::Null) : it.value());
+        }
+        if (run == before) return true;
+        runs[i] = run; event.insert("runs", runs); project.insert("event", event);
+        QString error;
+        if (!ProjectLimits::validateProject(project, &error)) return false;
+        m_projectTemplate = project;
+        markPersistentChange();
+        return true;
+    }
+    return false;
+}
 
 QVariantMap AppController::runTrackConfiguration(const QString &runId) const
 {
@@ -208,6 +262,11 @@ void AppController::refreshLapExclusionPolicy()
     emit lapNavigationChanged();
     emit liveValuesChanged();
     if (m_outingLapRequestedKey != outingLapKey() || m_outingLapGeneration != m_sourceGeneration) return;
+    QHash<QString, QString> names;
+    for (const auto &value : event.value("runs").toArray()) {
+        const auto run = value.toObject(); names.insert(run.value("id").toString(), run.value("name").toString());
+    }
+    for (auto &row : m_outingRawLapRows) row.runName = names.value(row.runId, row.runName);
     const auto reasons = lapExclusionReasons(exclusions);
     QSet<QByteArray> matched;
     QHash<QString, LapSession> runs;
@@ -226,7 +285,10 @@ void AppController::refreshLapExclusionPolicy()
         if (it->fastestLapIndex) bestNumbers.insert(it.key(), it->timedLaps[*it->fastestLapIndex].number);
     }
     m_outingLapRows.clear();
-    m_outingLapMessages = m_outingSourceMessages;
+    m_outingLapMessages.clear();
+    for (const auto &message : m_outingSourceMessages)
+        m_outingLapMessages.append(message.runId.isEmpty() ? message.text
+            : names.value(message.runId) + ": " + message.text);
     const auto unmatched = exclusions.size() - matched.size();
     if (unmatched > 0) m_outingLapMessages.append(QStringLiteral(
         "%1 saved lap exclusion(s) could not be matched to the current recordings; retained without applying.").arg(unmatched));
@@ -302,8 +364,12 @@ QJsonArray AppController::outingLapSources() const
 
 QByteArray AppController::outingLapKey() const
 {
+    auto sources = outingLapSources();
+    for (qsizetype i = 0; i < sources.size(); ++i) {
+        auto source = sources[i].toObject(); source.remove("name"); sources[i] = source;
+    }
     return QJsonDocument(QJsonObject{{"document", m_documentId}, {"path", m_documentState.projectPath()},
-        {"sources", outingLapSources()}}).toJson(QJsonDocument::Compact);
+        {"sources", sources}}).toJson(QJsonDocument::Compact);
 }
 
 void AppController::initializeOutingLaps()
@@ -402,19 +468,19 @@ void AppController::refreshOutingLaps()
                         if (row.reference.isEmpty()) throw std::runtime_error("Cannot identify this lap section.");
                     }
                     result.rows.append(rows);
-                    if (!recordingTimestamp(session)) result.messages.append(source.value("name").toString()
-                        + ": recording date/time unavailable; listed after chronological records in import order.");
-                    if (laps.acceptedPasses.isEmpty()) result.messages.append(source.value("name").toString()
-                        + ": no reliable start/finish passages; lap type is unknown.");
+                    if (!recordingTimestamp(session)) result.messages.append(OutingSourceMessage{
+                        source.value("runId").toString(), "recording date/time unavailable; listed after chronological records in import order."});
+                    if (laps.acceptedPasses.isEmpty()) result.messages.append(OutingSourceMessage{
+                        source.value("runId").toString(), "no reliable start/finish passages; lap type is unknown."});
                 } catch (const OperationCancelled &) { throw; }
                 catch (const std::exception &error) {
-                    result.messages.append(source.value("name").toString() + ": " + QString::fromUtf8(error.what()));
+                    result.messages.append(OutingSourceMessage{source.value("runId").toString(), QString::fromUtf8(error.what())});
                 }
             }
             throwIfCancelled(cancelled);
             sortOutingLaps(result.rows);
         } catch (const OperationCancelled &) { result.cancelled = true; result.rows.clear(); }
-        catch (const std::exception &error) { result.rows.clear(); result.messages.append(QString::fromUtf8(error.what())); }
+        catch (const std::exception &error) { result.rows.clear(); result.messages.append(OutingSourceMessage{{}, QString::fromUtf8(error.what())}); }
         return result;
     }));
 }

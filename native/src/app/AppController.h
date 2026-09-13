@@ -197,6 +197,9 @@ public:
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
     Q_INVOKABLE bool selectEventRun(const QString &runId);
+    Q_INVOKABLE QVariantMap runMetadata(const QString &runId) const;
+    Q_INVOKABLE bool updateRunMetadata(const QString &runId, const QString &expectedToken,
+        const QString &name, const QString &notes, const QString &conditions, const QString &setupChanges);
     Q_INVOKABLE QVariantMap runTrackConfiguration(const QString &runId) const;
     Q_INVOKABLE bool confirmRunTrackConfiguration(const QString &runId, const QString &expectedDerivationKey,
         const QString &layoutId, const QString &direction);
@@ -478,9 +481,13 @@ private:
     QStringList m_outingLapChannels;
     QVariantList m_outingLapTrack;
     double m_outingLapCursor = 0;
+    struct OutingSourceMessage {
+        QString runId;
+        QString text;
+    };
     struct OutingLapResult {
         QVector<OutingLapRow> rows;
-        QStringList messages;
+        QList<OutingSourceMessage> messages;
         QByteArray key;
         quint64 generation = 0;
         bool cancelled = false;
@@ -495,7 +502,7 @@ private:
     QString m_outingComparisonGroupId;
     QString m_outingCompatibilityDocumentId;
     QVector<OutingLapRow> m_outingRawLapRows;
-    QStringList m_outingSourceMessages;
+    QList<OutingSourceMessage> m_outingSourceMessages;
     QByteArray m_loadedSourceRevision;
     [[nodiscard]] QJsonArray outingLapSources() const;
     [[nodiscard]] QByteArray outingLapKey() const;

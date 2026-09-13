@@ -103,6 +103,8 @@ private slots:
     void displaysTimedLapsWithoutVideo();
     void importsAnalysisRunsAutomatically();
     void guardsAutomaticAnalysisImport();
+    void editsRunMetadataWithoutChangingAnalysis();
+    void editsRunMetadataThroughQml();
     void startsOutingThroughAnalysisQml();
     void opensOutingLapWithoutChangingEditor();
     void derivesOutingLapSections();
@@ -1073,6 +1075,168 @@ void TelemetryTests::guardsAutomaticAnalysisImport()
     QCOMPARE(controller.analysisImportMessages().size(), 1);
     QCOMPARE(controller.currentProjectObject(), before);
     QVERIFY(controller.eventRuns().isEmpty());
+}
+
+void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("20260901-rain.vbo");
+    const auto secondPath = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    QVERIFY(writeBytes(secondPath, EventProjectFixture::lapsVbo().replace("15 52.0001", "16 52.0001")));
+    const auto savedPath = directory.filePath("day.fetproject");
+    const auto recoveryPath = directory.filePath("recovery.json");
+    QString runId;
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.importAnalysisRuns("Metadata", {QUrl::fromLocalFile(path), QUrl::fromLocalFile(secondPath)}));
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 10);
+        runId = controller.activeRunId();
+        QVERIFY(controller.setRunTrackConfiguration(runId, "Full", "clockwise"));
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+        QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+        QString group;
+        for (const auto &value : controller.outingCompatibilityGroups())
+            if (value.toMap().value("resolved").toBool()) group = value.toMap().value("id").toString();
+        QVERIFY(controller.selectOutingComparisonGroup(group));
+        const auto winner = controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap();
+        QVERIFY(controller.selectOutingLapReference(winner));
+        QTRY_COMPARE(controller.outingLapDetailState(), QString("ready")); controller.setOutingLapCursor(1);
+        const auto cursor = controller.outingLapCursor(); const auto track = controller.outingLapTrack();
+        const auto detail = controller.m_outingLapDetailSession; const auto *session = controller.m_session.get();
+        const auto generation = controller.m_sourceGeneration; const auto key = controller.outingLapKey();
+        const auto config = controller.runTrackConfiguration(runId);
+        const auto before = controller.currentProjectObject(); const auto revision = controller.m_documentState.revision();
+        const auto metadata = controller.runMetadata(runId); const auto token = metadata.value("editToken").toString();
+        QVERIFY(metadata.value("conditions").isNull()); QVERIFY(metadata.value("setupChanges").isNull());
+        QVERIFY(controller.runMetadata("missing").isEmpty()); QVERIFY(!controller.dirty());
+        QVERIFY(controller.updateRunMetadata(runId, token, metadata.value("name").toString(), "", "", ""));
+        QCOMPARE(controller.currentProjectObject(), before); QCOMPARE(controller.m_documentState.revision(), revision);
+        for (const auto &badName : {QString(" "), QString(161, 'x'), QString("x") + QChar::Null})
+            QVERIFY(!controller.updateRunMetadata(runId, token, badName, "", "", ""));
+        for (const auto &bad : {QString(4097, 'x'), QString("x") + QChar::Null}) {
+            QVERIFY(!controller.updateRunMetadata(runId, token, "Renamed", bad, "", ""));
+            QVERIFY(!controller.updateRunMetadata(runId, token, "Renamed", "", bad, ""));
+            QVERIFY(!controller.updateRunMetadata(runId, token, "Renamed", "", "", bad));
+        }
+        QCOMPARE(controller.currentProjectObject(), before); QVERIFY(!controller.dirty());
+        QVERIFY(controller.updateRunMetadata(runId, token, " Renamed run ", "Driver notes\nSecond line", "Damp, 18 °C", "Front pressure +0.1 bar"));
+        QVERIFY(controller.dirty()); QCOMPARE(controller.m_documentState.revision(), revision + 1);
+        QVERIFY(!controller.updateRunMetadata(runId, token, "Stale overwrite", "", "", ""));
+        QCOMPARE(controller.runMetadata(runId).value("name").toString(), QString("Renamed run"));
+        QCOMPARE(controller.m_sourceGeneration, generation); QCOMPARE(controller.m_session.get(), session);
+        QCOMPARE(controller.outingLapKey(), key); QCOMPARE(controller.runTrackConfiguration(runId), config);
+        QCOMPARE(controller.m_outingLapDetailSession, detail); QCOMPARE(controller.outingLapTrack(), track);
+        QCOMPARE(controller.outingLapCursor(), cursor); QCOMPARE(controller.outingLapDetailState(), QString("ready"));
+        QCOMPARE(controller.selectedOutingLap().value("runName").toString(), QString("Renamed run"));
+        QCOMPARE(controller.selectedOutingLap().value("reference").toMap(), winner);
+        QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap(), winner);
+        QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("runName").toString(), QString("Renamed run"));
+        QVERIFY(controller.outingLapMessages().join('\n').contains("Renamed run: recording date/time unavailable"));
+        QVERIFY(!controller.outingLapMessages().join('\n').contains(metadata.value("name").toString() + ":"));
+        for (const auto &value : controller.outingLaps()) if (value.toMap().value("runId").toString() == runId) {
+            QCOMPARE(value.toMap().value("runName").toString(), QString("Renamed run"));
+            QVERIFY(!value.toMap().value("chronologyKnown").toBool());
+        }
+        const auto updated = controller.currentProjectObject();
+        const auto runsBefore = EventProjectFixture::runs(before); const auto runsAfter = EventProjectFixture::runs(updated);
+        for (qsizetype i = 0; i < runsBefore.size(); ++i) {
+            auto a = runsBefore[i].toObject(); auto b = runsAfter[i].toObject();
+            for (const auto *field : {"name", "notes", "conditions", "setupChanges"}) { a.remove(field); b.remove(field); }
+            QCOMPARE(a, b);
+        }
+        QString inactive;
+        for (const auto &value : controller.eventRuns()) if (value.toMap().value("id").toString() != runId) inactive = value.toMap().value("id").toString();
+        const auto inactiveMetadata = controller.runMetadata(inactive);
+        QVERIFY(controller.updateRunMetadata(inactive, inactiveMetadata.value("editToken").toString(), "Second run", "", "", "Rear damping -1"));
+        QCOMPARE(controller.activeRunId(), runId); QCOMPARE(controller.m_session.get(), session);
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath))); QVERIFY(!controller.dirty());
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 10);
+        const auto metadata = controller.runMetadata(runId);
+        QCOMPARE(metadata.value("notes").toString(), QString("Driver notes\nSecond line"));
+        QCOMPARE(metadata.value("conditions").toString(), QString("Damp, 18 °C"));
+        QCOMPARE(metadata.value("setupChanges").toString(), QString("Front pressure +0.1 bar"));
+        QVERIFY(controller.updateRunMetadata(runId, metadata.value("editToken").toString(), "Recovered run", "Unsaved notes", "", ""));
+        QVERIFY(controller.runMetadata(runId).value("conditions").isNull());
+        controller.writeRecoverySnapshot(); QVERIFY(QFileInfo::exists(recoveryPath));
+    }
+    {
+        AppController controller(nullptr, recoveryPath); QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery("recover"); QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+        QTRY_COMPARE(controller.outingLaps().size(), 10); QVERIFY(controller.dirty());
+        const auto metadata = controller.runMetadata(runId);
+        QCOMPARE(metadata.value("name").toString(), QString("Recovered run"));
+        QCOMPARE(metadata.value("notes").toString(), QString("Unsaved notes"));
+        QVERIFY(metadata.value("conditions").isNull()); QVERIFY(metadata.value("setupChanges").isNull());
+    }
+}
+
+void TelemetryTests::editsRunMetadataThroughQml()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo"); QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Details", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("day.fetproject"))));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    const auto before = controller.currentProjectObject();
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings); QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 760; height: 480; OutingLapPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *open = window->findChild<QQuickItem *>("openRunDetails"); QVERIFY(open);
+    open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *dialog = window->findChild<QObject *>("runDetailsDialog"); QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto *name = window->findChild<QQuickItem *>("runDetailsName");
+    auto *notes = window->findChild<QQuickItem *>("runDetailsNotes");
+    auto *conditions = window->findChild<QQuickItem *>("runDetailsConditions");
+    auto *setup = window->findChild<QQuickItem *>("runDetailsSetup");
+    auto *save = window->findChild<QQuickItem *>("saveRunDetails");
+    auto *cancel = window->findChild<QQuickItem *>("cancelRunDetails");
+    auto *picker = window->findChild<QQuickItem *>("runDetailsPicker");
+    auto *scroll = window->findChild<QQuickItem *>("runDetailsScroll");
+    QVERIFY(name && notes && conditions && setup && save && cancel && picker && scroll);
+    QVERIFY(conditions->property("text").toString().isEmpty());
+    name->setProperty("text", "Draft"); QVERIFY(!picker->isEnabled());
+    notes->setProperty("text", QString(4097, 'x')); QVERIFY(!save->isEnabled());
+    QCOMPARE(notes->property("text").toString().size(), 4097); // Never silently truncate notes.
+    notes->setProperty("text", "Notes"); conditions->setProperty("text", "Dry"); setup->setProperty("text", "Tyres changed");
+    QVERIFY(save->isEnabled());
+    QTRY_VERIFY2(scroll->height() > 50, qPrintable(QString("Scroll height %1; dialog %2x%3; window %4x%5")
+        .arg(scroll->height()).arg(dialog->property("width").toDouble()).arg(dialog->property("height").toDouble())
+        .arg(window->width()).arg(window->height())));
+    QTRY_VERIFY(save->mapRectToScene(save->boundingRect()).top() >= 0
+        && save->mapRectToScene(save->boundingRect()).bottom() <= window->height());
+    cancel->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(!dialog->property("visible").toBool()); QCOMPARE(controller.currentProjectObject(), before); QVERIFY(!controller.dirty());
+    open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); QTRY_VERIFY(dialog->property("opened").toBool());
+    QVERIFY(notes->property("text").toString().isEmpty());
+    name->setProperty("text", "Morning run"); notes->setProperty("text", "Driver notes");
+    conditions->setProperty("text", "Dry"); setup->setProperty("text", "Tyres changed");
+    save->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); QTRY_VERIFY(!dialog->property("visible").toBool());
+    QCOMPARE(controller.runMetadata(controller.activeRunId()).value("name").toString(), QString("Morning run"));
+    QVERIFY(controller.dirty());
+    open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); QTRY_VERIFY(dialog->property("opened").toBool());
+    QCOMPARE(setup->property("text").toString(), QString("Tyres changed"));
+    const auto current = controller.runMetadata(controller.activeRunId());
+    QVERIFY(controller.updateRunMetadata(controller.activeRunId(), current.value("editToken").toString(), "Newer edit", "", "", ""));
+    name->setProperty("text", "Stale draft"); save->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QVERIFY(dialog->property("visible").toBool());
+    auto *error = window->findChild<QObject *>("runDetailsError"); QVERIFY(error); QVERIFY(!error->property("text").toString().isEmpty());
+    QCOMPARE(controller.runMetadata(controller.activeRunId()).value("name").toString(), QString("Newer edit"));
+    QTest::keyClick(window, Qt::Key_Escape); QTRY_VERIFY(!dialog->property("visible").toBool());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::startsOutingThroughAnalysisQml()
