@@ -1110,16 +1110,24 @@ void TelemetryTests::startsOutingThroughAnalysisQml()
     QTRY_VERIFY(controller.outingLapChannels().contains(added));
     QCOMPARE(controller.outingLapChannels().size(), 4);
     QVERIFY(!add->isEnabled());
-    auto *replace = charts->findChild<QQuickItem *>("analysisReplaceChannel-" + added);
-    QVERIFY(replace); QVERIFY(replace->isVisible());
+    // Repeater/SplitView delegates follow the visual tree, which need not match
+    // QObject ownership. Wait for their visual creation before interacting.
+    const auto findVisual = [](auto &&self, QQuickItem *item, const QString &name) -> QQuickItem * {
+        if (item->objectName() == name) return item;
+        for (auto *child : item->childItems())
+            if (auto *found = self(self, child, name)) return found;
+        return nullptr;
+    };
+    QQuickItem *replace = nullptr;
+    QTRY_VERIFY((replace = findVisual(findVisual, charts, "analysisReplaceChannel-" + added)) && replace->isVisible());
     // Operate the real ComboBox through keyboard selection.
     replace->forceActiveFocus();
     QTest::keyClick(quickWindow, Qt::Key_End);
     QTest::keyClick(quickWindow, Qt::Key_Return);
     QTRY_VERIFY(!controller.outingLapChannels().contains(added));
     const auto replacement = controller.outingLapChannels().last();
-    auto *remove = charts->findChild<QQuickItem *>("analysisRemoveChannel-" + replacement);
-    QVERIFY(remove); QVERIFY(remove->isVisible());
+    QQuickItem *remove = nullptr;
+    QTRY_VERIFY((remove = findVisual(findVisual, charts, "analysisRemoveChannel-" + replacement)) && remove->isVisible());
     QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
         remove->mapToScene(QPointF(remove->width() / 2, remove->height() / 2)).toPoint());
     QTRY_COMPARE(controller.outingLapChannels().size(), 3);
