@@ -105,6 +105,7 @@ private slots:
     void guardsAutomaticAnalysisImport();
     void editsRunMetadataWithoutChangingAnalysis();
     void editsRunMetadataThroughQml();
+    void showsRunProgressionWithLiveContext();
     void startsOutingThroughAnalysisQml();
     void opensOutingLapWithoutChangingEditor();
     void derivesOutingLapSections();
@@ -1173,6 +1174,99 @@ void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
         QCOMPARE(metadata.value("notes").toString(), QString("Unsaved notes"));
         QVERIFY(metadata.value("conditions").isNull()); QVERIFY(metadata.value("setupChanges").isNull());
     }
+}
+
+void TelemetryTests::showsRunProgressionWithLiveContext()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::lapsVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::lapsVbo().replace("15 52.0001", "16 52.0001")));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Progression", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 10);
+    QCOMPARE(controller.outingProgression().value("state").toString(), QString("selection-required"));
+    QStringList ids;
+    for (const auto &value : controller.eventRuns()) ids.append(value.toMap().value("id").toString());
+    QCOMPARE(ids.size(), 2);
+    for (const auto &id : ids) QVERIFY(controller.setRunTrackConfiguration(id, "Full", "clockwise"));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    const auto group = controller.outingCompatibilityGroups().first().toMap().value("id").toString();
+    QVERIFY(controller.selectOutingComparisonGroup(group));
+    const auto metadata = controller.runMetadata(ids[0]);
+    QVERIFY(controller.updateRunMetadata(ids[0], metadata.value("editToken").toString(), "Morning", "Traffic observed",
+        "Damp", "Front pressure +0.1 bar"));
+    auto progression = controller.outingProgression();
+    QCOMPARE(progression.value("runs").toList().size(), 2);
+    QCOMPARE(progression.value("eligibleLapCount").toInt(), 6);
+    auto run = progression.value("runs").toList().first().toMap();
+    QCOMPARE(run.value("runId").toString(), ids[0]);
+    QCOMPARE(run.value("conditions").toString(), QString("Damp"));
+    QVERIFY(!run.value("chronologyKnown").toBool());
+    const auto excluded = run.value("bestLap").toMap().value("reference").toMap();
+    QVERIFY(controller.setOutingLapExcluded(excluded, true, "Traffic"));
+    run = controller.outingProgression().value("runs").toList().first().toMap();
+    QCOMPARE(run.value("eligibleLapCount").toInt(), 2);
+    QCOMPARE(run.value("excludedLaps").toList().first().toMap().value("userReason").toString(), QString("Traffic"));
+    const auto generation = controller.m_sourceGeneration;
+    const auto *session = controller.m_session.get();
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings); QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 760; height: 480; OutingLapPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    const auto findVisual = [](auto &&self, QQuickItem *item, const QString &name) -> QQuickItem * {
+        if (item->objectName() == name) return item;
+        for (auto *child : item->childItems()) if (auto *found = self(self, child, name)) return found;
+        return nullptr;
+    };
+    auto *open = window->findChild<QQuickItem *>("openOutingProgression"); QVERIFY(open); QVERIFY(open->isEnabled());
+    QTRY_VERIFY(window->contentItem()->contains(open->mapToScene(QPointF(open->width()/2, open->height()/2))));
+    open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *dialog = window->findChild<QObject *>("outingProgressionDialog"); QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto *list = window->findChild<QQuickItem *>("outingProgressionRuns"); QVERIFY(list);
+    QTRY_COMPARE(list->property("count").toInt(), 2); QTRY_VERIFY(list->height() >= 80);
+    QQuickItem *plot = nullptr, *context = nullptr, *best = nullptr;
+    QTRY_VERIFY((plot = findVisual(findVisual, list, "progressionDistribution0")));
+    QTRY_VERIFY((context = findVisual(findVisual, list, "progressionContext0")));
+    QTRY_VERIFY((best = findVisual(findVisual, list, "openProgressionBest0")));
+    QVERIFY(plot->isVisible()); QVERIFY(plot->width() > 100);
+    const auto text = context->property("text").toString();
+    QVERIFY(text.contains("Traffic")); QVERIFY(text.contains("Damp")); QVERIFY(text.contains("Front pressure +0.1 bar"));
+    // Live metadata edits update visible context without reloading analysis.
+    const auto current = controller.runMetadata(ids[0]);
+    QVERIFY(controller.updateRunMetadata(ids[0], current.value("editToken").toString(), "Morning", "Traffic observed", "Drying", "Front pressure +0.1 bar"));
+    QTRY_VERIFY((context = findVisual(findVisual, list, "progressionContext0")) && context->property("text").toString().contains("Drying"));
+    QCOMPARE(controller.m_sourceGeneration, generation); QCOMPARE(controller.m_session.get(), session);
+    QTRY_VERIFY((best = findVisual(findVisual, list, "openProgressionBest0")) && best->isEnabled());
+    const auto bestReference = controller.outingProgression().value("runs").toList().first().toMap().value("bestLap").toMap().value("reference").toMap();
+    best->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.selectedOutingLap().value("reference").toMap(), bestReference);
+    controller.closeOutingLap();
+    QCOMPARE(controller.activeRunId(), ids[0]);
+    // A stale recording cannot contribute statistics. Restoring the policy recomputes the sample count.
+    controller.m_outingStaleRunIds.insert(ids[0]); controller.refreshOutingCompatibility();
+    auto stale = controller.outingProgression().value("runs").toList().first().toMap();
+    QCOMPARE(stale.value("eligibleLapCount").toInt(), 0); QVERIFY(stale.value("distribution").isNull());
+    controller.m_outingStaleRunIds.clear(); controller.refreshOutingCompatibility();
+    QVERIFY(controller.setOutingLapExcluded(excluded, false, ""));
+    QCOMPARE(controller.outingProgression().value("eligibleLapCount").toInt(), 6);
+    QVERIFY(controller.setRunTrackConfiguration(ids[0], "Short", "clockwise"));
+    QCOMPARE(controller.outingProgression().value("state").toString(), QString("loading"));
+    QVERIFY(controller.outingProgression().value("runs").toList().isEmpty());
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    QCOMPARE(controller.outingProgression().value("runs").toList().size(), 1);
+    QCOMPARE(controller.outingProgression().value("runs").toList().first().toMap().value("runId").toString(), ids[1]);
+    QVERIFY(controller.selectOutingComparisonGroup(""));
+    QVERIFY(controller.outingProgression().value("runs").toList().isEmpty());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::editsRunMetadataThroughQml()

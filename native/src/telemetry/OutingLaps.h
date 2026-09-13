@@ -46,6 +46,11 @@ inline constexpr auto lapReferenceAlgorithm = "source-laps-v1";
     const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
     const QSet<QString> &staleRunIds = {});
 
+// Progression consumes the same eligibility-filtered ranking as best-lap results.
+// Run metadata entries contain id, name, groupId, notes, conditions and setupChanges.
+[[nodiscard]] QJsonObject summarizeOutingProgression(const QVector<OutingLapRow> &rows,
+    const QJsonObject &ranking, const QJsonArray &runMetadata);
+
 // Historical references are retained but only exact current references apply.
 using LapExclusionReasons = QHash<QByteArray, QString>;
 [[nodiscard]] QByteArray lapReferenceKey(const QJsonObject &reference);

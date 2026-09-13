@@ -335,3 +335,38 @@ lap references, derivation/cache keys, track configuration, exclusions or rankin
 eligibility. Current names are applied when publishing cached or newly derived
 rows, rankings, source diagnostics and selected-lap labels, without resetting the detail session,
 track geometry or cursor.
+
+## Within-day run progression (step 015)
+
+**All laps → Progression…** summarizes the explicitly selected compatibility
+group. Each run shows its best eligible lap, eligible/complete sample counts,
+and a five-number lap-time distribution: minimum, Q1, median, Q3 and maximum.
+Quartiles use linear interpolation at `(n - 1) * fraction` in the sorted eligible
+sample. For one lap all five values coincide; zero eligible laps produce null
+statistics. Every eligible lap remains in the distribution, including slow laps;
+there is no automatic outlier removal or traffic inference. The best-lap ranking
+and progression share the same eligibility calculation (GPS, exact source/lap
+identity, compatibility and explicit exclusions).
+
+Run cards use a common time scale for their min/max whiskers, middle-50% box and
+median mark; numerical values and sample counts remain visible. The best-lap
+button opens its exact source reference. Notes, observed conditions, setup
+changes and applied exclusion context are shown alongside each distribution.
+The first three exclusions are shown in each card; the existing Ranking details
+→ Applied exclusions view retains the full list. Unknown context stays unknown.
+
+Runs with recorded clocks are ordered by their earliest recorded section in UTC.
+Unknown clocks follow in project import order and are explicitly labelled. The
+best-time difference is against the **previous listed run**, never an inferred
+chronological improvement; its previous run name is shown. A run without an
+eligible best breaks that difference. Breaks do not create runs, laps, zero
+values or interpolated samples. Compatible runs without available rows remain
+listed with no recorded laps when the group has other available sections.
+
+Progression is derived session state, not a new project field. Metadata edits and
+exclusions refresh it without reloading telemetry; source/configuration changes
+suppress stale results until fresh derivation. Group switches use that group's
+samples only. A scrollable dialog with fixed close controls keeps the view
+reachable at the 760×480 minimum. Synthetic core and production QML tests cover
+statistics, eligibility, ordering/gaps, context, source invalidation and lap
+navigation; private recordings and physical-Mac acceptance remain separate.

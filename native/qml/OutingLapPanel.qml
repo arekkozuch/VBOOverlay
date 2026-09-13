@@ -12,6 +12,7 @@ Rectangle {
         return minutes + ":" + (seconds - minutes * 60).toFixed(3).padStart(6, "0");
     }
     RunDetailsDialog { id: runDetailsDialog }
+    OutingProgressionDialog { id: progressionDialog }
     Dialog {
         id: rankingDialog
         objectName: "outingRankingDialog"
@@ -265,6 +266,12 @@ Rectangle {
                 onClicked: appController.selectOutingLapReference(root.ranking.bestOfDay.reference)
                 ToolTip.visible: hovered
                 ToolTip.text: text + (root.ranking.groupLabel ? " · " + root.ranking.groupLabel : "")
+            }
+            FeButton {
+                objectName: "openOutingProgression"
+                text: qsTr("Progression…")
+                enabled: ["available", "no-eligible-laps"].indexOf(root.ranking.state) >= 0
+                onClicked: progressionDialog.open()
             }
             FeButton {
                 objectName: "openOutingRankingDetails"

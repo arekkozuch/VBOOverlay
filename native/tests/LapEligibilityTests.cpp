@@ -41,6 +41,8 @@ TelemetrySession interiorGapFixture()
 class LapEligibilityTests final : public QObject {
     Q_OBJECT
 private slots:
+    void progressionUsesEligibleDistributions();
+    void progressionPreservesOrderContextAndGaps();
     void ranksCompatibleLapsDeterministically();
     void rankingReportsAllAppliedExclusions();
     void separatesCompatibilityGroups_data();
@@ -56,6 +58,94 @@ private slots:
     void preservesNormalLapRanking();
     void rendererOmitsDeltaAtMissingCurrentCoordinate();
 };
+
+void LapEligibilityTests::progressionUsesEligibleDistributions()
+{
+    const QJsonObject config{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    const auto group = lapCompatibilityGroupId(config);
+    QHash<QString, QJsonObject> configs{{"run", config}};
+    QVector<OutingLapRow> rows;
+    for (const double duration : {10., 20., 30., 40., 1000., 1., 2., 3.}) {
+        OutingLapRow row; row.runId = "run"; row.runName = "Run"; row.type = LapSectionType::Lap;
+        row.start = rows.size() * 2000.; row.end = row.start + duration;
+        row.lapNumber = rows.size() + 1; row.referenceEligible = true;
+        row.reference = makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+        rows.append(row);
+    }
+    const QJsonArray exclusions{QJsonObject{{"reference", rows[5].reference}, {"reason", "Traffic"}}};
+    rows[6].referenceIssue = LapReferenceIssue::GpsGap; rows[6].referenceEligible = false;
+    rows[7].reference = {}; // An apparently fast malformed reference must not enter the distribution.
+    const auto ranking = rankOutingLaps(rows, group, configs, exclusions);
+    auto run = ranking.value("runs").toArray().first().toObject();
+    QCOMPARE(run.value("eligibleLapCount").toInt(), 5); QCOMPARE(run.value("lapCount").toInt(), 8);
+    QCOMPARE(run.value("distribution").toObject(), (QJsonObject{{"minimum", 10.}, {"q1", 20.},
+        {"median", 30.}, {"q3", 40.}, {"maximum", 1000.}})); // No statistical outlier removal.
+    QCOMPARE(run.value("bestLap").toObject().value("durationSeconds").toDouble(), 10.);
+    std::reverse(rows.begin(), rows.end());
+    QCOMPARE(rankOutingLaps(rows, group, configs, exclusions).value("runs"), ranking.value("runs"));
+    auto singleton = rankOutingLaps({rows.last()}, group, configs, {}).value("runs").toArray().first().toObject();
+    for (const auto *key : {"minimum", "q1", "median", "q3", "maximum"})
+        QCOMPARE(singleton.value("distribution").toObject().value(key).toDouble(), 10.);
+    const auto pair = rankOutingLaps({rows.last(), rows[rows.size() - 2]}, group, configs, {})
+        .value("runs").toArray().first().toObject().value("distribution").toObject();
+    QCOMPARE(pair.value("q1").toDouble(), 12.5); QCOMPARE(pair.value("median").toDouble(), 15.);
+    QCOMPARE(pair.value("q3").toDouble(), 17.5);
+    const auto stale = rankOutingLaps(rows, group, configs, exclusions, {"run"});
+    QVERIFY(stale.value("runs").toArray().first().toObject().value("distribution").isNull());
+    QCOMPARE(stale.value("eligibleLapCount").toInt(), 0);
+}
+
+void LapEligibilityTests::progressionPreservesOrderContextAndGaps()
+{
+    const QJsonObject config{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    const auto group = lapCompatibilityGroupId(config);
+    auto other = config; other.insert("layoutId", "Short");
+    QHash<QString, QJsonObject> configs{{"a", config}, {"b", config}, {"empty", config}, {"unknown", config}, {"other", other}};
+    const auto make = [](const QString &id, double duration, std::optional<qint64> clock) {
+        OutingLapRow row; row.runId = id; row.runName = id; row.type = LapSectionType::Lap;
+        row.start = 0; row.end = duration; row.lapNumber = 1; row.timestampMilliseconds = clock; row.referenceEligible = true;
+        row.reference = makeLapReference(row, "event", id + "-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+        return row;
+    };
+    // A five-hour unrecorded break adds no rows, laps or synthetic timing samples.
+    QVector<OutingLapRow> rows{make("b", 8, 18001000), make("unknown", 7, {}), make("a", 10, 1000), make("other", 1, 0)};
+    const QJsonArray metadata{
+        QJsonObject{{"id", "unknown"}, {"name", "Unknown clock"}, {"groupId", group}},
+        QJsonObject{{"id", "b"}, {"name", "Afternoon"}, {"groupId", group}, {"notes", "Traffic observed"},
+            {"conditions", "Damp"}, {"setupChanges", "Front pressure +0.1 bar"}},
+        QJsonObject{{"id", "a"}, {"name", "Morning"}, {"groupId", group}},
+        QJsonObject{{"id", "empty"}, {"name", "Unavailable recording"}, {"groupId", group}},
+        QJsonObject{{"id", "other"}, {"name", "Other layout"}, {"groupId", lapCompatibilityGroupId(other)}}};
+    auto ranking = rankOutingLaps(rows, group, configs, {}); ranking.insert("groupLabel", "Full clockwise");
+    const auto progression = summarizeOutingProgression(rows, ranking, metadata);
+    const auto runs = progression.value("runs").toArray(); QCOMPARE(runs.size(), 4);
+    QCOMPARE(runs[0].toObject().value("runId").toString(), QString("a"));
+    QCOMPARE(runs[1].toObject().value("runId").toString(), QString("b"));
+    QCOMPARE(runs[2].toObject().value("runId").toString(), QString("unknown"));
+    QCOMPARE(runs[3].toObject().value("runId").toString(), QString("empty"));
+    QCOMPARE(runs[1].toObject().value("bestDeltaPreviousListedSeconds").toDouble(), -2.);
+    QCOMPARE(runs[1].toObject().value("conditions").toString(), QString("Damp"));
+    QCOMPARE(runs[1].toObject().value("notes").toString(), QString("Traffic observed"));
+    QCOMPARE(runs[1].toObject().value("setupChanges").toString(), QString("Front pressure +0.1 bar"));
+    QVERIFY(runs[0].toObject().value("conditions").isNull());
+    QVERIFY(runs[2].toObject().value("firstSectionUtcMilliseconds").isNull());
+    QCOMPARE(runs[3].toObject().value("state").toString(), QString("no-recorded-laps"));
+    QVERIFY(runs[3].toObject().value("distribution").isNull());
+    QVERIFY(runs[3].toObject().value("bestDeltaPreviousListedSeconds").isNull());
+    QCOMPARE(progression.value("lapCount").toInt(), 3); QCOMPARE(progression.value("eligibleLapCount").toInt(), 3);
+    QCOMPARE(progression.value("minimumSeconds").toDouble(), 7.); QCOMPARE(progression.value("maximumSeconds").toDouble(), 10.);
+    std::reverse(rows.begin(), rows.end());
+    QCOMPARE(summarizeOutingProgression(rows, rankOutingLaps(rows, group, configs, {}), metadata).value("runs"), runs);
+    QJsonArray exclusions;
+    for (const auto &row : rows) if (row.runId == "b") exclusions.append(QJsonObject{{"reference", row.reference}, {"reason", "Traffic"}});
+    const auto filtered = summarizeOutingProgression(rows, rankOutingLaps(rows, group, configs, exclusions), metadata).value("runs").toArray();
+    QVERIFY(filtered[1].toObject().value("distribution").isNull());
+    QVERIFY(filtered[2].toObject().value("bestDeltaPreviousListedSeconds").isNull()); // Do not bridge the unavailable best.
+    QCOMPARE(filtered[1].toObject().value("excludedLaps").toArray().first().toObject().value("userReason").toString(), QString("Traffic"));
+    QVERIFY(summarizeOutingProgression(rows, rankOutingLaps(rows, "", configs, {}), metadata).value("runs").toArray().isEmpty());
+    QJsonArray tooMany; for (int i = 0; i < 65; ++i) tooMany.append(metadata.first());
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(summarizeOutingProgression(rows, ranking, tooMany)));
+}
 
 void LapEligibilityTests::ranksCompatibleLapsDeterministically()
 {

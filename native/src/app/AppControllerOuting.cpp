@@ -97,6 +97,13 @@ QVariantMap AppController::outingRanking() const
     return m_outingRanking;
 }
 
+QVariantMap AppController::outingProgression() const
+{
+    if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
+        || m_outingLapGeneration != m_sourceGeneration) return {{"state", "loading"}};
+    return m_outingProgression;
+}
+
 QVariantList AppController::outingCompatibilityGroups() const
 {
     if (projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
@@ -180,6 +187,25 @@ void AppController::refreshOutingCompatibility()
     m_outingRanking = rankOutingLaps(m_outingRawLapRows, m_outingComparisonGroupId, configurations,
         currentProjectObject().value("event").toObject().value("lapExclusions").toArray(), m_outingStaleRunIds).toVariantMap();
     m_outingRanking.insert("groupLabel", groups.value(m_outingComparisonGroupId).value("label"));
+    QJsonArray metadata;
+    for (const auto &value : currentProjectObject().value("event").toObject().value("runs").toArray()) {
+        const auto run = value.toObject();
+        QJsonObject item{{"id", run.value("id")}, {"name", run.value("name")},
+            {"groupId", lapCompatibilityGroupId(configurations.value(run.value("id").toString()))}};
+        for (const auto *field : {"notes", "conditions", "setupChanges"}) item.insert(field, run.value(field));
+        metadata.append(item);
+    }
+    auto progression = summarizeOutingProgression(m_outingRawLapRows, QJsonObject::fromVariantMap(m_outingRanking), metadata);
+    auto progressionRuns = progression.value("runs").toArray();
+    for (qsizetype i = 0; i < progressionRuns.size(); ++i) {
+        auto run = progressionRuns[i].toObject();
+        run.insert("clock", run.value("chronologyKnown").toBool()
+            ? QDateTime::fromMSecsSinceEpoch(run.value("firstSectionUtcMilliseconds").toString().toLongLong(), QTimeZone::UTC).toString("yyyy-MM-dd HH:mm:ss.zzz")
+            : QStringLiteral("Time unavailable · import order"));
+        progressionRuns[i] = run;
+    }
+    progression.insert("runs", progressionRuns);
+    m_outingProgression = progression.toVariantMap();
     const auto bestReference = m_outingRanking.value("bestOfDay").toMap().value("reference").toMap();
     QHash<QString, QVariantMap> bestRunReferences;
     for (const auto &value : m_outingRanking.value("runs").toList()) {
@@ -405,6 +431,7 @@ void AppController::refreshOutingLaps()
     m_outingLapRows.clear();
     m_outingRawLapRows.clear();
     m_outingRanking = {{"state", "selection-required"}};
+    m_outingProgression = {{"state", "selection-required"}};
     m_outingCompatibilityGroups.clear();
     m_outingSourceMessages.clear();
     m_outingLapMessages.clear();
