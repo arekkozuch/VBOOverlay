@@ -13,6 +13,10 @@ An event owns an ordered list of runs and an `activeRunId`. Each run owns:
 - Stable `id`, display `name` and `primaryTelemetrySourceId`.
 - `sources.telemetry`: 1–8 source entries, each with an event-wide unique `id`
   and a `reference` containing relative/absolute paths and an optional fingerprint.
+- Optional `sources.telemetry[].contentSha256`: exactly 64 lowercase hex
+  characters identifying the complete recording, independent of its pathname.
+  New imports write it; matching legacy import provenance also supplies this
+  identity. Untouched legacy documents are not rewritten during loading.
 - Optional `sources.video` reference and its `sync.offset`/`sync.timeScale`.
 - `trackConfiguration` on new imports: explicit layout/direction/gate identity,
   bound to the primary source ID and fingerprint (details below).
@@ -38,9 +42,10 @@ not invalidate an otherwise valid event document.
 ## Track configuration and derivation identity (KAN-19)
 
 New imports persist the following run-local configuration. Layout IDs are opaque
-identifiers assigned explicitly, not filenames, display names or inferred GPS
-clusters. Reuse an ID only for the same physical layout. Direction is independent
-of a gate's crossing sign and remains `unknown` until explicitly assigned.
+identifiers assigned by supported geometry matching or manual correction, not
+filenames. Reuse a manual ID only for the same physical layout. Direction is
+independent of a gate's crossing sign. Unset manual fields remain `unknown` while
+automatic evidence supplies the effective grouping configuration.
 
 ```json
 "trackConfiguration": {
@@ -72,8 +77,8 @@ unknown and binds them to the replacement fingerprint. The controller API
 `setRunTrackConfiguration(runId, layoutId, direction)` supports validated explicit
 assignment or clearing (empty layout ID / `unknown` direction), records a normal
 persistent edit, and leaves the loaded editor source intact. Step 012 exposes this
-through the Track configuration dialog; automatic track/direction recognition is
-not implemented.
+through **Correct grouping…**; ordinary imports use automatic GPS route/direction
+inference, described below. Manual values override automatic evidence.
 
 `lapDerivationKey` combines a version tag, run ID, primary source ID/fingerprint
 and configuration. Names, notes, video synchronization and source path spelling
@@ -221,18 +226,29 @@ verifies the complete source revision before and after deriving laps.
 
 Validation includes malformed documents, exact-reference invalidation, all-excluded
 ranking, shared render-context results, keyboard-operated production QML controls,
-and actual save/reopen/recovery flows. Native macOS Debug/Release CI provides the
-build/test gate; private recordings and physical-Mac acceptance remain separate.
+and actual save/reopen/recovery flows. Use the local macOS Debug build/test gate;
+Cloud CI remains paused. Private recordings and manual acceptance remain separate.
 
-## Explicit compatibility groups (step 012)
+## Automatic compatibility groups and corrections (steps 012/016)
 
-Open **Track configuration…** in All laps, choose a recording, enter a layout
-name, choose clockwise/counterclockwise and confirm. The entered name is the
+Importing sufficiently supported recordings automatically groups matching routes
+and directions, activates a group and populates rankings and progression. No
+track names, per-run confirmation or group-selection click is required. Multiple
+groups show separate best-day summaries and retain separate progression results.
+An explicit saved group choice takes priority; an unavailable explicit choice is
+retained without substituting another group.
+
+Use **Correct grouping…** only for an incorrect or ambiguous match. Choose a
+recording, enter a layout name and correct the travel direction. The name is the
 layout ID: leading/trailing whitespace is removed, but spelling and case must
 match to join the same layout. The decision applies to all laps in that recording
-and uses the existing persisted source-bound configuration. An outdated dialog
+and uses the existing persisted source-bound configuration. **Apply to recordings
+with matching GPS routes** applies one atomic correction to verified spatial
+matches. **Use detected route** removes the manual override. An outdated dialog
 cannot overwrite a changed derivation. Cancel leaves unresolved fields unchanged.
 Gate revisions come from verified source geometry, never from a user override.
+**Inspect GPS trace…** opens this recording's lap map and telemetry through the
+existing verified detail loader, including partial sections when no timed lap exists.
 A recording without a verified gate revision remains unresolved even after its
 layout/direction are confirmed. Configuration changes can leave prior lap
 exclusions unmatched, as explained in the dialog.
@@ -243,8 +259,9 @@ version, so identical configurations can group different recordings. Unknown or
 malformed fields never compare equal for this purpose: unresolved recordings
 remain separate, visible entries and cannot be chosen for comparison.
 
-Choose a resolved comparison group to see each lap's reasons relative to it.
-All recorded sections remain visible and inspectable. Reasons are independent:
+All recorded sections remain visible and inspectable. Ambiguity is explained once
+per run, rather than repeating layout/direction prompts beneath every lap. OUT/IN
+sections are ordinary untimed sections, not errors. Eligibility reasons remain independent:
 different layout, opposite direction, different/unresolved gates, unresolved
 layout/direction, incomplete/invalid GPS, user exclusion, stale source and
 incomplete timed section. Several can apply to the same row. Tooltips expose
@@ -253,23 +270,24 @@ reasons when the row label is too narrow.
 `outingCompatibilityGroups` supplies all LAP members and the eligible member
 references separately; OUT/IN/UNKNOWN sections never become comparison candidates.
 GPS/user exclusions do not redefine physical compatibility or hide group members.
-No group is selected implicitly, and `comparisonEligible` requires an explicit
-selected group plus no blocking reasons. Group choice is session-only; confirmed
-run configuration survives save/reopen/recovery. Missing, changed or in-flight
-source/derivation generations cannot serve stale group selections. Group membership
+An available group is active automatically unless the document has an explicit
+choice. `comparisonEligible` requires the active group and no blocking reasons.
+The explicitly selected group and corrected
+run configuration survive save/reopen/recovery (step 016 below). Missing, changed
+or in-flight source/derivation generations cannot serve stale group selections. Group membership
 and reasons are rebuilt from validated current lap references; they are not saved
-as an independent cache. This step does not add alignment, potential estimates,
-automatic direction inference or judgments about representative performance.
+as an independent cache. This step does not add lap alignment, potential estimates
+or judgments about representative performance.
 
 Regression coverage verifies exact grouping boundaries, unknown-to-unknown
 rejection, simultaneous GPS/user/compatibility reasons, durable explicit decisions,
 generation invalidation, and keyboard interaction with the production QML dialog
-and group selector. Native verification uses macOS arm64 Debug and Release CI;
-physical-Mac and private-recording acceptance remain separate.
+and group selector. Native verification uses the local macOS Debug gate; Cloud CI
+is paused. Manual and private-recording acceptance remain separate.
 
 ## Compatible run/day rankings (step 013)
 
-After choosing a resolved compatibility group, **Best day** opens that group's
+For the automatically active or explicitly chosen group, **Best day** opens its
 fastest eligible lap. The matching lap row carries a **Best day in group** badge.
 **Ranking details…** shows each run's best lap and an **Applied exclusions** tab;
 results carry the run, lap, group and exact portable reference. Selecting a result
@@ -338,7 +356,7 @@ track geometry or cursor.
 
 ## Within-day run progression (step 015)
 
-**All laps → Progression…** summarizes the explicitly selected compatibility
+**All laps → Progression…** summarizes the active compatibility
 group. Each run shows its best eligible lap, eligible/complete sample counts,
 and a five-number lap-time distribution: minimum, Q1, median, Q3 and maximum.
 Quartiles use linear interpolation at `(n - 1) * fraction` in the sorted eligible
@@ -370,3 +388,131 @@ samples only. A scrollable dialog with fixed close controls keeps the view
 reachable at the 760×480 minimum. Synthetic core and production QML tests cover
 statistics, eligibility, ordering/gaps, context, source invalidation and lap
 navigation; private recordings and physical-Mac acceptance remain separate.
+
+## Durable day-analysis decisions and invalidation (step 016 / KAN-26)
+
+The optional event field stores the existing explicit compatibility choice:
+
+```json
+"analysisDecisions": {
+  "comparisonGroupId": "compatibility-v1:<64 lowercase SHA-256 hex characters>"
+}
+```
+
+The value is the exact stable group ID, never its display label or selector
+index. An absent object, absent field or null group means automatic selection,
+without inventing an explicit document decision. A malformed object, unsupported ID,
+oversized string or non-string selection is rejected transactionally by the
+ordinary project validator, including recovery reads. **Automatic** stores null and
+can remove an unavailable decision. Actual changes mark the project dirty and
+use atomic Save, Save As and recovery. Repeating a choice, repeating an exclusion
+with the same reason, or loading/restoring decisions does not create an edit.
+
+Choosing a comparison group defines the analysis reference context. Clicking a
+lap, a run-best result or Best day only opens that lap for inspection. This
+transient detail view is not a new reference-lap/comparison feature and is not
+saved as a bookmark. Existing exclusions continue to use the complete portable
+lap reference, including event/run/source IDs, full source hash, derivation key,
+algorithm, section type and exact time bounds. No telemetry samples, rankings,
+group membership lists or progression distributions are serialized.
+
+Saved intent is applied only after current sources and their derivations have
+been verified. The selector exposes `none`, `automatic`, `loading`, `applied` and `unavailable`
+states. A missing recording or changed configuration leaves the exact decision
+saved but unapplied, with **Saved group unavailable** and a retained-decision
+notice. It never picks another group or nearby lap. A remaining verified run in
+the same group can still supply eligible results. Missing recordings do not
+prevent the document opening; verified identical-content relinking restores the
+applicable decision without changing logical event/run/source identities.
+
+Full-content verification complements the sampled fingerprint: changes anywhere
+in a recording, including outside fingerprint blocks, prevent automatic source
+acceptance and analysis reuse when a full identity is available. Legacy import
+provenance is used only while its fingerprint still matches the source binding.
+An explicit replacement records the new full identity and clears that run's
+asserted track configuration, even if the sampled fingerprint stayed equal.
+The verified replacement's actual gate revision then enables fresh inference.
+Historical exclusions remain saved and unmatched; they are never transferred.
+New track decisions on verified legacy recordings also capture the complete
+source identity. Save As rebases paths, and moving a project with its relative
+recordings preserves the same identities and decisions.
+
+Derived outing rows are cached per run in memory, bounded by the existing file,
+batch and 20,000-section limits. Reuse requires the same document/run generation,
+source and derivation dependencies, plus a fresh complete-file hash check. New
+derivations verify content before and after parsing/derivation. Changing run A's
+source, gates, layout or direction cancels/invalidates A's dependent detail and
+rows; independent run B retains its verified detail session, geometry and cursor.
+Aggregate rankings/progression are suppressed while verification is pending and
+then rebuilt from current eligible inputs. Metadata-only changes update labels
+and context without reloading telemetry or rebuilding detail geometry.
+
+Outing workers retain cooperative cancellation and current-generation commit
+checks. Detail workers use a document/run dependency key plus a request token;
+an old completion cannot restore a cancelled selection. New/open/recovery
+establish a new analysis generation, including when reopening the same document.
+Save As and switching the editor's active run preserve unrelated detail state.
+
+Local regression coverage includes two distinct runs, Save/reopen/Save As,
+relative-folder relocation, missing/identical relinking, unsaved recovery,
+no-op/clean loading, malformed/legacy fields, unsampled content changes,
+independent detail/cache reuse, stale workers and production QML restoration.
+Run the local macOS Debug build and CTest gate from
+[the development workflow](development-workflow.md). Cloud CI and Windows work
+remain paused; private-media, hardware and manual interaction evidence are
+reported separately.
+
+### GPS route evidence and tolerances (`gps-route-v1`)
+
+Inference reuses `LapSession::lapTraces`: complete, GPS-eligible gate-to-gate
+sections, excluding OUT, IN, unknown sections and gaps. It never uses filenames,
+layout names, lap times or shared dates as route evidence. West-positive VBO
+longitude is normalized for matching and direction only; source telemetry is
+unchanged. At least two supported repetitions are required. Same-day context
+does not authorize a match by itself.
+
+Each candidate needs at least 12 points after dropping movements below 3 metres,
+closure within 25 metres and a perimeter between 100 metres and 30 kilometres.
+Signed enclosed area must exceed 0.5% of perimeter squared; degenerate or
+self-cancelling winding is ambiguous. The sign establishes clockwise versus
+counterclockwise travel. Each closed route is resampled to 256 points at equal
+distance intervals. Cyclic ordered matching tolerates different trace starts and
+sampling rates; it does not rotate, translate or reverse a route to force a match.
+Perimeters must agree within 5%, pointwise separation must stay within 25 metres,
+and RMS separation must not exceed 10 metres. These finite GPS tolerances cannot
+distinguish physically separate routes that remain within that envelope; manual
+correction remains available.
+
+Up to 64 evenly distributed complete traces establish a representative using
+complete-link clustering. A cluster must contain at least two laps and 60% of
+usable candidates. Conflicting routes remain unresolved. Every complete trace is
+then checked against the supported route; an unmatched timed lap remains visible
+but cannot enter automatic ranking/progression for that route. This keeps pit
+detours and alternate-route sections out of representative results. Across runs,
+every member must match every other member of its group, preventing a chain of
+near matches from bridging incompatible routes. A recording that matches two
+otherwise incompatible groups stays unresolved with one explanation instead of
+being assigned by input order. Reverse traversal and alternate
+layouts remain separate. Exact recorded gate revisions still partition timing
+results even when route geometry matches; spatial similarity never equates
+different timing definitions.
+
+Optional `run.trackInference` records only `algorithm`, complete `sourceRevision`,
+`gateRevision`, opaque `layoutId` and `direction`. Strings and identities are
+validated and bounded. Source/gate/version bindings must match before a prior
+layout ID can be reused. Matching runs share a stable assigned layout ID; an
+unchanged run retains that ID if another recording disappears or changes. New
+IDs bind the representative run and complete content identity. A saved ID claimed
+by incompatible spatial clusters is not reused; those clusters receive distinct
+IDs, leaving any old explicit comparison choice unavailable. Raw
+GPS descriptors and lap membership classifications remain bounded in-memory data.
+Manual `trackConfiguration` fields take precedence, and manual corrections retain
+the existing GPS/exclusion safeguards.
+
+Import/source-edit completion records changed inference provenance through the
+normal dirty/recovery lifecycle; unchanged inference does not advance the document
+revision. Clean reopening reconstructs and verifies results without dirtying the
+document. Explicit Save also records available verified provenance. Legacy files
+without it reconstruct deterministically without confirmation. Per-run caches
+include the inference algorithm and source/derivation dependencies; inferred
+grouping does not change portable lap references or transfer saved exclusions.

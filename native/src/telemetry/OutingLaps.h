@@ -23,6 +23,7 @@ struct OutingLapRow {
     LapReferenceIssue referenceIssue = LapReferenceIssue::None;
     bool bestOfRun = false;
     QJsonObject reference = {};
+    QString layoutIssue = {};
 };
 
 // Portable references use exact telemetry bounds, not row indices or lap numbers.

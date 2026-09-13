@@ -3,6 +3,8 @@
 #include <QByteArray>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <cmath>
+#include <numbers>
 
 namespace EventProjectFixture {
 
@@ -63,6 +65,29 @@ inline QByteArray lapsVbo()
            "6 52.0001 20.9998\n7 52.0008 20.9998\n8 52.0008 21.0002\n"
            "10 52.0001 21.0002\n11 52.0001 20.9998\n12 52.0008 20.9998\n"
            "13 52.0008 21.0002\n14 52.0001 21.0002\n15 52.0001 20.9998\n";
+}
+
+// Synthetic closed circuit with independent sampling, phase, noise and travel
+// direction. Names and lap duration carry no route evidence.
+inline QByteArray routeVbo(int samplesPerLap = 240, double phase = -1.0,
+    double noiseMeters = 0, bool reverse = false, double radiusX = 300, int turns = 4, int detourLap = -1)
+{
+    constexpr double latitude = 52, longitude = 21, earth = 6'371'000;
+    const auto lat = [](double north) { return latitude + north / earth * 180 / std::numbers::pi; };
+    const auto lon = [](double east) { return longitude + east / (earth * std::cos(latitude * std::numbers::pi / 180)) * 180 / std::numbers::pi; };
+    QString text = QString("File created on 29/08/2026 at 10:00:00\n[header]\ncoordinate units = degrees\n[laptiming]\nStart %1 %2 %3 %2 start\n[column names]\ntime latitude longitude\n[data]\n")
+        .arg(lon(280), 0, 'f', 9).arg(lat(0), 0, 'f', 9).arg(lon(320), 0, 'f', 9);
+    for (int i = 0; i <= samplesPerLap * turns; ++i) {
+        const double angle = phase + (reverse ? -1 : 1) * 2 * std::numbers::pi * i / samplesPerLap;
+        // Alternative routes and a single pit detour keep the same timing gate.
+        const double excursion = radiusX + (detourLap >= 0 && std::floor(angle / (2 * std::numbers::pi)) == detourLap ? 150 : 0);
+        const double east = 300 * std::cos(angle) - (excursion - 300) * (1 - std::cos(angle)) / 2
+            + noiseMeters * std::sin(i * .7);
+        const double north = 180 * std::sin(angle) + noiseMeters * std::cos(i * .4);
+        text += QString("%1 %2 %3\n").arg(i * 48.0 / samplesPerLap, 0, 'f', 6)
+            .arg(lat(north), 0, 'f', 9).arg(lon(east), 0, 'f', 9);
+    }
+    return text.toUtf8();
 }
 
 } // namespace EventProjectFixture

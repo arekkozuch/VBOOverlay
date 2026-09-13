@@ -21,6 +21,13 @@ can group a unique dated VBO/RCZ GPS match and use VBO for calculated G. These a
 different entry points, documented in [batch-import.md](batch-import.md).
 Neither combines raw channels across files. HR stays within the imported session.
 
+Day-analysis compatibility is separate from duplicate/alternative source grouping.
+By owner correction on 13 September 2026, repeated complete GPS routes and ordered
+travel automatically establish supported layouts/directions. Import activates
+available group results without per-run configuration. Manual correction remains
+an override for ambiguous or incorrect matches. See
+[the inference, persistence and invalidation contract](event-project-format.md#automatic-compatibility-groups-and-corrections-steps-012016).
+
 ## Next product outcomes
 
 1. Quality-aware run/event results and progression, using the existing outing service.
@@ -30,7 +37,9 @@ Neither combines raw channels across files. HR stays within the imported session
 5. Full Mac journey/overlay-export acceptance, then remaining advanced F00–F20 work.
 
 A timed interval, usable spatial reference and comparable event lap are distinct.
-GPS continuity alone cannot establish layout/direction/conditions compatibility.
+GPS continuity alone cannot establish compatibility; repeated route geometry,
+ordered traversal and compatible timing definitions are required. Conditions are
+never inferred from the route or lap time.
 Do not extend the old live nearest-segment overlay delta into cross-run analysis
 without the alignment and eligibility gates in the product contract.
 

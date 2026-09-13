@@ -6,6 +6,7 @@
 #include "telemetry/TrackGeometry.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
+#include "telemetry/TrackInference.h"
 #include "export/MediaProbe.h"
 #include "export/ExportDiagnostics.h"
 #include "export/ExportOutputTransaction.h"
@@ -102,6 +103,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap outingProgression READ outingProgression NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingCompatibilityGroups READ outingCompatibilityGroups NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonGroupId READ outingComparisonGroupId NOTIFY outingLapsChanged)
+    Q_PROPERTY(QString outingComparisonSelectionState READ outingComparisonSelectionState NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingLaps READ outingLaps NOTIFY outingLapsChanged)
     Q_PROPERTY(QStringList outingLapMessages READ outingLapMessages NOTIFY outingLapsChanged)
     Q_PROPERTY(bool outingLapsLoading READ outingLapsLoading NOTIFY outingLapsChanged)
@@ -203,12 +205,13 @@ public:
         const QString &name, const QString &notes, const QString &conditions, const QString &setupChanges);
     Q_INVOKABLE QVariantMap runTrackConfiguration(const QString &runId) const;
     Q_INVOKABLE bool confirmRunTrackConfiguration(const QString &runId, const QString &expectedDerivationKey,
-        const QString &layoutId, const QString &direction);
+        const QString &layoutId, const QString &direction, bool applyToMatching = false);
     Q_INVOKABLE bool selectOutingComparisonGroup(const QString &groupId);
     [[nodiscard]] QVariantMap outingRanking() const;
     [[nodiscard]] QVariantMap outingProgression() const;
     [[nodiscard]] QVariantList outingCompatibilityGroups() const;
     [[nodiscard]] QString outingComparisonGroupId() const;
+    [[nodiscard]] QString outingComparisonSelectionState() const;
     Q_INVOKABLE bool setRunTrackConfiguration(
         const QString &runId, const QString &layoutId, const QString &direction);
     [[nodiscard]] QString batchImportState() const { return m_batchState; }
@@ -232,9 +235,12 @@ public:
     [[nodiscard]] QVariantMap outingLapTrackPoint() const;
     [[nodiscard]] double outingLapCursor() const { return m_outingLapCursor; }
     void setOutingLapCursor(double seconds);
-    [[nodiscard]] QVariantList outingLaps() const { return m_outingLapRows; }
+    [[nodiscard]] QVariantList outingLaps() const;
     [[nodiscard]] QStringList outingLapMessages() const { return m_outingLapMessages; }
-    [[nodiscard]] bool outingLapsLoading() const { return m_outingLapsLoading; }
+    [[nodiscard]] bool outingLapsLoading() const {
+        return projectLoading() || m_outingLapsLoading || m_outingLapRequestedKey != outingLapKey()
+            || m_outingLapGeneration != m_sourceGeneration;
+    }
     [[nodiscard]] QVariantList batchImportRows() const { return m_batchRows; }
     [[nodiscard]] int batchImportProcessed() const { return m_batchProcessed; }
     [[nodiscard]] int batchImportTotal() const { return m_batchTotal; }
@@ -376,6 +382,7 @@ private:
         TrackGeometry geometry;
         LapSession lapSession;
         QByteArray contentRevision;
+        bool contentMismatch = false;
         QString error;
         quint64 generation = 0;
         QJsonObject fingerprint;
@@ -414,8 +421,8 @@ private:
         bool relink = false;
     };
     [[nodiscard]] quint64 beginSourceReplacement(bool replacingVideo);
-    [[nodiscard]] quint64 beginSourceGeneration();
-    void cancelSourceJobs();
+    [[nodiscard]] quint64 beginSourceGeneration(bool preserveOuting = false);
+    void cancelSourceJobs(bool cancelOutingDetail = true);
     void startVideoProbe(const QString &path, quint64 generation, bool markDocumentDirty,
                          QJsonObject expectedFingerprint = {}, bool relink = false);
     void startVboLoad(const QString &path, quint64 generation, bool markDocumentDirty,
@@ -475,7 +482,6 @@ private:
     QVariantMap m_selectedOutingLap;
     QJsonObject m_outingLapDetailSource;
     QByteArray m_outingLapDetailKey;
-    quint64 m_outingLapDetailGeneration = 0;
     quint64 m_outingLapDetailRequest = 0;
     bool m_outingLapDetailPending = false;
     QString m_outingLapDetailState = QStringLiteral("idle");
@@ -487,28 +493,46 @@ private:
         QString runId;
         QString text;
     };
+    struct OutingRunResult {
+        QByteArray dependencyKey;
+        QByteArray contentRevision;
+        QVector<OutingLapRow> rows;
+        QList<OutingSourceMessage> messages;
+        quint64 derivationSerial = 0;
+        TrackInference inference;
+    };
     struct OutingLapResult {
         QVector<OutingLapRow> rows;
         QList<OutingSourceMessage> messages;
         QByteArray key;
         quint64 generation = 0;
         bool cancelled = false;
+        QHash<QString, OutingRunResult> runs;
+        InferredTrackGroups groups;
     };
     void initializeOutingLaps();
     void refreshOutingLaps();
     void refreshLapExclusionPolicy();
     [[nodiscard]] QJsonObject activeLapBinding() const;
     void refreshOutingCompatibility();
+    bool setRunTrackConfigurations(const QStringList &runIds, const QString &layoutId, const QString &direction);
     QVariantMap m_outingRanking;
     QVariantMap m_outingProgression;
     QVariantList m_outingCompatibilityGroups;
     QString m_outingComparisonGroupId;
-    QString m_outingCompatibilityDocumentId;
     QVector<OutingLapRow> m_outingRawLapRows;
     QList<OutingSourceMessage> m_outingSourceMessages;
     QByteArray m_loadedSourceRevision;
     [[nodiscard]] QJsonArray outingLapSources() const;
     [[nodiscard]] QByteArray outingLapKey() const;
+    [[nodiscard]] QByteArray outingRunKey(const QString &runId) const;
+    [[nodiscard]] QSet<QString> reusableOutingRuns() const;
+    void invalidateOutingLapDetail();
+    QHash<QString, OutingRunResult> m_outingRunCache;
+    InferredTrackGroups m_outingInferredGroups;
+    [[nodiscard]] QJsonObject projectWithOutingInference(QJsonObject project) const;
+    QHash<QString, quint64> m_outingRunGenerations;
+    quint64 m_outingDocumentGeneration = 0;
     QFutureWatcher<OutingLapResult> m_outingLapWatcher;
     QTimer m_outingLapTimer;
     std::shared_ptr<std::atomic_bool> m_outingLapCancellation;

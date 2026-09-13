@@ -100,6 +100,27 @@ ctest --test-dir build-native -R '^flappedear_import_tests$' --output-on-failure
 
 ## Private real fixtures
 
+The optional day-analysis integration imports every VBO in a local directory
+through the production controller, without layout, direction or group clicks:
+
+```bash
+FLAPPEDEAR_REAL_DAY="$PWD/jastrzab" \
+  ./build-native/native/tests/flappedear_native_tests automaticallyGroupsPrivateTrackDay
+```
+
+It expects multiple recordings of one compatible route and direction and checks
+automatic rankings/progression for every run. The repo-root `jastrzab/` directory
+is ignored; never add private sessions to the repository. Optional
+`FLAPPEDEAR_DAY_REVIEW_PROJECT` and `FLAPPEDEAR_DAY_REVIEW_IMAGE` paths write a local
+review project and captures of the production Analysis window and Progression
+dialog, correction controls and GPS traces. Store those outside the repository. These captures and keyboard-driven
+QML regressions complement, rather than establish, owner-operated acceptance.
+The Escape regression synthesizes Qt window activation as well as key input:
+macOS does not always grant foreground activation to a shell-launched test.
+Its production shortcut and selection assertions remain enabled.
+See [KAN-26 local validation](kan26-local-validation.md) for the executed gate
+and private-recording results.
+
 Optional real-media tests read paths from environment variables:
 
 ```bash

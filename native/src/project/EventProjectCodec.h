@@ -23,7 +23,8 @@ public:
     [[nodiscard]] static QJsonObject editorProjection(const QJsonObject &project);
     [[nodiscard]] static QJsonObject withEditorState(
         const QJsonObject &eventProject, QJsonObject editorProject,
-        const QString &previousProjectPath, const QString &targetProjectPath);
+        const QString &previousProjectPath, const QString &targetProjectPath,
+        const QByteArray &activeSourceRevision = {});
     [[nodiscard]] static QJsonObject referenceForSave(
         const ProjectSourceReference &reference, const QString &previousProjectPath,
         const QString &targetProjectPath);
@@ -35,6 +36,9 @@ public:
     // Opaque dependency identity, not a lap reference or compatibility decision.
     // Excludes names, notes, video/sync and portable source paths.
     [[nodiscard]] static QByteArray lapDerivationKey(const QJsonObject &run);
+    // Full content identity, including legacy imports whose provenance is still
+    // bound to the current fingerprint. Never infer identity from a path.
+    [[nodiscard]] static QByteArray sourceContentRevision(const QJsonObject &source);
     // All referenced path candidates, including inactive sources, for export protection.
     [[nodiscard]] static QStringList referencedPaths(const QJsonObject &project, const QString &projectPath);
 };

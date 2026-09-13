@@ -9,6 +9,7 @@ __MACOSX/
 *.fetproject
 /*.vbo
 /samples/*.vbo
+/jastrzab/
 *.rcz
 
 __pycache__/

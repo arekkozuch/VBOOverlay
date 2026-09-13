@@ -109,6 +109,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TelemetryRenderContext.cpp
     src/telemetry/TelemetryRenderContext.h
     src/telemetry/TrackGeometry.cpp
+    src/telemetry/TrackInference.cpp
+    src/telemetry/TrackInference.h
     src/telemetry/TrackGeometry.h
     src/telemetry/RczParser.cpp
     src/telemetry/RczParser.h

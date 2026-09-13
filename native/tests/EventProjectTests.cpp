@@ -23,6 +23,9 @@ class EventProjectTests final : public QObject {
     Q_OBJECT
 private slots:
     void acceptsLegacyAndEventDocuments();
+    void boundsAndPreservesAnalysisDecisions();
+    void bindsFullContentWithoutMigratingOnLoad();
+    void boundsInferenceProvenanceAndRecoversIt();
     void boundsAndPreservesRunMetadata();
     void persistsTrackConfigurationAndUnknownLegacyState();
     void rejectsInvalidTrackConfigurations_data();
@@ -58,6 +61,83 @@ void EventProjectTests::acceptsLegacyAndEventDocuments()
     QVERIFY(example.open(QIODevice::ReadOnly));
     const auto sample = QJsonDocument::fromJson(example.readAll()).object();
     QVERIFY2(ProjectLimits::validateProject(sample, &error), qPrintable(error));
+}
+
+void EventProjectTests::boundsAndPreservesAnalysisDecisions()
+{
+    const auto original = Fixture::project();
+    QVERIFY(!original.value("event").toObject().contains("analysisDecisions"));
+    for (const auto &selection : {QJsonValue(QJsonValue::Undefined), QJsonValue(QJsonValue::Null),
+         QJsonValue("compatibility-v1:" + QString(64, 'a'))}) {
+        auto project = original; auto event = project.value("event").toObject();
+        event.insert("analysisDecisions", QJsonObject{{"comparisonGroupId", selection}});
+        project.insert("event", event);
+        QString error; QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+        QCOMPARE(EventProjectCodec::withEditorState(project, EventProjectCodec::editorProjection(project), {}, {}), project);
+        QTemporaryDir directory; ProjectRecoveryStore store(directory.filePath("recovery.json"));
+        QVERIFY2(store.write({{}, "event-document", 5, 4, "2026-09-13T00:00:00.000Z", project, true}, &error), qPrintable(error));
+        ProjectRecoverySnapshot restored; QVERIFY2(store.load(&restored, &error), qPrintable(error));
+        QCOMPARE(restored.project, project);
+    }
+    for (const auto &selection : {QJsonValue(""), QJsonValue(0), QJsonValue(false), QJsonValue(QJsonObject{}),
+         QJsonValue(QJsonArray{}), QJsonValue("Group 1"), QJsonValue("compatibility-v1:" + QString(65, 'a')),
+         QJsonValue("compatibility-v1:" + QString(64, 'a') + '\n'), QJsonValue(QString(4097, 'x'))}) {
+        auto project = original; auto event = project.value("event").toObject();
+        event.insert("analysisDecisions", QJsonObject{{"comparisonGroupId", selection}});
+        project.insert("event", event); QVERIFY(!ProjectLimits::validateProject(project));
+    }
+    for (const auto &value : {QJsonValue(QJsonValue::Null), QJsonValue(1), QJsonValue(QJsonArray{})}) {
+        auto project = original; auto event = project.value("event").toObject();
+        event.insert("analysisDecisions", value); project.insert("event", event);
+        QVERIFY(!ProjectLimits::validateProject(project));
+    }
+}
+
+void EventProjectTests::bindsFullContentWithoutMigratingOnLoad()
+{
+    auto project = Fixture::project(); auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+    auto sources = run.value("sources").toObject(); auto telemetry = sources.value("telemetry").toArray();
+    auto source = telemetry[0].toObject(); const auto digest = QByteArray(64, 'a');
+    source.insert("contentSha256", QString::fromLatin1(digest)); telemetry[0] = source;
+    sources.insert("telemetry", telemetry); run.insert("sources", sources);
+    auto config = EventProjectCodec::trackConfiguration(run); config.insert("layoutId", "Circuit");
+    config.insert("direction", "clockwise"); run.insert("trackConfiguration", config);
+    runs[0] = run; Fixture::setRuns(project, runs);
+    QVERIFY(ProjectLimits::validateProject(project));
+    QCOMPARE(EventProjectCodec::sourceContentRevision(source), digest);
+    QCOMPARE(EventProjectCodec::withEditorState(project, EventProjectCodec::editorProjection(project), {}, {}, digest), project);
+    auto changed = EventProjectCodec::withEditorState(project, EventProjectCodec::editorProjection(project), {}, {}, QByteArray(64, 'b'));
+    QVERIFY(Fixture::runs(changed)[0].toObject().value("trackConfiguration").toObject().value("layoutId").isNull());
+    QCOMPARE(Fixture::runs(changed)[1], runs[1]);
+    for (const auto &value : {QJsonValue(""), QJsonValue("a"), QJsonValue(42), QJsonValue(QJsonValue::Null),
+         QJsonValue(QString(64, 'a') + '\n')}) {
+        source.insert("contentSha256", value); telemetry[0] = source; sources.insert("telemetry", telemetry);
+        run.insert("sources", sources); runs[0] = run; Fixture::setRuns(project, runs);
+        QVERIFY(!ProjectLimits::validateProject(project));
+    }
+    const auto legacy = Fixture::project();
+    QCOMPARE(EventProjectCodec::withEditorState(legacy, EventProjectCodec::editorProjection(legacy), {}, {}, digest), legacy);
+}
+
+void EventProjectTests::boundsInferenceProvenanceAndRecoversIt()
+{
+    auto project = Fixture::project(); auto runs = Fixture::runs(project); auto run = runs[0].toObject();
+    const QJsonObject inference{{"algorithm", "gps-route-v1"}, {"sourceRevision", QString(64, 'a')},
+        {"gateRevision", "gates-v1:" + QString(64, 'b')}, {"layoutId", "gps-route-v1:" + QString(64, 'c')},
+        {"direction", "clockwise"}};
+    run.insert("trackInference", inference); runs[0] = run; Fixture::setRuns(project, runs);
+    QVERIFY(ProjectLimits::validateProject(project));
+    QTemporaryDir directory; ProjectRecoveryStore store(directory.filePath("recovery.json")); QString error;
+    QVERIFY2(store.write({{}, "event-document", 5, 4, "2026-09-13T00:00:00.000Z", project, true}, &error), qPrintable(error));
+    ProjectRecoverySnapshot restored; QVERIFY2(store.load(&restored, &error), qPrintable(error));
+    QCOMPARE(restored.project, project);
+    for (const auto &[field, value] : QList<QPair<QString, QJsonValue>>{
+        {"algorithm", QString(129, 'x')}, {"algorithm", QString("bad") + QChar::Null},
+        {"sourceRevision", QString(63, 'a')}, {"sourceRevision", 12}, {"gateRevision", "gates-v1:bad"},
+        {"layoutId", "gps-route-v1:"}, {"layoutId", QString(129, 'x')}, {"direction", "unknown"}}) {
+        auto invalid = inference; invalid.insert(field, value); run.insert("trackInference", invalid);
+        runs[0] = run; Fixture::setRuns(project, runs); QVERIFY(!ProjectLimits::validateProject(project));
+    }
 }
 
 void EventProjectTests::boundsAndPreservesRunMetadata()

@@ -119,6 +119,7 @@ QString lapCompatibilityReasonText(const QString &reason)
     if (reason == "stale-source") return "Source changed; reload recording";
     if (reason == "ineligible-lap") return "Lap is not eligible";
     if (reason == "invalid-reference") return "Lap identity is invalid";
+    if (reason == "different-recorded-route") return "Lap does not follow the supported route";
     return reason;
 }
 
@@ -164,6 +165,7 @@ QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &gro
         ++run.count;
         const auto reason = reasonsByReference.value(lapReferenceKey(row.reference));
         auto reasons = lapCompatibilityReasons(configurations.value(row.runId), {}, row.referenceIssue, !reason.isEmpty());
+        if (!row.layoutIssue.isEmpty()) reasons.append(row.layoutIssue);
         if (staleRunIds.contains(row.runId)) reasons.append("stale-source");
         if (!row.referenceEligible && reasons.isEmpty()) reasons.append("ineligible-lap");
         if (!validLapReference(row.reference) || row.reference.value("algorithm") != lapReferenceAlgorithm

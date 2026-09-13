@@ -7,6 +7,7 @@ Rectangle {
     id: root
     color: "#090e14"
     readonly property var ranking: appController.outingRanking
+    readonly property var resolvedGroups: appController.outingCompatibilityGroups.filter(group => group.resolved && group.available)
     function duration(seconds) {
         const minutes = Math.floor(seconds / 60);
         return minutes + ":" + (seconds - minutes * 60).toFixed(3).padStart(6, "0");
@@ -104,22 +105,32 @@ Rectangle {
     Dialog {
         id: configurationDialog
         objectName: "outingTrackConfigurationDialog"
-        title: qsTr("Track configuration")
+        title: qsTr("Correct track grouping")
         modal: true
         anchors.centerIn: parent
         width: Math.min(560, root.width - 40)
+        height: Math.min(implicitHeight, root.height - 24)
         property string editingRunId: ""
         property var capturedConfiguration: ({})
         function loadConfiguration() {
             editingRunId = runPicker.currentValue || "";
             capturedConfiguration = appController.runTrackConfiguration(editingRunId);
             layoutName.text = capturedConfiguration.layoutId || "";
-            directionPicker.currentIndex = capturedConfiguration.direction === "clockwise" ? 1
-                : capturedConfiguration.direction === "counterclockwise" ? 2 : 0;
+            const direction = capturedConfiguration.direction === "unknown"
+                ? capturedConfiguration.inferredDirection : capturedConfiguration.direction;
+            directionPicker.currentIndex = direction === "clockwise" ? 1 : direction === "counterclockwise" ? 2 : 0;
+            matchingRuns.checked = false;
             configurationError.text = "";
         }
         onOpened: loadConfiguration()
-        contentItem: ColumnLayout {
+        contentItem: ScrollView {
+            id: configurationScroll
+            clip: true
+            contentWidth: availableWidth
+            implicitHeight: configurationContent.implicitHeight
+        ColumnLayout {
+            id: configurationContent
+            width: configurationScroll.availableWidth
             spacing: 12
             Label { text: qsTr("Recording"); color: "#91a0b2" }
             ComboBox {
@@ -131,6 +142,25 @@ Rectangle {
                 valueRole: "id"
                 onActivated: configurationDialog.loadConfiguration()
                 Accessible.name: qsTr("Recording configuration")
+            }
+            Label {
+                Layout.fillWidth: true
+                text: configurationDialog.capturedConfiguration.inferenceSupported
+                    ? qsTr("Route and direction detected from repeated complete GPS laps. Override only if the grouping is incorrect.")
+                    : (configurationDialog.capturedConfiguration.inferenceReason || qsTr("Route evidence is not available yet."))
+                color: "#91a0b2"
+                wrapMode: Text.WordWrap
+            }
+            FeButton {
+                objectName: "inspectGroupingGpsTrace"
+                text: qsTr("Inspect GPS trace…")
+                readonly property var sections: appController.outingLaps.filter(row => row.runId === configurationDialog.editingRunId)
+                enabled: sections.length > 0 && !appController.outingLapsLoading
+                onClicked: {
+                    const section = sections.find(row => row.type === "LAP") || sections[0];
+                    if (appController.selectOutingLapReference(section.reference)) configurationDialog.close();
+                    else configurationError.text = qsTr("The recording changed. Reopen the dialog to review it.");
+                }
             }
             Label { text: qsTr("Layout name — use the same name for the same layout"); color: "#91a0b2" }
             TextField {
@@ -147,6 +177,12 @@ Rectangle {
                 Layout.fillWidth: true
                 model: [qsTr("Direction unknown"), qsTr("Clockwise"), qsTr("Counterclockwise")]
                 Accessible.name: qsTr("Driving direction")
+            }
+            CheckBox {
+                id: matchingRuns
+                objectName: "applyTrackCorrectionToMatchingRuns"
+                text: qsTr("Apply to recordings with matching GPS routes")
+                enabled: !!configurationDialog.capturedConfiguration.inferenceSupported
             }
             Label {
                 Layout.fillWidth: true
@@ -175,19 +211,30 @@ Rectangle {
                     text: qsTr("Cancel")
                     onClicked: configurationDialog.close()
                 }
+                FeButton {
+                    objectName: "useAutomaticTrackGrouping"
+                    text: qsTr("Use detected route")
+                    onClicked: {
+                        if (appController.confirmRunTrackConfiguration(configurationDialog.editingRunId,
+                            configurationDialog.capturedConfiguration.derivationKey || "", "", "unknown", matchingRuns.checked))
+                            configurationDialog.close();
+                        else configurationError.text = qsTr("Could not restore automatic grouping. Reopen the dialog to review the current recording.");
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 FeButton {
                     objectName: "confirmTrackConfiguration"
-                    text: qsTr("Confirm configuration")
+                    text: qsTr("Apply correction")
                     enabled: layoutName.text.trim().length > 0 && directionPicker.currentIndex > 0
                     onClicked: {
                         if (appController.confirmRunTrackConfiguration(configurationDialog.editingRunId,
                             configurationDialog.capturedConfiguration.derivationKey || "", layoutName.text,
-                            directionPicker.currentIndex === 1 ? "clockwise" : "counterclockwise")) configurationDialog.close();
+                            directionPicker.currentIndex === 1 ? "clockwise" : "counterclockwise", matchingRuns.checked)) configurationDialog.close();
                         else configurationError.text = qsTr("Could not save this configuration. Reopen the dialog to review the current recording.");
                     }
                 }
             }
+        }
         }
     }
     ColumnLayout {
@@ -225,29 +272,84 @@ Rectangle {
                 id: comparisonGroup
                 objectName: "outingComparisonGroupPicker"
                 Layout.fillWidth: true
-                model: appController.outingCompatibilityGroups.filter(group => group.resolved)
+                model: root.resolvedGroups
                 textRole: "summary"
                 valueRole: "id"
-                currentIndex: { const count = model.length; return indexOfValue(appController.outingComparisonGroupId); }
-                displayText: currentIndex < 0 ? qsTr("Choose a comparison group") : currentText
+                currentIndex: model.findIndex(group => group.id === appController.outingComparisonGroupId)
+                displayText: currentIndex >= 0 ? currentText
+                    : appController.outingLapsLoading ? qsTr("Detecting compatible groups…")
+                    : appController.outingComparisonSelectionState === "loading" ? qsTr("Restoring saved group…")
+                    : appController.outingComparisonSelectionState === "unavailable" ? qsTr("Saved group unavailable")
+                    : qsTr("Choose a comparison group")
                 onActivated: appController.selectOutingComparisonGroup(currentValue)
                 Accessible.name: qsTr("Comparison group")
             }
             FeButton {
+                objectName: "clearOutingComparisonGroup"
+                text: qsTr("Automatic")
+                visible: ["applied", "unavailable", "loading"].indexOf(appController.outingComparisonSelectionState) >= 0
+                onClicked: appController.selectOutingComparisonGroup("")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Clear the explicit choice and show an available group automatically")
+            }
+            FeButton {
                 objectName: "openTrackConfiguration"
-                text: qsTr("Track configuration…")
+                text: qsTr("Correct grouping…")
                 enabled: appController.eventRuns.length > 0 && !appController.projectLoading
                 onClicked: configurationDialog.open()
             }
         }
         Label {
             Layout.fillWidth: true
-            text: qsTr("%1 compatible groups · %2 unresolved recordings. Confirm layout and direction to resolve compatibility; all laps stay visible.")
+            text: qsTr("%1 compatible groups · %2 recordings need review. Groups use repeated GPS routes and recorded timing gates; every section remains inspectable.")
                 .arg(appController.outingCompatibilityGroups.filter(group => group.resolved).length)
                 .arg(appController.outingCompatibilityGroups.filter(group => !group.resolved).length)
             wrapMode: Text.WordWrap
             color: "#91a0b2"
             font.pixelSize: 11
+        }
+        ListView {
+            objectName: "automaticGroupResults"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 86
+            visible: root.resolvedGroups.length > 1
+            orientation: ListView.Horizontal
+            spacing: 8
+            clip: true
+            model: root.resolvedGroups
+            ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+            delegate: Rectangle {
+                required property var modelData
+                width: 300; height: 76; radius: 6
+                color: "#101923"
+                border.color: modelData.id === appController.outingComparisonGroupId ? "#55e6a5" : "#253244"
+                Column {
+                    anchors.fill: parent; anchors.margins: 8; spacing: 4
+                    Label { width: parent.width; text: modelData.label; color: "#aab6c4"; elide: Text.ElideRight; font.pixelSize: 11 }
+                    Label {
+                        width: parent.width
+                        text: modelData.ranking && modelData.ranking.bestOfDay
+                            ? qsTr("Best day %1 · %2").arg(root.duration(modelData.ranking.bestOfDay.durationSeconds)).arg(modelData.ranking.bestOfDay.runName)
+                            : qsTr("No eligible lap")
+                        color: "#55e6a5"; elide: Text.ElideRight; font.pixelSize: 12
+                    }
+                    Label {
+                        width: parent.width
+                        text: modelData.progression ? qsTr("Run bests: %1").arg(modelData.progression.runs.map(run =>
+                            run.bestLap ? root.duration(run.bestLap.durationSeconds) : qsTr("no eligible lap")).join(" · ")) : ""
+                        color: "#91a0b2"; elide: Text.ElideRight; font.pixelSize: 10
+                    }
+                }
+                MouseArea {
+                    id: groupPointer
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: appController.selectOutingComparisonGroup(parent.modelData.id)
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: parent.modelData.progression ? parent.modelData.progression.runs.map(run =>
+                        run.runName + ": " + (run.bestLap ? root.duration(run.bestLap.durationSeconds) : qsTr("no eligible lap"))).join("\n") : ""
+                }
+            }
         }
         RowLayout {
             Layout.fillWidth: true
@@ -284,12 +386,14 @@ Rectangle {
         ScrollView {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(root.height < 600 ? 40 : 80, notices.implicitHeight)
-            visible: appController.outingLapMessages.length > 0
+            visible: appController.outingLapMessages.length > 0 || appController.outingComparisonSelectionState === "unavailable"
             contentWidth: availableWidth
             Label {
                 id: notices
                 width: parent.width
-                text: appController.outingLapMessages.join("\n")
+                text: (appController.outingComparisonSelectionState === "unavailable"
+                    ? [qsTr("Saved comparison group retained without applying. Verify missing or changed recordings and track configuration, choose another group, or clear the decision.")]
+                    : []).concat(appController.outingLapMessages).join("\n")
                 color: "#d6a457"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 11
@@ -373,11 +477,13 @@ Rectangle {
                             elide: Text.ElideMiddle
                         }
                         Label {
-                            text: (row.modelData.compatibilityGroupLabel || "") + " · "
-                                + ((row.modelData.compatibilityReasonLabels || []).join("; ")
-                                    || (row.modelData.comparisonEligible ? qsTr("Eligible in selected group") : qsTr("Choose a group to compare")))
+                            visible: row.modelData.compatibilityResolved || row.modelData.type !== "LAP"
+                            text: row.modelData.type !== "LAP" ? qsTr("Untimed section · available for inspection")
+                                : (row.modelData.compatibilityGroupLabel || "")
+                                    + (row.modelData.layoutIssue ? qsTr(" · Different recorded route")
+                                        : row.modelData.comparisonEligible ? qsTr(" · Eligible") : "")
                             Layout.fillWidth: true
-                            color: row.modelData.comparisonEligible ? "#55e6a5" : "#d6a457"
+                            color: row.modelData.comparisonEligible ? "#55e6a5" : "#91a0b2"
                             font.pixelSize: 10
                             elide: Text.ElideRight
                             ToolTip.visible: pointer.containsMouse

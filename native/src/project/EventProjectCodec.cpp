@@ -23,6 +23,7 @@ bool fail(QString *error, const QString &message)
 bool validText(const QJsonValue &value, const qsizetype limit)
 {
     return value.isString() && !value.toString().trimmed().isEmpty()
+        && !value.toString().contains(QChar::Null)
         && value.toString().size() <= limit;
 }
 
@@ -108,6 +109,15 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         if (project.contains(key)) return fail(error, QStringLiteral("Event projects cannot contain root %1.").arg(key));
     }
     const QJsonObject event = project.value(QStringLiteral("event")).toObject();
+    const auto decisions = event.value("analysisDecisions");
+    if (!decisions.isUndefined()) {
+        if (!decisions.isObject()) return fail(error, "Analysis decisions must be an object.");
+        const auto group = decisions.toObject().value("comparisonGroupId");
+        static const QRegularExpression groupPattern("^compatibility-v1:[0-9a-f]{64}$");
+        if (!group.isUndefined() && !group.isNull()
+            && (!group.isString() || group.toString().size() != 81 || !groupPattern.match(group.toString()).hasMatch()))
+            return fail(error, "Saved comparison group is malformed.");
+    }
     if (!validText(event.value(QStringLiteral("id")), ProjectLimits::maximumIdCharacters)
         || !validText(event.value(QStringLiteral("name")), ProjectLimits::maximumTemplateNameCharacters)
         || !validText(event.value(QStringLiteral("activeRunId")), ProjectLimits::maximumIdCharacters)
@@ -149,6 +159,12 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         for (const QJsonValue &sourceValue : telemetry) {
             const QJsonObject source = sourceValue.toObject();
             const QString sourceId = source.value(QStringLiteral("id")).toString();
+            if (source.contains("contentSha256")) {
+                static const QRegularExpression digestPattern("^[0-9a-f]{64}$");
+                if (!source.value("contentSha256").isString() || source.value("contentSha256").toString().size() != 64
+                    || !digestPattern.match(source.value("contentSha256").toString()).hasMatch())
+                    return fail(error, "Telemetry content identity is malformed.");
+            }
             if (!validText(source.value(QStringLiteral("id")), ProjectLimits::maximumIdCharacters)
                 || sourceIds.contains(sourceId) || !validReference(source.value(QStringLiteral("reference")))) {
                 return fail(error, QStringLiteral("Telemetry source identity or reference is invalid."));
@@ -161,6 +177,21 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         }
         if (!validConfiguration(run)) {
             return fail(error, QStringLiteral("Track configuration or its primary source binding is invalid."));
+        }
+        if (run.contains("trackInference")) {
+            const auto value = run.value("trackInference"); const auto inference = value.toObject();
+            static const QRegularExpression digest("^[0-9a-f]{64}$");
+            static const QRegularExpression gates("^gates-v1:[0-9a-f]{64}$");
+            const auto revision = inference.value("sourceRevision").toString();
+            const auto gate = inference.value("gateRevision");
+            if (!value.isObject() || !validText(inference.value("algorithm"), 128)
+                || revision.size() != 64 || !digest.match(revision).hasMatch()
+                || !(gate.isNull() || (gate.toString().size() == 73 && gates.match(gate.toString()).hasMatch()))
+                || !validText(inference.value("layoutId"), 128)
+                || inference.value("layoutId").toString().size() <= 13
+                || !inference.value("layoutId").toString().startsWith("gps-route-v1:")
+                || !QStringList{"clockwise", "counterclockwise"}.contains(inference.value("direction").toString()))
+                return fail(error, "Track inference provenance is malformed.");
         }
         if (sources.contains(QStringLiteral("video")) && !validReference(sources.value(QStringLiteral("video")))) {
             return fail(error, QStringLiteral("Run video reference is invalid."));
@@ -199,6 +230,17 @@ QByteArray EventProjectCodec::lapDerivationKey(const QJsonObject &run)
         {"runId", run.value("id")}, {"sourceId", run.value("primaryTelemetrySourceId")},
         {"sourceFingerprint", primaryFingerprint(run)}, {"trackConfiguration", trackConfiguration(run)}})
         .toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex();
+}
+
+QByteArray EventProjectCodec::sourceContentRevision(const QJsonObject &source)
+{
+    if (source.contains("contentSha256")) return source.value("contentSha256").toString().toLatin1();
+    const auto provenance = source.value("importProvenance").toObject();
+    const auto fingerprint = source.value("reference").toObject().value("fingerprint").toObject();
+    static const QRegularExpression digestPattern("^[0-9a-f]{64}$");
+    const auto digest = provenance.value("sha256").toString();
+    return !fingerprint.isEmpty() && provenance.value("fingerprint").toObject() == fingerprint
+        && digest.size() == 64 && digestPattern.match(digest).hasMatch() ? digest.toLatin1() : QByteArray{};
 }
 
 QJsonObject EventProjectCodec::editorProjection(const QJsonObject &project)
@@ -266,7 +308,8 @@ QStringList EventProjectCodec::referencedPaths(const QJsonObject &project, const
 
 QJsonObject EventProjectCodec::withEditorState(
     const QJsonObject &eventProject, QJsonObject editorProject,
-    const QString &previousProjectPath, const QString &targetProjectPath)
+    const QString &previousProjectPath, const QString &targetProjectPath,
+    const QByteArray &activeSourceRevision)
 {
     QJsonObject event = eventProject.value(QStringLiteral("event")).toObject();
     QJsonArray runs;
@@ -275,10 +318,20 @@ QJsonObject EventProjectCodec::withEditorState(
         const bool active = run.value(QStringLiteral("id")) == event.value(QStringLiteral("activeRunId"));
         QJsonObject sources = run.value(QStringLiteral("sources")).toObject();
         QJsonArray telemetry;
+        bool contentChanged = false;
         const QJsonObject editorSources = editorProject.value(QStringLiteral("sources")).toObject();
         for (const QJsonValue &sourceValue : sources.value(QStringLiteral("telemetry")).toArray()) {
             QJsonObject source = sourceValue.toObject();
             const bool primary = source.value(QStringLiteral("id")) == run.value(QStringLiteral("primaryTelemetrySourceId"));
+            const auto previousRevision = sourceContentRevision(source);
+            if (active && primary && !activeSourceRevision.isEmpty()) {
+                contentChanged = !previousRevision.isEmpty() && previousRevision != activeSourceRevision;
+                // Loading a legacy document is not a schema migration. Record a
+                // new binding only on replacement; import already records SHA-256.
+                if (contentChanged || source.value("reference").toObject().value("fingerprint")
+                    != editorSources.value("telemetry").toObject().value("fingerprint"))
+                    source.insert("contentSha256", QString::fromLatin1(activeSourceRevision));
+            }
             source.insert(QStringLiteral("reference"), active && primary
                 ? editorSources.value(QStringLiteral("telemetry")).toObject()
                 : rebaseReference(source.value(QStringLiteral("reference")).toObject(), previousProjectPath, targetProjectPath));
@@ -294,7 +347,7 @@ QJsonObject EventProjectCodec::withEditorState(
         }
         const auto previousFingerprint = primaryFingerprint(run);
         run.insert(QStringLiteral("sources"), sources);
-        if (primaryFingerprint(run) != previousFingerprint) {
+        if (contentChanged || primaryFingerprint(run) != previousFingerprint) {
             // A replacement source cannot inherit asserted layout/gate metadata.
             // A same-content relink/Save As changes paths only and retains it.
             run.insert("trackConfiguration", unknownTrackConfiguration(

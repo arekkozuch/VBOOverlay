@@ -270,7 +270,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
             setStatus(QStringLiteral("Could not parse telemetry: %1\n%2").arg(result.path, result.error));
             return;
         }
-        if (ProjectSourceReferenceCodec::compareFingerprints(
+        if (result.contentMismatch || ProjectSourceReferenceCodec::compareFingerprints(
                 result.expectedFingerprint, result.fingerprint)
             == SourceFingerprintMatch::Mismatch) {
             m_vboLoadState = QStringLiteral("mismatch");
@@ -851,7 +851,11 @@ quint64 AppController::beginSourceReplacement(const bool replacingVideo)
 {
     const bool restartOther = (replacingVideo ? m_vboLoadState : m_videoLoadState) == QStringLiteral("loading");
     const auto request = replacingVideo ? m_vboLoadRequest : m_videoLoadRequest;
-    const quint64 generation = beginSourceGeneration();
+    if (!replacingVideo) {
+        ++m_outingRunGenerations[activeRunId()];
+        invalidateOutingLapDetail();
+    }
+    const quint64 generation = beginSourceGeneration(true);
     if (restartOther && !request.path.isEmpty()) {
         if (replacingVideo) startVboLoad(request.path, generation, request.markDocumentDirty,
                                         request.expectedFingerprint, request.relink);
@@ -861,8 +865,15 @@ quint64 AppController::beginSourceReplacement(const bool replacingVideo)
     return generation;
 }
 
-quint64 AppController::beginSourceGeneration()
+quint64 AppController::beginSourceGeneration(const bool preserveOuting)
 {
+    if (!preserveOuting) {
+        ++m_outingDocumentGeneration;
+        m_outingRunCache.clear();
+        m_outingInferredGroups = {};
+        m_outingRunGenerations.clear();
+        closeOutingLap();
+    }
     ++m_sourceGeneration;
     if (!m_sourceMismatchType.isEmpty()) {
         m_sourceMismatchType.clear();
@@ -872,7 +883,7 @@ quint64 AppController::beginSourceGeneration()
     }
     const bool replacing = m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
         || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning();
-    cancelSourceJobs();
+    cancelSourceJobs(!preserveOuting);
     if (replacing) AppLog::info(QStringLiteral("Previous source load cancelled after replacement"));
     if (m_videoProbeWatcher.isRunning()) {
         m_videoLoadState = QStringLiteral("idle");
@@ -885,10 +896,11 @@ quint64 AppController::beginSourceGeneration()
     return m_sourceGeneration;
 }
 
-void AppController::cancelSourceJobs()
+void AppController::cancelSourceJobs(const bool cancelOutingDetail)
 {
+    if (cancelOutingDetail && m_outingLapDetailCancellation) m_outingLapDetailCancellation->store(true);
     for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
-                                     m_projectLoadCancellation, m_syncCancellation, m_outingLapCancellation, m_outingLapDetailCancellation}) {
+                                     m_projectLoadCancellation, m_syncCancellation, m_outingLapCancellation}) {
         if (cancellation) {
             cancellation->store(true);
         }
@@ -946,8 +958,17 @@ void AppController::startVboLoad(
     m_vboLoadMarksDocumentDirty = markDocumentDirty;
     m_vboLoadState = QStringLiteral("loading");
     emit sourceLoadStateChanged();
+    QByteArray expectedRevision;
+    if (!expectedFingerprint.isEmpty()) {
+        for (const auto &value : outingLapSources()) {
+            const auto source = value.toObject();
+            if (source.value("runId").toString() == activeRunId()
+                && source.value("reference").toObject().value("fingerprint").toObject() == expectedFingerprint)
+                expectedRevision = source.value("expectedRevision").toString().toLatin1();
+        }
+    }
     m_vboLoadWatcher.setFuture(QtConcurrent::run(
-        [path, generation, cancellation, expectedFingerprint = std::move(expectedFingerprint), relink] {
+        [path, generation, cancellation, expectedRevision, expectedFingerprint = std::move(expectedFingerprint), relink] {
         VboLoadResult result;
         result.path = path;
         result.generation = generation;
@@ -957,6 +978,7 @@ void AppController::startVboLoad(
             const auto sourceSize = QFileInfo(path).size();
             result.contentRevision = TelemetrySource::contentSha256(path, sourceSize,
                 [cancellation] { return cancellation->load(); }).toHex();
+            result.contentMismatch = !expectedRevision.isEmpty() && result.contentRevision != expectedRevision;
             result.session = TelemetrySource::load(
                 path, [cancellation] { return cancellation->load(); });
             if (cancellation->load()) {
@@ -1027,6 +1049,21 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     m_syncCandidate.clear();
     m_previewRenderContext.setSession(m_session.get());
     m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
+    if (markDocumentDirty && EventProjectCodec::isEvent(m_projectTemplate)) {
+        // Replacement clears asserted layout/direction, then records the gates
+        // actually verified in the new source. This enables fresh inference.
+        auto project = currentProjectObject(); auto event = project.value("event").toObject();
+        auto runs = event.value("runs").toArray();
+        for (qsizetype i = 0; i < runs.size(); ++i) {
+            auto run = runs[i].toObject();
+            if (run.value("id").toString() != activeRunId()) continue;
+            auto config = EventProjectCodec::trackConfiguration(run);
+            const auto gates = timingGateRevision(result.session);
+            config.insert("gateRevision", gates.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(gates));
+            run.insert("trackConfiguration", config); runs[i] = run;
+        }
+        event.insert("runs", runs); project.insert("event", event); m_projectTemplate = project;
+    }
     refreshLapExclusionPolicy();
     reconcileAnalysisChannels();
     emit telemetryChanged();
@@ -1480,7 +1517,7 @@ bool AppController::beginProjectLoad(
             channels.append(value.toString());
         }
     }
-    const quint64 generation = beginSourceGeneration();
+    const quint64 generation = beginSourceGeneration(runSelection);
     ProjectLoadResult result;
     result.success = true;
     result.projectPath = std::move(projectPath);
@@ -1678,9 +1715,11 @@ QJsonObject AppController::currentProjectObject(
     if (!project.contains("exportSettings")) {
         project.insert("exportSettings", QJsonObject{{"quality", "high"}});
     }
-    return eventProject
-        ? EventProjectCodec::withEditorState(m_projectTemplate, project, m_documentState.projectPath(), targetProjectPath)
+    project = eventProject
+        ? EventProjectCodec::withEditorState(m_projectTemplate, project, m_documentState.projectPath(), targetProjectPath,
+            m_vboLoadState == "ready" ? m_loadedSourceRevision : QByteArray{})
         : project;
+    return savedRevision ? projectWithOutingInference(project) : project;
 }
 
 bool AppController::saveProject(const QUrl &url)

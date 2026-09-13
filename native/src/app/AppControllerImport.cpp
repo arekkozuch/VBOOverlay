@@ -58,6 +58,7 @@ QSet<QString> existingContent(const QJsonObject &project)
             const auto reference = source.value("reference").toObject();
             // A relink/replacement must not inherit the original content identity.
             if (provenance.value("sha256").toString().size() == 64
+                && EventProjectCodec::sourceContentRevision(source) == provenance.value("sha256").toString().toLatin1()
                 && provenance.value("fingerprint").isObject()
                 && provenance.value("fingerprint") == reference.value("fingerprint")) {
                 result.insert(provenance.value("format").toString() + ':' + provenance.value("sha256").toString());
@@ -371,6 +372,7 @@ bool AppController::confirmBatchImport(const QString &name, const bool append, c
             const auto reference = ProjectSourceReferenceCodec::toJson(
                 { {}, source.sourcePath, fingerprint }, append ? m_documentState.projectPath() : QString{});
             sources.append(QJsonObject{{"id", sourceId}, {"reference", reference},
+                {"contentSha256", QString::fromLatin1(source.contentSha256.toHex())},
                 {"importProvenance", QJsonObject{{"sha256", QString::fromLatin1(source.contentSha256.toHex())},
                     {"format", source.format}, {"fingerprint", fingerprint}}}});
         }
