@@ -3,8 +3,10 @@
 ## Engineering rules
 
 - Follow the [task delivery workflow](docs/development-workflow.md): one active Jira
-  task, a focused PR, passing native CI, integration and a verified `main` before
-  marking implementation complete. All Jira content must be in English.
+  task, local Codex implementation, a focused commit and recorded local build/test
+  evidence before marking implementation complete. Cloud CI is paused; do not
+  dispatch, rerun or restore it without explicit owner authorization.
+  All Jira content must be in English.
 - Treat Qt 6, C++, and QML as the only production application architecture.
 - Preserve the native `.fetproject` schema and behavioral test fixtures.
 - Use C++20, Qt Test, CMake targets, compiler warnings, and explicit ownership in native code.
@@ -88,8 +90,9 @@
   not the media-duration boundary after it.
 - Current owner direction (2026-09-13): focus on macOS only. Do not start Windows builds,
   tests, packaging or installer validation until the owner explicitly resumes them. This
-  supersedes older dual-platform gates in Jira and historical documentation. Keep macOS
-  arm64 Debug and Release CI green, run the applicable local gate, and report real-media
+  supersedes older dual-platform gates in Jira and historical documentation. The owner
+  subsequently paused all Cloud CI due to quota limits. Run the applicable local
+  macOS build/test gate, and report real-media
   and hardware-encoder validation separately. An explicit
   cloud hardware-test skip must not disable QRhi rendering assertions or software FFmpeg integrations.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke

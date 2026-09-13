@@ -1,9 +1,8 @@
 name: Native CI
 
+# Cloud CI paused by owner on 2026-09-13: quota exhausted.
+# Restore triggers and the job guard only after explicit owner authorization.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -15,6 +14,7 @@ concurrency:
 
 jobs:
   build-and-test:
+    if: ${{ false }}
     name: ${{ matrix.name }} / ${{ matrix.build-type }} / Qt 6.8.3
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40

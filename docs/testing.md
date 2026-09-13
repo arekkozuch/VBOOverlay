@@ -7,7 +7,7 @@ cmake --build build-native --parallel
 ctest --test-dir build-native --output-on-failure
 ```
 
-Run the local gate appropriate to the change before claiming a behavior works. Cloud CI supplements this gate as described below.
+Run the local gate appropriate to the change before claiming a behavior works. Cloud CI is paused by owner direction; do not run it. Follow the current [local task workflow](development-workflow.md).
 
 The native suite assigns a unique test application identity and checks a default `QSettings` round trip before controller tests run. It retains the platform's native settings backend, including the Windows registry, and clears that test namespace afterward. Recovery cleanup failures use the existing injected deletion operation so stale-snapshot and Save As assertions run on every platform; these checks do not replace native Windows ACL-denial coverage. File-content checks close their read handles before attempting atomic replacement.
 
@@ -26,7 +26,12 @@ Windows naming edits are not Windows execution evidence.
 
 ## Cloud CI
 
-[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Two macOS arm64 jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows builds, tests and installer validation are paused by owner direction on 13 September 2026; resume them only when explicitly requested. Earlier Windows results below are historical. See [Windows installer](windows-installer.md).
+**Paused by owner on 13 September 2026 due to quota limits.** Push/PR triggers
+are removed and manual jobs are disabled. All descriptions and task delivery
+records below describe historical coverage, not permission to start cloud jobs.
+Use the [local task workflow](development-workflow.md) for new work.
+
+Before the pause, [Native CI](../.github/workflows/build.yml) ran on pull requests, pushes to `main`, and manual dispatch. Two macOS arm64 jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows builds, tests and installer validation are paused by owner direction on 13 September 2026; resume them only when explicitly requested. Earlier Windows results below are historical. See [Windows installer](windows-installer.md).
 
 | Job | Renderer | Toolchain |
 | --- | --- | --- |
