@@ -62,7 +62,7 @@ public:
         int maximumPoints) const;
 };
 
-[[nodiscard]] double videoToTelemetryTime(double videoTime, const SyncTransform &transform);
+[[nodiscard]] std::optional<double> videoToTelemetryTime(double videoTime, const SyncTransform &transform);
 [[nodiscard]] std::optional<double> telemetryToVideoTime(
     double telemetryTime, const SyncTransform &transform);
 [[nodiscard]] double telemetryGapThreshold(

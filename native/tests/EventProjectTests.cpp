@@ -10,6 +10,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <functional>
+#include <limits>
+#include "telemetry/TelemetrySession.h"
 
 using namespace FlappedEar;
 namespace Fixture = EventProjectFixture;
@@ -18,6 +20,7 @@ class EventProjectTests final : public QObject {
     Q_OBJECT
 private slots:
     void acceptsLegacyAndEventDocuments();
+    void preservesFiniteExtremeSyncForGuardedConsumers();
     void rejectsMalformedEvents_data();
     void rejectsMalformedEvents();
     void boundsRunsAndSources();
@@ -45,6 +48,25 @@ void EventProjectTests::acceptsLegacyAndEventDocuments()
     QVERIFY(example.open(QIODevice::ReadOnly));
     const auto sample = QJsonDocument::fromJson(example.readAll()).object();
     QVERIFY2(ProjectLimits::validateProject(sample, &error), qPrintable(error));
+}
+
+void EventProjectTests::preservesFiniteExtremeSyncForGuardedConsumers()
+{
+    auto project = Fixture::project();
+    auto event = project.value("event").toObject();
+    auto runs = event.value("runs").toArray();
+    auto run = runs[0].toObject();
+    run.insert("sync", QJsonObject{{"offset", 0.0}, {"timeScale", std::numeric_limits<double>::max()}});
+    runs[0] = run; event.insert("runs", runs); project.insert("event", event);
+    QString error;
+    QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+    const auto reopened = QJsonDocument::fromJson(QJsonDocument(project).toJson()).object();
+    QVERIFY2(ProjectLimits::validateProject(reopened, &error), qPrintable(error));
+    const auto sync = EventProjectCodec::editorProjection(reopened).value("sync").toObject();
+    QCOMPARE(sync.value("timeScale").toDouble(), std::numeric_limits<double>::max());
+    const SyncTransform transform{sync.value("offset").toDouble(), sync.value("timeScale").toDouble()};
+    QVERIFY(!videoToTelemetryTime(2, transform));
+    QCOMPARE(videoToTelemetryTime(0, transform).value(), 0.0);
 }
 
 void EventProjectTests::rejectsMalformedEvents_data()

@@ -181,6 +181,14 @@ private slots:
     void rejectsOutOfFileGpmfPackets();
     void boundsGpmfDepthAndRecordCount();
     void normalizesGpmfTimestamps();
+    void boundsTimeTransforms_data();
+    void boundsTimeTransforms();
+    void exposesNoDataForOverflowingTransforms();
+    void rejectsUnsafeSynchronizationInputs_data();
+    void rejectsUnsafeSynchronizationInputs();
+    void preservesConfirmedTransformForAmbiguousResult();
+    void rejectsInvalidAutomaticCandidates();
+    void keepsExtremeFiniteSyncSignalsBounded();
     void synchronizesGpsSpeed();
     void cancelsSynchronizationDeterministically();
     void reportsAmbiguousGpsSpeed();
@@ -1832,7 +1840,7 @@ void TelemetryTests::interpolatesByTime()
     QVERIFY(!session.valueAt("speed", -1));
     QVERIFY(!session.valueAt("speed", 9));
     QVERIFY(!session.valueAt("rpm", 1));
-    QCOMPARE(videoToTelemetryTime(10, {2.5, 1.01}), 12.6);
+    QCOMPARE(videoToTelemetryTime(10, {2.5, 1.01}).value(), 12.6);
 }
 
 void TelemetryTests::preservesMissingTelemetryGaps()
@@ -3831,7 +3839,7 @@ void TelemetryTests::rendersTelemetryAtExplicitTime()
     context.setSession(&session);
     context.setSyncTransform({2.0, 1.5});
     context.setTime(4.0);
-    QCOMPARE(context.telemetryTime(), 8.0);
+    QCOMPARE(context.telemetryTime().toDouble(), 8.0);
     QCOMPARE(context.telemetryValue("speed").toDouble(), 80.0);
     context.setTime(2.0);
     QCOMPARE(context.telemetryValue("speed").toDouble(), 50.0);
@@ -6930,10 +6938,10 @@ void TelemetryTests::preservesAbsoluteExportTimestamps()
     context.setSession(&session);
     context.setSyncTransform(sync);
     context.setTime(ExportEngine::framePresentationTime(120.0, 0, rate));
-    QVERIFY(qAbs(context.telemetryTime() - 210.203) < 0.000001);
+    QVERIFY(qAbs(context.telemetryTime().toDouble() - 210.203) < 0.000001);
     QVERIFY(qAbs(context.telemetryValue("speed").toDouble() - 73.4) < 0.001);
     context.setTime(125.0);
-    QVERIFY(qAbs(context.telemetryTime() - 215.203) < 0.000001);
+    QVERIFY(qAbs(context.telemetryTime().toDouble() - 215.203) < 0.000001);
     QVERIFY(qAbs(context.telemetryValue("rpm").toDouble() - 5270.0) < 0.001);
 }
 
@@ -7602,6 +7610,201 @@ void TelemetryTests::normalizesGpmfTimestamps()
     QCOMPARE(speed.timestamps, QVector<double>({1.0, 2.0}));
     QVERIFY(speed.timestamps[1] > speed.timestamps[0]);
     QVERIFY(qAbs(speed.values[0] - 7.2F) < 0.001F);
+}
+
+void TelemetryTests::boundsTimeTransforms_data()
+{
+    QTest::addColumn<double>("time");
+    QTest::addColumn<double>("offset");
+    QTest::addColumn<double>("scale");
+    QTest::addColumn<bool>("forwardValid");
+    QTest::addColumn<bool>("inverseValid");
+    const double maximum = std::numeric_limits<double>::max();
+    const double tiny = std::numeric_limits<double>::denorm_min();
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    QTest::newRow("ordinary") << 10.0 << 2.5 << 1.01 << true << true;
+    QTest::newRow("negative-offset") << 10.0 << -20.0 << 2.0 << true << true;
+    QTest::newRow("large-finite") << maximum / 4 << maximum / 4 << 2.0 << true << true;
+    QTest::newRow("product-overflow") << 2.0 << 0.0 << maximum << false << true;
+    QTest::newRow("sum-overflow") << maximum << maximum << 1.0 << false << true;
+    QTest::newRow("inverse-subtraction-overflow") << maximum << -maximum << 1.0 << true << false;
+    QTest::newRow("inverse-division-overflow") << 1.0 << 0.0 << tiny << true << false;
+    QTest::newRow("tiny-scale-zero-time") << 0.0 << 0.0 << tiny << true << true;
+    QTest::newRow("zero-scale") << 1.0 << 0.0 << 0.0 << false << false;
+    QTest::newRow("negative-scale") << 1.0 << 0.0 << -1.0 << false << false;
+    QTest::newRow("infinite-time") << inf << 0.0 << 1.0 << false << false;
+    QTest::newRow("nan-time") << nan << 0.0 << 1.0 << false << false;
+    QTest::newRow("infinite-offset") << 1.0 << inf << 1.0 << false << false;
+    QTest::newRow("nan-offset") << 1.0 << nan << 1.0 << false << false;
+    QTest::newRow("infinite-scale") << 1.0 << 0.0 << inf << false << false;
+    QTest::newRow("nan-scale") << 1.0 << 0.0 << nan << false << false;
+}
+
+void TelemetryTests::boundsTimeTransforms()
+{
+    QFETCH(double, time); QFETCH(double, offset); QFETCH(double, scale);
+    QFETCH(bool, forwardValid); QFETCH(bool, inverseValid);
+    const auto forward = videoToTelemetryTime(time, {offset, scale});
+    const auto inverse = telemetryToVideoTime(time, {offset, scale});
+    QCOMPARE(forward.has_value(), forwardValid);
+    QCOMPARE(inverse.has_value(), inverseValid);
+    if (forward) { QVERIFY(std::isfinite(*forward)); QCOMPARE(*forward, time * scale + offset); }
+    if (inverse) { QVERIFY(std::isfinite(*inverse)); QCOMPARE(*inverse, (time - offset) / scale); }
+}
+
+void TelemetryTests::exposesNoDataForOverflowingTransforms()
+{
+    const auto session = VboParser::parse(
+        u"[header]\ncoordinate units = degrees\n[column names]\ntime speed latitude longitude\n[data]\n0 0 0 0\n2 20 .0002 .0002\n3 30 .0003 .0003\n10 100 .001 .001\n");
+    const auto geometry = buildTrackGeometry(session);
+    const auto laps = deriveSourceLapSession(VboParser::parse(QString::fromUtf8(EventProjectFixture::lapsVbo())));
+    QVERIFY(laps.status == LapSessionStatus::Available);
+    TelemetryRenderContext context;
+    context.setSession(&session);
+    context.setTrackGeometry(&geometry);
+    context.setLapSession(laps);
+    context.setSyncTransform({0, std::numeric_limits<double>::max()});
+    context.setTime(2);
+    // This exact context is shared by preview and offscreen export rendering.
+    QVERIFY(!context.telemetryTime().isValid());
+    QVERIFY(!context.telemetryValue("speed").isValid());
+    QCOMPARE(context.valueText("speed"), QString("—"));
+    QVERIFY(context.currentTrackPoint().isEmpty());
+    QVERIFY(!context.lapTiming().value("available").toBool());
+    context.setSyncTransform({0, 1});
+    QCOMPARE(context.telemetryTime().toDouble(), 2.0);
+    QVERIFY(context.telemetryValue("speed").isValid());
+    QVERIFY(!context.currentTrackPoint().isEmpty());
+
+    QTemporaryDir directory;
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.m_session = std::make_unique<TelemetrySession>(session);
+    controller.setTimeScale(std::numeric_limits<double>::max());
+    controller.m_playbackTime = 2;
+    QVERIFY(!controller.telemetryValue("speed").isValid());
+    QCOMPARE(controller.valueText("speed"), QString("—"));
+    QVERIFY(controller.telemetrySeries("speed", 2, 3, 100).isEmpty());
+    controller.setTimeScale(1);
+    QCOMPARE(controller.telemetryValue("speed").toDouble(), 20.0);
+    QVERIFY(!controller.telemetrySeries("speed", 2, 3, 100).isEmpty());
+}
+
+void TelemetryTests::rejectsUnsafeSynchronizationInputs_data()
+{
+    QTest::addColumn<int>("fault");
+    const char *names[] = {"empty", "mismatched", "nan-time", "infinite-time", "duplicate-time",
+        "backward-time", "stalled-grid", "overflowing-difference", "sample-grid-budget",
+        "offset-grid-budget", "pair-work-budget", "source-sample-budget"};
+    for (int i = 0; i < 12; ++i) QTest::newRow(names[i]) << i;
+}
+
+void TelemetryTests::rejectsUnsafeSynchronizationInputs()
+{
+    QFETCH(int, fault);
+    auto video = speedSession(0, 30, 0);
+    auto telemetry = video;
+    auto &a = video.channels["speed"];
+    auto &b = telemetry.channels["speed"];
+    if (fault == 0) { a.timestamps.clear(); a.values.clear(); }
+    if (fault == 1) a.values.removeLast();
+    if (fault == 2) a.timestamps[1] = std::numeric_limits<double>::quiet_NaN();
+    if (fault == 3) a.timestamps[1] = std::numeric_limits<double>::infinity();
+    if (fault == 4) a.timestamps[1] = a.timestamps[0];
+    if (fault == 5) a.timestamps[1] = -1;
+    if (fault >= 6) {
+        a.timestamps.resize(20); a.values.resize(20);
+        b.timestamps.resize(20); b.values.resize(20);
+        double negative = -std::numeric_limits<double>::max();
+        double positive = std::numeric_limits<double>::max() * .9;
+        for (int i = 0; i < 20; ++i) {
+            a.timestamps[i] = b.timestamps[i] = i;
+            if (fault == 6) a.timestamps[i] = b.timestamps[i] = 1e16 + i * 2.0;
+            if (fault == 7) {
+                a.timestamps[i] = negative; b.timestamps[i] = positive;
+                negative = std::nextafter(negative, 0.0);
+                positive = std::nextafter(positive, std::numeric_limits<double>::infinity());
+            }
+            if (fault == 8) a.timestamps[i] = b.timestamps[i] = i * 100000.0;
+            if (fault == 9) b.timestamps[i] = i * 100000.0;
+            if (fault == 10) { a.timestamps[i] = i * 1000.0; b.timestamps[i] = i * 1500.0; }
+        }
+        if (fault == 11) {
+            a.timestamps.resize(kMaximumSyncSignalSamples + 1);
+            a.values.resize(kMaximumSyncSignalSamples + 1);
+        }
+    }
+    int checks = 0;
+    bool rejected = false;
+    try {
+        (void) TelemetrySyncEngine::synchronize(video, telemetry, [&] { return ++checks > 1000; });
+    } catch (const OperationCancelled &) {
+        QFAIL("Unsafe input reached the cancellation watchdog instead of a bounded error.");
+    } catch (const std::runtime_error &error) {
+        rejected = true;
+        QVERIFY(QString::fromUtf8(error.what()).contains("Synchronization"));
+    }
+    QVERIFY(rejected);
+    QVERIFY(checks <= 1000);
+}
+
+void TelemetryTests::preservesConfirmedTransformForAmbiguousResult()
+{
+    QTemporaryDir directory;
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.setSyncOffset(7.25);
+    controller.setTimeScale(1.003);
+    auto video = speedSession(0, 30, 0);
+    auto telemetry = speedSession(0, 35, 0);
+    std::fill(video.channels["speed"].values.begin(), video.channels["speed"].values.end(), 42.0F);
+    std::fill(telemetry.channels["speed"].values.begin(), telemetry.channels["speed"].values.end(), 42.0F);
+    AppController::AutoSyncResult result;
+    result.success = true;
+    result.generation = controller.m_sourceGeneration;
+    result.syncRevision = controller.m_syncRevision;
+    result.candidate = TelemetrySyncEngine::synchronize(video, telemetry);
+    QVERIFY(!shouldAutoApplySyncCandidate(result.candidate));
+    QPromise<AppController::AutoSyncResult> promise;
+    promise.start();
+    controller.m_syncWatcher.setFuture(promise.future());
+    QSignalSpy finished(&controller, &AppController::syncingChanged);
+    promise.addResult(result); promise.finish();
+    QTRY_VERIFY(!finished.isEmpty());
+    QCOMPARE(controller.syncOffset(), 7.25);
+    QCOMPARE(controller.timeScale(), 1.003);
+    QVERIFY(!controller.syncCandidate().isEmpty());
+}
+
+void TelemetryTests::rejectsInvalidAutomaticCandidates()
+{
+    SyncCandidate candidate;
+    candidate.confidence = 1;
+    for (const double confidence : {std::numeric_limits<double>::quiet_NaN(),
+             std::numeric_limits<double>::infinity(), -1.0, 1.01}) {
+        candidate.confidence = confidence;
+        QVERIFY(!shouldAutoApplySyncCandidate(candidate));
+    }
+    candidate.confidence = 1;
+    candidate.offset = std::numeric_limits<double>::infinity();
+    QVERIFY(!shouldAutoApplySyncCandidate(candidate));
+    candidate.offset = 0;
+    for (const double scale : {0.0, -1.0, std::numeric_limits<double>::infinity()}) {
+        candidate.timeScale = scale;
+        QVERIFY(!shouldAutoApplySyncCandidate(candidate));
+    }
+}
+
+void TelemetryTests::keepsExtremeFiniteSyncSignalsBounded()
+{
+    auto session = speedSession(0, 30, 0);
+    auto &values = session.channels["speed"].values;
+    for (qsizetype i = 0; i < values.size(); ++i)
+        values[i] = (i % 2 ? 1.0F : -1.0F) * std::numeric_limits<float>::max();
+    const auto candidate = TelemetrySyncEngine::synchronize(session, session);
+    QVERIFY(std::isfinite(candidate.offset));
+    QVERIFY(std::isfinite(candidate.confidence));
+    QVERIFY(candidate.confidence >= 0 && candidate.confidence <= 1);
+    QVERIFY(candidate.diagnostics.correlation > .99);
 }
 
 void TelemetryTests::synchronizesGpsSpeed()

@@ -38,7 +38,7 @@ environments, not physical acceptance of this baseline.
 - [ ] Validate shared track-progress correspondence at nearby crossings for A/B comparison ([KAN-32](https://kozucharkadiusz.atlassian.net/browse/KAN-32)).
 - [x] Replace VBO bulk line/field splitting with bounded, cancellable scanning (KAN-14; exact integration evidence in Jira).
 - [x] Validate finite derived VBO timestamps and downstream conversion bounds (KAN-15; exact integration evidence in Jira).
-- [ ] Validate synchronization bounds (KAN-17 in the delivery ledger).
+- [x] Guard synchronization transforms and bound auto-sync search grids/work (KAN-17; exact PR/main macOS CI evidence in Jira).
 - [x] Supervise Unix descendants after leader exit and stop remaining writers before commit/cleanup; retain owned artifacts if shutdown is unconfirmed ([KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13), PR #14; exact CI/integration evidence is recorded in the task).
 - [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (KAN-5, PR #12 merged at `7138fbd`; PR/main CI passed).
 - [x] Resolve VBO coordinate units from explicit evidence, with shared sample/gate conversion and equator/prime-meridian regressions ([KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16); exact integration evidence in Jira).

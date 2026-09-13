@@ -448,3 +448,29 @@ Release package/startup results for the PR and merged main are recorded in
 Debug and Release are in scope under the owner's current platform instruction.
 Historical private RCZ/VBO evidence above is not a new private-media or hardware
 acceptance run.
+
+
+### KAN-17: synchronization transform and search bounds
+
+Thirty-three new Qt cases cover finite extreme transforms, forward multiplication/
+addition overflow, inverse subtraction/division overflow, non-finite inputs,
+zero/negative/tiny scales, and restoration of ordinary no-gap lookup. The shared
+preview/offscreen context and controller analysis/value APIs expose no data on
+overflow and recover when the transform is corrected. An event JSON round trip
+preserves a finite extreme scale while the queried overflowing time is unavailable.
+
+Auto-sync cases cover empty/mismatched channels, non-finite/non-monotonic times,
+non-advancing numeric grids, overflowing differences and all source/grid/work
+budgets. A cancellation watchdog prevents a stalled implementation from hanging
+the regression; success requires an explicit error before that watchdog fires.
+A real ambiguous engine result delivered through the controller's async watcher
+preserves a confirmed non-default offset and scale. Invalid confidence/transform
+candidates cannot auto-apply. Existing deterministic offset, periodic ambiguity,
+short-overlap, cancellation, timing-edit revision, rendering and software-export
+tests remain in the complete native suite.
+
+The [consumer trace and numeric contract](telemetry-semantics.md#synchronization-transforms-and-numeric-bounds)
+records which existing guards needed no change. Exact PR and main macOS arm64
+Debug/Release CI evidence is recorded in [KAN-17](https://kozucharkadiusz.atlassian.net/browse/KAN-17).
+The coordinator lacks CMake/CTest/Qt; native validation runs in CI. Windows remains
+paused, and private recordings/physical hardware require separate acceptance.
