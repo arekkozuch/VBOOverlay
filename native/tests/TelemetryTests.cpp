@@ -1428,7 +1428,7 @@ void TelemetryTests::lapReferencesDetectUnsampledContentChanges()
     auto bytes = EventProjectFixture::lapsVbo() + "[comments]\n";
     for (int i = 0; i < 512; ++i) bytes += QByteArray(1023, 'a') + '\n';
     const auto path = directory.filePath("large.vbo"); QVERIFY(writeBytes(path, bytes));
-    const auto sampled = ProjectSourceReferenceCodec::sampledDigest(path);
+    const auto sampled = ProjectSourceReferenceCodec::telemetryFingerprint(path, TelemetrySource::load(path));
     const auto full = TelemetrySource::contentSha256(path, bytes.size());
     QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(TelemetrySource::contentSha256(path, bytes.size(), [] { return true; })));
     QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(TelemetrySource::contentSha256(path, 128LL * 1024 * 1024 + 1)));
@@ -1439,7 +1439,7 @@ void TelemetryTests::lapReferencesDetectUnsampledContentChanges()
     const auto reference = controller.outingLaps()[1].toMap().value("reference").toMap();
     QCOMPARE(reference.value("sourceRevision").toString().toLatin1(), full.toHex());
     bytes[100000] = 'b'; QVERIFY(writeBytes(path, bytes));
-    QCOMPARE(ProjectSourceReferenceCodec::sampledDigest(path), sampled);
+    QCOMPARE(ProjectSourceReferenceCodec::telemetryFingerprint(path, TelemetrySource::load(path)), sampled);
     QVERIFY(TelemetrySource::contentSha256(path, bytes.size()) != full);
     QVERIFY(controller.selectOutingLapReference(reference));
     QTRY_COMPARE(controller.outingLapDetailState(), QString("error"));
