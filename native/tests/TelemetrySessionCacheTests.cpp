@@ -69,7 +69,7 @@ void TelemetrySessionCacheTests::chargesPinnedSessionsAfterEviction()
     auto b = cache.load("b", {}, decode, verified);
     auto c = cache.load("c", {}, decode, verified); // A is evicted but remains pinned.
     QCOMPARE(cache.usedBytes(), cache.limitBytes());
-    QVERIFY_EXCEPTION_THROWN(cache.load("d", {}, decode, verified), ResourceLimitError);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(cache.load("d", {}, decode, verified)));
     QCOMPARE(decodes, 3); QVERIFY(a->valueAt("speed", 1).has_value());
     a.reset(); QCOMPARE(cache.usedBytes(), 2 * cost);
     auto d = cache.load("d", {}, decode, verified);
@@ -85,25 +85,25 @@ void TelemetrySessionCacheTests::rejectsOversizedInvalidAndCancelledResults()
     const auto cost = telemetrySessionMemoryBytes(sample());
     TelemetrySessionCache small(cost - 1);
     const auto decode = [](qint64) { return sample(); };
-    QVERIFY_EXCEPTION_THROWN(small.load("a", {}, decode, verified), ResourceLimitError);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(small.load("a", {}, decode, verified)));
     QCOMPARE(small.usedBytes(), 0);
     TelemetrySessionCache cache;
     int decodes = 0;
     const auto counted = [&](qint64) { ++decodes; return sample(); };
     const auto changed = [](const TelemetrySession &) { throw std::runtime_error("Source changed"); };
-    QVERIFY_EXCEPTION_THROWN(cache.load("a", {}, counted, changed), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, static_cast<void>(cache.load("a", {}, counted, changed)));
     QCOMPARE(cache.usedBytes(), 0); // Failed post-read verification never populates the cache.
     auto a = cache.load("a", {}, counted, verified); QCOMPARE(decodes, 2);
-    QVERIFY_EXCEPTION_THROWN(cache.load("a", {}, counted, changed), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, static_cast<void>(cache.load("a", {}, counted, changed)));
     const auto b = cache.load("a", {}, counted, verified);
     QVERIFY(a != b); QCOMPARE(decodes, 3); // Failed hit validation evicts its entry too.
     a.reset();
     const auto retained = cache.usedBytes();
     bool cancelled = false;
-    QVERIFY_EXCEPTION_THROWN(cache.load("cancelled", [&] { return cancelled; },
-        [&](qint64) { cancelled = true; return sample(); }, verified), OperationCancelled);
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(cache.load("cancelled", [&] { return cancelled; },
+        [&](qint64) { cancelled = true; return sample(); }, verified)));
     QCOMPARE(cache.usedBytes(), retained);
-    QVERIFY_EXCEPTION_THROWN(cache.load("cancelled", [] { return true; }, counted, verified), OperationCancelled);
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(cache.load("cancelled", [] { return true; }, counted, verified)));
     QCOMPARE(decodes, 3);
 }
 
@@ -141,14 +141,14 @@ void TelemetrySessionCacheTests::boundsVboSamplesAndPreservesMalformedInputPolic
     QCOMPARE(bounded.sampleCount, original.sampleCount);
     QCOMPARE(bounded.channels["velocity"].values, original.channels["velocity"].values);
     QCOMPARE(bounded.warnings, original.warnings);
-    QVERIFY_EXCEPTION_THROWN(VboParser::parse(text, {}, 1024), ResourceLimitError);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(VboParser::parse(text, {}, 1024)));
     QString wide = "[column names]\ntime";
     for (int i = 0; i < 200; ++i) wide += QString(" channel%1").arg(i);
     wide += "\n[data]\n";
     for (int i = 0; i < 1000; ++i) wide += QString::number(i) + QString(" 1").repeated(200) + "\n";
-    QVERIFY_EXCEPTION_THROWN(VboParser::parse(wide, {}, 2 * 1024 * 1024), ResourceLimitError);
-    QVERIFY_EXCEPTION_THROWN(VboParser::parse(QString("[data]\n0 1\n"), {}, 2 * 1024 * 1024), VboParseError);
-    QVERIFY_EXCEPTION_THROWN(VboParser::parse(text, [] { return true; }, 2 * 1024 * 1024), OperationCancelled);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(VboParser::parse(wide, {}, 2 * 1024 * 1024)));
+    QVERIFY_THROWS_EXCEPTION(VboParseError, static_cast<void>(VboParser::parse(QString("[data]\n0 1\n"), {}, 2 * 1024 * 1024)));
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(VboParser::parse(text, [] { return true; }, 2 * 1024 * 1024)));
 }
 
 void TelemetrySessionCacheTests::boundsExpandedRczAndPreservesGaps()
@@ -163,14 +163,14 @@ void TelemetrySessionCacheTests::boundsExpandedRczAndPreservesGaps()
     for (const double time : {.1, .25, .4, 1.0, 2.0})
         QCOMPARE(bounded.valueAt("speed", time), original.valueAt("speed", time));
     QVERIFY(!bounded.valueAt("speed", 1.0).has_value());
-    QVERIFY_EXCEPTION_THROWN(TelemetrySource::load(path, {}, 1024), ResourceLimitError);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(TelemetrySource::load(path, {}, 1024)));
     members.insert("padding", QByteArray(2 * 1024 * 1024, '\0'));
     const auto compressed = RczFixture::zip(members);
     QVERIFY(compressed.size() < 32 * 1024); QVERIFY(write(path, compressed));
-    QVERIFY_EXCEPTION_THROWN(TelemetrySource::load(path, {}, 32 * 1024 * 1024), ResourceLimitError);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(TelemetrySource::load(path, {}, 32 * 1024 * 1024)));
     QVERIFY(write(path, QByteArray("not a zip archive")));
-    QVERIFY_EXCEPTION_THROWN(TelemetrySource::load(path, {}, 32 * 1024 * 1024), std::runtime_error);
-    QVERIFY_EXCEPTION_THROWN(TelemetrySource::load(path, [] { return true; }, 32 * 1024 * 1024), OperationCancelled);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, static_cast<void>(TelemetrySource::load(path, {}, 32 * 1024 * 1024)));
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(TelemetrySource::load(path, [] { return true; }, 32 * 1024 * 1024)));
 }
 
 QTEST_GUILESS_MAIN(TelemetrySessionCacheTests)
