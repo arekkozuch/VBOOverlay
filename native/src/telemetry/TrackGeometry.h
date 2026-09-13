@@ -17,6 +17,8 @@ struct TrackGeometry {
     double normalizationScale = 1.0;
     double originLatitude = 0.0;
     double originLongitude = 0.0;
+    // Origin remains in source coordinates; map x is always positive east.
+    bool longitudeIsWestPositive = false;
     bool valid = false;
 };
 

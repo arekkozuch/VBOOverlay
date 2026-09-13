@@ -263,6 +263,7 @@ void AppController::loadOutingLapDetail()
             // polylines; the dynamic marker shares the same normalization.
             const auto latitude = session->sampledSegments("latitude", start, end, 2000);
             TelemetrySession mapSession;
+            mapSession.metadata.insert("gpsLongitudeConvention", session->metadata.value("gpsLongitudeConvention"));
             mapSession.aliases = {{"latitude", "lat"}, {"longitude", "lon"}};
             mapSession.channels.insert("lat", {}); mapSession.channels.insert("lon", {});
             auto &lat = mapSession.channels["lat"]; auto &lon = mapSession.channels["lon"];

@@ -27,7 +27,10 @@ Names have the shape `channel_<kind>_<device>_<group>_<id>_<storage>` or `channe
 All numbers are little endian. Channel ID 1/storage 1 contains signed 64-bit epoch
 milliseconds. ID 2 is distance, not time. Position ID 3/storage 1 contains paired signed
 32-bit latitude/longitude in 1/6,000,000 degree units. Native RCZ longitude is positive
-East; the existing VBO parser retains the file's opposite longitude convention.
+East; the verified RaceChrono VBO parser retains west-positive source longitude
+and records `gpsLongitudeConvention=west-positive`. Shared map projection honors
+that metadata for both track outlines and playback markers, including lap detail.
+Source samples and timing gates retain their original coordinate convention.
 
 | Recorded source | IDs | Encoding and output |
 | --- | --- | --- |
