@@ -431,6 +431,7 @@ Rectangle {
                 width: statusScroll.availableWidth
                 spacing: 6
                 Repeater {
+                    objectName: "outingRunStatuses"
                     model: root.pendingRuns
                     delegate: Label {
                         required property var modelData

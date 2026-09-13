@@ -2838,9 +2838,12 @@ void TelemetryTests::presentsDayResultStatesWithoutVideo()
     QCOMPARE(controller.m_outingLapDetailSession, detail);
     QCOMPARE(controller.outingLapTrack(), track); QCOMPARE(controller.outingLapCursor(), cursor);
     QTRY_VERIFY(retry->isVisible() && retry->isEnabled());
-    const auto statusName = "outingRunStatus_" + runB;
-    QObject *missing = nullptr;
-    QTRY_VERIFY((missing = window->findChild<QObject *>(statusName)) != nullptr);
+    auto *runStatuses = window->findChild<QObject *>("outingRunStatuses"); QVERIFY(runStatuses);
+    QTRY_COMPARE(runStatuses->property("count").toInt(), 1);
+    QQuickItem *missing = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(runStatuses, "itemAt", Q_RETURN_ARG(QQuickItem *, missing), Q_ARG(int, 0)) && missing);
+    QCOMPARE(missing->objectName(), "outingRunStatus_" + runB);
+    QVERIFY(missing->isVisible());
     QVERIFY(missing->property("text").toString().contains("afternoon"));
     QVERIFY(missing->property("text").toString().contains("missing"));
     QTRY_VERIFY(lapList->height() > 30);
