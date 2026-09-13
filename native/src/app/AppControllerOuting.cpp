@@ -953,84 +953,92 @@ void AppController::loadOutingLapDetail()
     if (m_selectedOutingLap.isEmpty() || m_outingLapDetailPending) return;
     const auto source = m_outingLapDetailSource;
     const auto projectPath = m_documentState.projectPath();
-    const auto start = m_selectedOutingLap.value("startTime").toDouble();
-    const auto end = m_selectedOutingLap.value("endTime").toDouble();
-    const auto lapReference = QJsonObject::fromVariantMap(m_selectedOutingLap.value("reference").toMap());
+    const auto row = m_selectedOutingLap;
     const auto request = m_outingLapDetailRequest;
     m_outingLapDetailCancellation = std::make_shared<std::atomic_bool>(false);
     const auto cancellation = m_outingLapDetailCancellation;
     m_outingLapDetailPending = true;
-    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, start, end, lapReference, request, cancellation] {
-        OutingLapDetailResult result; result.request = request;
-        const auto cancelled = [cancellation] { return cancellation->load(); };
-        try {
-            throwIfCancelled(cancelled);
-            const auto json = source.value("reference").toObject();
-            const ProjectSourceReference reference{json.value("relativePath").toString(),
-                json.value("absolutePath").toString(), json.value("fingerprint").toObject()};
-            const auto path = ProjectSourceReferenceCodec::resolve(reference, projectPath);
-            if (path.isEmpty()) throw std::runtime_error("Recording is missing. Relink its source and try again.");
-            const auto bytes = QFileInfo(path).size();
-            if (bytes <= 0 || bytes > TelemetryImportLimits{}.maximumFileBytes)
-                throw ResourceLimitError("Recording exceeds the analysis size limit.");
-            const auto contentRevision = TelemetrySource::contentSha256(path, bytes, cancelled).toHex();
-            if (!validLapReference(lapReference)
-                || contentRevision != lapReference.value("sourceRevision").toString().toLatin1()) {
-                result.staleReference = true;
-                throw std::runtime_error("Lap reference is stale: recording content changed. Reload this source.");
-            }
-            auto session = std::make_shared<TelemetrySession>(TelemetrySource::load(path, cancelled));
-            if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision) {
-                result.staleReference = true;
-                throw std::runtime_error("Lap reference is stale: recording changed while opening it.");
-            }
-            throwIfCancelled(cancelled);
-            if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
-                ProjectSourceReferenceCodec::telemetryFingerprint(path, *session)) != SourceFingerprintMatch::Match)
-                throw std::runtime_error("Recording changed. Relink its source before opening this lap.");
-            if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end <= start || end > session->duration)
-                throw std::runtime_error("Lap range is no longer valid for this recording.");
-            // Build map bounds only from this section. Keep gaps as separate
-            // polylines; the dynamic marker shares the same normalization.
-            const auto latitude = session->sampledSegments("latitude", start, end, 2000);
-            TelemetrySession mapSession;
-            mapSession.metadata.insert("gpsLongitudeConvention", session->metadata.value("gpsLongitudeConvention"));
-            mapSession.aliases = {{"latitude", "lat"}, {"longitude", "lon"}};
-            mapSession.channels.insert("lat", {}); mapSession.channels.insert("lon", {});
-            auto &lat = mapSession.channels["lat"]; auto &lon = mapSession.channels["lon"];
-            QVector<QVector<double>> times;
-            for (const auto &segment : latitude) {
-                QVector<double> current;
-                for (const auto &point : segment) {
-                    throwIfCancelled(cancelled);
-                    const auto longitude = session->valueAt("longitude", point.x());
-                    if (!longitude) {
-                        if (!current.isEmpty()) times.append(std::exchange(current, {}));
-                        continue;
-                    }
-                    lat.values.append(static_cast<float>(point.y()));
-                    lon.values.append(static_cast<float>(*longitude));
-                    current.append(point.x());
-                }
-                if (!current.isEmpty()) times.append(std::move(current));
-            }
-            result.geometry = buildTrackGeometry(mapSession, cancelled);
-            for (const auto &segment : times) {
-                QVariantList points;
-                for (const auto time : segment) {
-                    throwIfCancelled(cancelled);
-                    const auto point = FlappedEar::currentTrackPoint(*session, time, result.geometry);
-                    if (point) points.append(QVariantMap{{"x", point->x()}, {"y", point->y()}});
-                }
-                if (!points.isEmpty()) result.track.append(QVariant::fromValue(points));
-            }
-            throwIfCancelled(cancelled);
-            result.session = std::move(session);
-        } catch (const std::exception &error) {
-            result.error = QString::fromUtf8(error.what()); result.track.clear(); result.geometry = {};
-        }
-        return result;
+    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, row, request, cancellation] {
+        return readOutingLapDetail(source, projectPath, row, request, cancellation);
     }));
+}
+
+AppController::OutingLapDetailResult AppController::readOutingLapDetail(const QJsonObject &source,
+    const QString &projectPath, const QVariantMap &row, const quint64 request,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    const auto start = row.value("startTime").toDouble();
+    const auto end = row.value("endTime").toDouble();
+    const auto lapReference = QJsonObject::fromVariantMap(row.value("reference").toMap());
+    OutingLapDetailResult result; result.request = request;
+    const auto cancelled = [cancellation] { return cancellation->load(); };
+    try {
+        throwIfCancelled(cancelled);
+        const auto json = source.value("reference").toObject();
+        const ProjectSourceReference reference{json.value("relativePath").toString(),
+            json.value("absolutePath").toString(), json.value("fingerprint").toObject()};
+        const auto path = ProjectSourceReferenceCodec::resolve(reference, projectPath);
+        if (path.isEmpty()) throw std::runtime_error("Recording is missing. Relink its source and try again.");
+        const auto bytes = QFileInfo(path).size();
+        if (bytes <= 0 || bytes > TelemetryImportLimits{}.maximumFileBytes)
+            throw ResourceLimitError("Recording exceeds the analysis size limit.");
+        const auto contentRevision = TelemetrySource::contentSha256(path, bytes, cancelled).toHex();
+        if (!validLapReference(lapReference)
+            || contentRevision != lapReference.value("sourceRevision").toString().toLatin1()) {
+            result.staleReference = true;
+            throw std::runtime_error("Lap reference is stale: recording content changed. Reload this source.");
+        }
+        auto session = std::make_shared<TelemetrySession>(TelemetrySource::load(path, cancelled));
+        if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision) {
+            result.staleReference = true;
+            throw std::runtime_error("Lap reference is stale: recording changed while opening it.");
+        }
+        throwIfCancelled(cancelled);
+        if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
+            ProjectSourceReferenceCodec::telemetryFingerprint(path, *session)) != SourceFingerprintMatch::Match)
+            throw std::runtime_error("Recording changed. Relink its source before opening this lap.");
+        if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end <= start || end > session->duration)
+            throw std::runtime_error("Lap range is no longer valid for this recording.");
+        // Build map bounds only from this section. Keep gaps as separate
+        // polylines; the dynamic marker shares the same normalization.
+        const auto latitude = session->sampledSegments("latitude", start, end, 2000);
+        TelemetrySession mapSession;
+        mapSession.metadata.insert("gpsLongitudeConvention", session->metadata.value("gpsLongitudeConvention"));
+        mapSession.aliases = {{"latitude", "lat"}, {"longitude", "lon"}};
+        mapSession.channels.insert("lat", {}); mapSession.channels.insert("lon", {});
+        auto &lat = mapSession.channels["lat"]; auto &lon = mapSession.channels["lon"];
+        QVector<QVector<double>> times;
+        for (const auto &segment : latitude) {
+            QVector<double> current;
+            for (const auto &point : segment) {
+                throwIfCancelled(cancelled);
+                const auto longitude = session->valueAt("longitude", point.x());
+                if (!longitude) {
+                    if (!current.isEmpty()) times.append(std::exchange(current, {}));
+                    continue;
+                }
+                lat.values.append(static_cast<float>(point.y()));
+                lon.values.append(static_cast<float>(*longitude));
+                current.append(point.x());
+            }
+            if (!current.isEmpty()) times.append(std::move(current));
+        }
+        result.geometry = buildTrackGeometry(mapSession, cancelled);
+        for (const auto &segment : times) {
+            QVariantList points;
+            for (const auto time : segment) {
+                throwIfCancelled(cancelled);
+                const auto point = FlappedEar::currentTrackPoint(*session, time, result.geometry);
+                if (point) points.append(QVariantMap{{"x", point->x()}, {"y", point->y()}});
+            }
+            if (!points.isEmpty()) result.track.append(QVariant::fromValue(points));
+        }
+        throwIfCancelled(cancelled);
+        result.session = std::move(session);
+    } catch (const std::exception &error) {
+        result.error = QString::fromUtf8(error.what()); result.track.clear(); result.geometry = {};
+    }
+    return result;
 }
 
 QStringList AppController::outingLapAvailableChannels() const

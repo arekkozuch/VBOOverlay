@@ -30,6 +30,7 @@
 #include <QUrl>
 #include <QVariant>
 #include <QSet>
+#include <array>
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -91,6 +92,9 @@ class AppController final : public QObject {
     Q_PROPERTY(QString batchImportState READ batchImportState NOTIFY batchImportChanged)
     Q_PROPERTY(QString batchImportError READ batchImportError NOTIFY batchImportChanged)
     Q_PROPERTY(QStringList analysisImportMessages READ analysisImportMessages NOTIFY batchImportChanged)
+    Q_PROPERTY(QVariantList comparisonSlots READ comparisonSlots NOTIFY comparisonSlotsChanged)
+    Q_PROPERTY(QVariantList comparisonLaps READ comparisonLaps NOTIFY comparisonSlotsChanged)
+    Q_PROPERTY(bool comparisonPairReady READ comparisonPairReady NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailError READ outingLapDetailError NOTIFY outingLapDetailChanged)
@@ -218,6 +222,14 @@ public:
     [[nodiscard]] QString batchImportState() const { return m_batchState; }
     [[nodiscard]] QString batchImportError() const { return m_batchError; }
     [[nodiscard]] QStringList analysisImportMessages() const { return m_analysisImportMessages; }
+    [[nodiscard]] QVariantList comparisonSlots() const;
+    [[nodiscard]] QVariantList comparisonLaps() const;
+    [[nodiscard]] bool comparisonPairReady() const;
+    Q_INVOKABLE bool selectComparisonLap(int slot, const QVariantMap &reference);
+    Q_INVOKABLE void clearComparisonLap(int slot);
+    Q_INVOKABLE bool swapComparisonLaps();
+    Q_INVOKABLE bool useBestComparisonLap(bool wholeDay);
+    Q_INVOKABLE bool inspectComparisonLap(int slot);
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
@@ -325,6 +337,7 @@ signals:
     void batchImportCommitted();
     void outingLapsChanged();
     void outingLapDetailChanged();
+    void comparisonSlotsChanged();
     void outingLapCursorChanged();
     void videoSourceChanged();
     void telemetryChanged();
@@ -473,6 +486,30 @@ private:
         QVariantList track;
         QString error;
     };
+    static OutingLapDetailResult readOutingLapDetail(const QJsonObject &source, const QString &projectPath,
+        const QVariantMap &row, quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation);
+    struct ComparisonSlot {
+        QVariantMap row;
+        QJsonObject source;
+        QByteArray key;
+        quint64 request = 0;
+        QString state = QStringLiteral("empty");
+        QString error;
+        std::shared_ptr<const TelemetrySession> session;
+        TrackGeometry geometry;
+        QVariantList track;
+    };
+    void initializeComparisonLaps();
+    void loadComparisonLap();
+    void invalidateComparisonLaps();
+    void failComparisonLap(int slot, const QString &reason);
+    std::array<ComparisonSlot, 2> m_comparisonSlots;
+    QFutureWatcher<OutingLapDetailResult> m_comparisonWatcher;
+    QTimer m_comparisonTimer;
+    std::shared_ptr<std::atomic_bool> m_comparisonCancellation;
+    quint64 m_comparisonRequest = 0;
+    int m_comparisonLoadingSlot = -1;
+    bool m_comparisonPending = false;
     void initializeOutingLapDetail();
     void loadOutingLapDetail();
     static QVariantMap sessionSeries(const TelemetrySession &session, const QString &channel,
