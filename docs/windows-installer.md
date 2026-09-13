@@ -1,5 +1,9 @@
 # Windows candidate installer
 
+Windows builds and installer validation are paused by owner direction on
+13 September 2026. The procedure below is retained for later resumption; do not
+run it until the owner explicitly requests Windows work again.
+
 Windows Release CI compiles `packaging/windows/installer.nsi` using
 [NSIS 3.12](https://nsis.sourceforge.io/Download). This is an unsigned internal
 candidate, not beta distribution approval. The existing portable ZIP remains available.

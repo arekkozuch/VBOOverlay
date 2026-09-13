@@ -22,7 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         build-type: [Debug, Release]
-        platform: [macos, windows]
+        # Owner direction, 2026-09-13: pause Windows until explicitly resumed.
+        platform: [macos]
         include:
           - platform: macos
             name: macOS arm64
@@ -30,12 +31,6 @@ jobs:
             qt-arch: clang_64
             graphics-api: metal
             software-renderer: '0'
-          - platform: windows
-            name: Windows x64
-            os: windows-2022
-            qt-arch: win64_msvc2022_64
-            graphics-api: d3d11
-            software-renderer: '1'
     defaults:
       run:
         shell: pwsh
@@ -176,7 +171,7 @@ jobs:
         if: always()
         run: |
           @'
-          Cloud gate: Debug and Release application builds, Qt Test suite, production QML startup smoke, QRhi pixel regressions, and synthetic FFmpeg integrations.
+          Cloud gate: macOS arm64 only; Windows builds and installer validation are paused by owner direction. Debug and Release application builds, Qt Test suite, production QML startup smoke, QRhi pixel regressions, and synthetic FFmpeg integrations.
           The VideoToolbox hardware test is explicitly skipped; private VBO/GoPro fixtures are not supplied. Platform-specific tests report their own skip reasons in ctest.log.
           Release jobs deploy Qt, hide the build SDK for a relocated startup smoke, and attach an unsigned/internal candidate with file hashes and build metadata. A green run does not establish real-media, hardware-encoder, clean-machine, signing/notarization, or interactive-editor release acceptance.
           '@ | Add-Content $env:GITHUB_STEP_SUMMARY

@@ -42,7 +42,7 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 - Qt 6.8 or newer with Concurrent, Core, Gui and matching GuiPrivate headers, Qml, Quick, Quick Controls 2, Multimedia, and Test; include the SVG and Shader Tools modules in binary SDK installations.
 - FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; the command-line tools are not bundled. A small production-filter preflight also requires explicit alpha-mode support.
 
-Development targets are macOS and Windows. CI pins Qt 6.8.3 and produces internal Release candidates with deployed Qt runtimes. Windows Release candidates also include a [per-user NSIS installer](docs/windows-installer.md). Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
+Current development and CI focus is macOS only, per owner direction on 13 September 2026. Windows builds and validation are paused until explicitly resumed. CI pins Qt 6.8.3 and produces internal macOS Release candidates with deployed Qt runtimes. Existing [Windows NSIS packaging](docs/windows-installer.md) remains available for later resumption. Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
 
 ## Build
 
@@ -62,7 +62,7 @@ open "build-native/native/FlappedEar Telemetry.app"
 
 ## Continuous integration
 
-[Native CI](.github/workflows/build.yml) builds Debug and Release configurations and runs Qt Test, QML startup smoke, QRhi rendering regressions, and synthetic FFmpeg integrations on macOS arm64 and Windows x64 with Qt 6.8.3. It runs on pull requests, pushes to `main`, and manual dispatch. Hardware-encoder and private real-media acceptance remain separate local gates. Successful Release jobs also deploy Qt and check installed startup with the build SDK hidden. Candidate archives carry file hashes and a checkout manifest; these are internal acceptance artifacts, not an approved release. Logs and JUnit results are attached to each run; see [testing guidance](docs/testing.md#cloud-ci) for scope and exclusions.
+[Native CI](.github/workflows/build.yml) builds Debug and Release configurations and runs Qt Test, QML startup smoke, QRhi rendering regressions, and synthetic FFmpeg integrations on macOS arm64 with Qt 6.8.3. Windows jobs are currently disabled. It runs on pull requests, pushes to `main`, and manual dispatch. Hardware-encoder and private real-media acceptance remain separate local gates. Successful Release jobs also deploy Qt and check installed startup with the build SDK hidden. Candidate archives carry file hashes and a checkout manifest; these are internal acceptance artifacts, not an approved release. Logs and JUnit results are attached to each run; see [testing guidance](docs/testing.md#cloud-ci) for scope and exclusions.
 
 ## Architecture
 
