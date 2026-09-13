@@ -44,7 +44,7 @@ evidence-linked report. Raw OBD/HR charts do not yet constitute vehicle/driver
 analysis. The full original vision remains itemized as F00–F20.
 
 The editor/export foundation should be preserved. Remaining hardening includes
-VBO allocation/time budgets, coordinate-unit
+VBO derived-time budgets, coordinate-unit
 ambiguity, slow/full destinations and consistent user-facing package naming.
 
 ## Subsequent task changes
@@ -57,6 +57,14 @@ for all writers before cleanup, rejects reported success with surviving writers,
 and keeps the export active while shutdown is unconfirmed. Startup recovery also
 retains manifests for surviving Unix groups. Exact PR/main CI and integration
 results are recorded in KAN-13; physical/private-media acceptance stays separate.
+
+[KAN-14](https://kozucharkadiusz.atlassian.net/browse/KAN-14) / PR #15 replaces
+bulk line and field splitting with bounded scanning and cancellation checks.
+It avoids a joined header allocation, retains only declared data fields, and
+validates ignored extra fields while preserving their warning counts. Existing
+size/count limits and timestamp calculations are unchanged. Synthetic boundary,
+format and cancellation regressions accompany the change; exact CI and merge
+evidence belongs in KAN-14.
 
 ## Evidence boundaries
 

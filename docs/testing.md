@@ -376,3 +376,25 @@ was run against unchanged production code in
 Both macOS Debug and Release compiled and failed exactly the four surviving-writer
 checks and the premature-recovery check; the existing cases had no new failures.
 Final passing-head and integrated-main results are recorded in KAN-13.
+
+
+### KAN-14: bounded VBO scanning
+
+PR #15 adds synthetic coverage for separator-heavy rows and headers, exact and
+exceeded line/field/column/line-count limits, CRLF versus terminal CR, ignored
+oversized extra fields, multiline header fields, Unicode padding and preserved
+ASCII whitespace/comma semantics. Extra values retain their original warning
+counts without a field object for every separator. Existing file/sample limits,
+valid VBO fixtures, timing-gate output and derived timestamp tests remain in the gate.
+
+Four regression cases request cancellation while scanning input that would later
+exceed a line, field or column limit. They must report OperationCancelled before
+resource-limit validation, without depending on a wall-clock deadline. A separate
+successful separator-heavy fixture is cancelled at every available checkpoint,
+including discarded-field scanning. Test-only and corrected CI results are
+recorded in [KAN-14](https://kozucharkadiusz.atlassian.net/browse/KAN-14) and
+[PR #15](https://github.com/arekkozuch/VBOOverlay/pull/15).
+
+The coordinator has no native CMake/Qt toolchain; actual compilation and CTest
+execution require the four Qt 6.8.3 Native CI jobs. No private recording or
+physical-hardware acceptance is claimed by these synthetic parser checks.

@@ -126,6 +126,7 @@ private slots:
     void enforcesVboScannerBoundaries();
     void cancelsVboScanningBeforeLimitFailures_data();
     void cancelsVboScanningBeforeLimitFailures();
+    void cancelsVboFieldScanningAtEveryCheckpoint();
     void convertsArcMinuteCoordinates();
     void parsesBoundedRaceChronoTimingGates();
     void derivesDirectionalPassesAndCompleteLaps();
@@ -2234,6 +2235,22 @@ void TelemetryTests::cancelsVboScanningBeforeLimitFailures()
     QVERIFY_THROWS_EXCEPTION(OperationCancelled,
         (void) VboParser::parse(source, [&checks] { return ++checks == 4; }));
     QCOMPARE(checks, 4);
+}
+
+void TelemetryTests::cancelsVboFieldScanningAtEveryCheckpoint()
+{
+    const QString source = QStringLiteral("[column names]\ntime,\nspeed\n[data]\n0,42")
+        + QString(16'384, QLatin1Char(','));
+    int totalChecks = 0;
+    QCOMPARE(VboParser::parse(source, [&] { ++totalChecks; return false; }).sampleCount, 1);
+    // Exercise cancellation throughout a successful parse, including scanning
+    // discarded fields. Do not assume a particular number or ordering of polls.
+    for (int stopAt = 1; stopAt <= totalChecks; ++stopAt) {
+        int checks = 0;
+        QVERIFY_THROWS_EXCEPTION(OperationCancelled,
+            (void) VboParser::parse(source, [&] { return ++checks == stopAt; }));
+        QCOMPARE(checks, stopAt);
+    }
 }
 
 void TelemetryTests::convertsArcMinuteCoordinates()

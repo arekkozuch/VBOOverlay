@@ -36,7 +36,8 @@ environments, not physical acceptance of this baseline.
 - [x] Guard auto-sync results with a timing-edit revision and cancellation; invalidate stale review candidates.
 - [x] Exclude GPS-incomplete laps from spatial references/ranking and expose no-delta/quality states ([KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5), PR #12 merged at `7138fbd`; PR/main CI passed).
 - [ ] Validate shared track-progress correspondence at nearby crossings for A/B comparison ([KAN-32](https://kozucharkadiusz.atlassian.net/browse/KAN-32)).
-- [ ] Bound VBO line splitting before bulk allocation; validate finite derived timestamps and synchronization bounds (KAN-14, KAN-15 and KAN-17 in the delivery ledger).
+- [x] Replace VBO bulk line/field splitting with bounded, cancellable scanning (KAN-14; exact integration evidence in Jira).
+- [ ] Validate finite derived timestamps and synchronization bounds (KAN-15 and KAN-17 in the delivery ledger).
 - [x] Supervise Unix descendants after leader exit and stop remaining writers before commit/cleanup; retain owned artifacts if shutdown is unconfirmed ([KAN-13](https://kozucharkadiusz.atlassian.net/browse/KAN-13), PR #14; exact CI/integration evidence is recorded in the task).
 - [x] Correct export-log retention for hyphenated production UUIDs, with active/unrelated/symlink protection (KAN-5, PR #12 merged at `7138fbd`; PR/main CI passed).
 - [ ] Validate coordinate-unit ambiguity near the equator/prime meridian across exporters ([KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16)).
