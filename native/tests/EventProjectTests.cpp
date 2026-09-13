@@ -81,7 +81,7 @@ void EventProjectTests::persistsTrackConfigurationAndUnknownLegacyState()
     QCOMPARE(EventProjectCodec::withEditorState(project, EventProjectCodec::editorProjection(project), {}, {}), project);
     QTemporaryDir directory; QVERIFY(directory.isValid());
     ProjectRecoveryStore store(directory.filePath("identity-recovery.json"));
-    const ProjectRecoverySnapshot snapshot{{}, "identity-document", 2, 1, "2026-09-13T00:00:00.000Z", project, true};
+    const ProjectRecoverySnapshot snapshot{{}, "event-document", 5, 4, "2026-09-13T00:00:00.000Z", project, true};
     QVERIFY2(store.write(snapshot, &error), qPrintable(error));
     ProjectRecoverySnapshot restored;
     QVERIFY2(store.load(&restored, &error), qPrintable(error));
