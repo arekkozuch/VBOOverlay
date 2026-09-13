@@ -15,6 +15,7 @@ Rectangle {
         return minutes + ":" + (seconds - minutes * 60).toFixed(3).padStart(6, "0");
     }
     RunDetailsDialog { id: runDetailsDialog }
+    ComparisonLapDialog { id: comparisonLapDialog }
     OutingProgressionDialog { id: progressionDialog }
     Dialog {
         id: rankingDialog
@@ -247,6 +248,13 @@ Rectangle {
             Layout.fillWidth: true
             Label { text: qsTr("Day results"); color: "#f2f6fb"; font.pixelSize: 24; font.weight: Font.DemiBold }
             Item { Layout.fillWidth: true }
+            FeButton {
+                objectName: "openComparisonLaps"
+                text: qsTr("Compare laps…")
+                compact: true
+                enabled: appController.eventRuns.length > 0
+                onClicked: comparisonLapDialog.open()
+            }
             FeButton {
                 objectName: "openRunDetails"
                 text: qsTr("Run details…")

@@ -1,6 +1,6 @@
 # Flapped Ear Telemetry — event analysis delivery
 
-Updated 12 September 2026. The complete scope is now maintained in
+Updated 13 September 2026. The complete scope is now maintained in
 [product-vision.md](product-vision.md); actual status, blockers, milestones,
 forecasts and acceptance live in [product-delivery.md](product-delivery.md).
 This page is an entry point, not a competing roadmap.
@@ -44,10 +44,30 @@ choosing a result and inspecting a lap do not select an editor run or change its
 synchronization. Unaffected open details survive. Pending and failed run messages
 share a bounded scroll area, including at the 760×480 analysis-window minimum.
 
+## Independent A/B selections (KAN-29)
+
+**Day results → Compare laps…** opens two separately owned selections. Choose
+eligible complete laps from compatible runs, swap A/B, set the best lap of A's
+run or its whole compatibility group as B, clear a slot or inspect either lap.
+The selectors show the full run/lap label in a wide, wrapping dropdown. OUT/IN,
+excluded laps, unresolved routes and route/GPS outliers are not candidates.
+
+Each slot retains its own verified session, map and source-bound reference.
+One cancellable worker serializes pair loading; rapid changes coalesce and stale
+completions cannot overwrite a replacement or swapped slot. A missing or changed
+recording fails only the affected slot. Metadata updates retain valid selections;
+source/configuration changes and exclusions invalidate affected slots. Starting
+another document clears the pair. Pair selection and inspection do not activate
+an editor run, alter synchronization or dirty the saved project.
+
+These are in-memory analysis selections. Saving an A/B workspace, shared progress,
+distance delta and paired traces/charts belong to subsequent M2 tasks. The existing
+single-lap inspector remains the evidence view for each selected lap.
+
 ## Next product outcomes
 
-1. End-to-end acceptance of the implemented run/event results and progression.
-2. Independent cross-run A/B, shared track progress, delta and paired map/channels.
+1. M1 synthetic acceptance is recorded in [KAN-28](kan28-m1-acceptance.md), with local private-VBO evidence separate.
+2. Extend independent cross-run A/B with shared track progress, delta and paired map/channels.
 3. Reviewed corners/sectors, metrics and sector theoretical.
 4. Ranked losses, consistency, G-G, available thermal/HR data and automatic report.
 5. Full Mac journey/overlay-export acceptance, then remaining advanced F00–F20 work.

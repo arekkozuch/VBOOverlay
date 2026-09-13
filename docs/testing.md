@@ -21,6 +21,25 @@ owner/private-GoPro acceptance. The record contains the measured M0/M1 cycle
 times and the 27 September planning target; the current capability/scope ledger
 is [product-delivery.md](product-delivery.md).
 
+## Independent A/B selection (KAN-29)
+
+`selectsIndependentComparisonLapsThroughQml` imports matching and reversed routes,
+uses the production A/B selectors and keyboard controls, rejects incompatible
+pairs, swaps verified sessions, selects best run/group as B and inspects a lap.
+It checks that editor run/synchronization and the saved document remain unchanged,
+and that exclusions invalidate the affected selection.
+
+`preservesComparisonSlotAcrossFailuresAndReplacement` removes/restores B's source,
+checks that A retains its session and map, holds an async completion across a
+swap, replaces one editor source and rejects a late completion after New project.
+The pair and single-lap inspector share the existing bounded full-content loader;
+its fingerprint, hash, range, GPS-gap and cancellation regressions remain enabled.
+
+Interactive acceptance: import a day, open **Compare laps…**, choose compatible
+laps from different runs, swap, choose best run/group as B and inspect each. Check
+readability and keyboard navigation on the owner's Mac. These checks do not yet
+accept shared-progress delta or paired chart/map presentation.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

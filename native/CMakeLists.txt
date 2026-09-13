@@ -150,6 +150,7 @@ endif()
 
 qt_add_executable(flappedear_native MACOSX_BUNDLE
     src/app/AppControllerImport.cpp
+    src/app/AppControllerComparison.cpp
     src/app/AppControllerOuting.cpp
     src/app/AppController.cpp
     src/app/AppController.h
@@ -187,6 +188,7 @@ qt_add_qml_module(flappedear_native
         qml/RunDetailsDialog.qml
         qml/OutingLapPanel.qml
         qml/OutingLapDetailPanel.qml
+        qml/ComparisonLapDialog.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml
         qml/FeCheckBox.qml

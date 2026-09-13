@@ -320,6 +320,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
     initializeBatchImport();
     initializeOutingLaps();
     initializeOutingLapDetail();
+    initializeComparisonLaps();
     retireLegacyDocumentSettings();
     restoreStartupState();
 }
@@ -333,12 +334,12 @@ AppController::~AppController()
     while (sourceShutdown.elapsed() < 2'000
            && (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
                || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
-               || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning())) {
+               || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning() || m_comparisonWatcher.isRunning())) {
         QThread::msleep(10);
     }
     if (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
         || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
-        || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning()) {
+        || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning() || m_comparisonWatcher.isRunning()) {
         AppLog::warn(QStringLiteral("Source worker shutdown exceeded the bounded wait"));
     }
     bool exportStopped = true;
@@ -854,6 +855,7 @@ quint64 AppController::beginSourceReplacement(const bool replacingVideo)
     if (!replacingVideo) {
         ++m_outingRunGenerations[activeRunId()];
         invalidateOutingLapDetail();
+        invalidateComparisonLaps();
     }
     const quint64 generation = beginSourceGeneration(true);
     if (restartOther && !request.path.isEmpty()) {
@@ -873,6 +875,8 @@ quint64 AppController::beginSourceGeneration(const bool preserveOuting)
         m_outingInferredGroups = {};
         m_outingRunGenerations.clear();
         closeOutingLap();
+        clearComparisonLap(0);
+        clearComparisonLap(1);
     }
     ++m_sourceGeneration;
     if (!m_sourceMismatchType.isEmpty()) {
@@ -898,6 +902,7 @@ quint64 AppController::beginSourceGeneration(const bool preserveOuting)
 
 void AppController::cancelSourceJobs(const bool cancelOutingDetail)
 {
+    if (cancelOutingDetail && m_comparisonCancellation) m_comparisonCancellation->store(true);
     if (cancelOutingDetail && m_outingLapDetailCancellation) m_outingLapDetailCancellation->store(true);
     for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
                                      m_projectLoadCancellation, m_syncCancellation, m_outingLapCancellation}) {

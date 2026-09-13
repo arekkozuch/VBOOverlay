@@ -133,6 +133,8 @@ private slots:
     void recordsVboUtcChronology();
     void ordersWholeOutingAndReopensSources();
     void presentsDayResultStatesWithoutVideo();
+    void selectsIndependentComparisonLapsThroughQml();
+    void preservesComparisonSlotAcrossFailuresAndReplacement();
     void groupsOnlyDatedUnambiguousAlternatives();
     void prefersRaceChronoCalculatedAcceleration();
     void presentsBrakingUpInGForceWidgets();
@@ -2759,6 +2761,176 @@ void TelemetryTests::ordersWholeOutingAndReopensSources()
     QTRY_VERIFY(controller.outingLaps().isEmpty());
     QTRY_VERIFY(!controller.m_outingLapWatcher.isRunning());
     QVERIFY(controller.eventRuns().isEmpty());
+}
+
+void TelemetryTests::selectsIndependentComparisonLapsThroughQml()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("morning.vbo"), second = directory.filePath("afternoon.vbo");
+    const auto reverse = directory.filePath("reverse.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2)));
+    QVERIFY(writeBytes(reverse, EventProjectFixture::routeVbo(240, 1, 0, true)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Comparison", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second), QUrl::fromLocalFile(reverse)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 3);
+    QVariantMap a, b, incompatible;
+    for (const auto &value : candidates) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (row.value("compatibilityGroupId") != a.value("compatibilityGroupId")) incompatible = row;
+        else if (row.value("runId") != a.value("runId")) b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty() && !incompatible.isEmpty());
+    controller.setSyncOffset(19); controller.setTimeScale(1.3); controller.setPlaybackTime(7);
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("day.fetproject"))));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto before = controller.currentProjectObject(); const auto active = controller.activeRunId();
+    const auto revision = controller.m_documentState.revision();
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings); QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 760; height: 480; OutingLapPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *open = window->findChild<QQuickItem *>("openComparisonLaps"); QVERIFY(open);
+    open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *dialog = window->findChild<QObject *>("comparisonLapDialog"); QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto *pickerA = window->findChild<QObject *>("comparisonLapPicker0");
+    auto *pickerB = window->findChild<QObject *>("comparisonLapPicker1"); QVERIFY(pickerA && pickerB);
+    // Exercise the production selectors, including a different compatible run.
+    QVERIFY(QMetaObject::invokeMethod(pickerA, "activated", Q_ARG(int, 0)));
+    QTRY_COMPARE(controller.comparisonSlots()[0].toMap().value("state").toString(), QString("ready"));
+    QCOMPARE(controller.comparisonSlots()[0].toMap().value("lap").toMap().value("reference"), a.value("reference"));
+    const auto model = pickerB->property("model");
+    const auto labels = model.metaType() == QMetaType::fromType<QJSValue>()
+        ? model.value<QJSValue>().toVariant().toList() : model.toList();
+    int bIndex = -1;
+    for (qsizetype i = 0; i < labels.size(); ++i) if (labels[i].toString() == b.value("label").toString()) bIndex = static_cast<int>(i);
+    QVERIFY(bIndex >= 0);
+    QVERIFY(QMetaObject::invokeMethod(pickerB, "activated", Q_ARG(int, bIndex)));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    const auto sessionA = controller.m_comparisonSlots[0].session;
+    const auto sessionB = controller.m_comparisonSlots[1].session;
+    QVERIFY(sessionA && sessionB && sessionA != sessionB);
+    QVERIFY(!controller.selectComparisonLap(1, incompatible.value("reference").toMap()));
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionB);
+    auto *swap = window->findChild<QQuickItem *>("swapComparisonLaps"); QVERIFY(swap);
+    swap->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QCOMPARE(controller.m_comparisonSlots[0].session, sessionB);
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionA);
+    auto *bestRun = window->findChild<QQuickItem *>("bestRunAsComparisonB"); QVERIFY(bestRun);
+    bestRun->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(controller.comparisonPairReady());
+    QCOMPARE(controller.m_comparisonSlots[1].row.value("runId"), b.value("runId"));
+    for (const auto &groupValue : controller.outingCompatibilityGroups()) {
+        const auto group = groupValue.toMap();
+        if (group.value("id") != b.value("compatibilityGroupId")) continue;
+        for (const auto &runValue : group.value("ranking").toMap().value("runs").toList()) {
+            const auto run = runValue.toMap();
+            if (run.value("runId") == b.value("runId"))
+                QCOMPARE(controller.m_comparisonSlots[1].row.value("reference"), run.value("bestLap").toMap().value("reference"));
+        }
+    }
+    auto *bestDay = window->findChild<QQuickItem *>("bestDayAsComparisonB"); QVERIFY(bestDay);
+    bestDay->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(controller.comparisonPairReady());
+    for (const auto &groupValue : controller.outingCompatibilityGroups()) {
+        const auto group = groupValue.toMap();
+        if (group.value("id") == b.value("compatibilityGroupId"))
+            QCOMPARE(controller.m_comparisonSlots[1].row.value("reference"), group.value("ranking").toMap().value("bestOfDay").toMap().value("reference"));
+    }
+    auto *inspect = window->findChild<QQuickItem *>("inspectComparison0"); QVERIFY(inspect);
+    inspect->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.selectedOutingLap().value("reference"), b.value("reference"));
+    QCOMPARE(controller.m_comparisonSlots[0].session, sessionB);
+    QCOMPARE(controller.activeRunId(), active); QCOMPARE(controller.syncOffset(), 19.0); QCOMPARE(controller.timeScale(), 1.3);
+    QCOMPARE(controller.currentProjectObject(), before); QCOMPARE(controller.m_documentState.revision(), revision); QVERIFY(!controller.dirty());
+    controller.closeOutingLap();
+    QVERIFY(controller.setOutingLapExcluded(b.value("reference").toMap(), true, "Traffic"));
+    QCOMPARE(controller.m_comparisonSlots[0].state, QString("error"));
+    QVERIFY(!controller.comparisonPairReady());
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::preservesComparisonSlotAcrossFailuresAndReplacement()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    const auto secondBytes = EventProjectFixture::routeVbo(130, -2, 2);
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo())); QVERIFY(writeBytes(second, secondBytes));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Independent slots", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto runA = controller.eventRuns()[0].toMap().value("id").toString();
+    QVariantMap a, b;
+    for (const auto &value : controller.comparisonLaps()) {
+        const auto row = value.toMap();
+        if (row.value("runId") == runA) a = row; else b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QTRY_COMPARE(controller.m_comparisonSlots[0].state, QString("ready"));
+    const auto sessionA = controller.m_comparisonSlots[0].session;
+    const auto trackA = controller.m_comparisonSlots[0].track;
+    // Missing B fails through the shared verified-source loader without disturbing A.
+    QVERIFY(QFile::remove(second));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_COMPARE(controller.m_comparisonSlots[1].state, QString("error"));
+    QVERIFY(!controller.m_comparisonSlots[1].error.isEmpty());
+    QCOMPARE(controller.m_comparisonSlots[0].session, sessionA); QCOMPARE(controller.m_comparisonSlots[0].track, trackA);
+    QVERIFY(writeBytes(second, secondBytes));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    const auto sessionB = controller.m_comparisonSlots[1].session;
+    // Hold one completion so swap/replacement races are deterministic.
+    QTRY_VERIFY(!controller.m_comparisonPending);
+    AppController::OutingLapDetailResult stale;
+    stale.request = controller.m_comparisonSlots[1].request;
+    stale.session = sessionB; stale.error = "Obsolete worker result";
+    controller.m_comparisonSlots[1].state = "loading";
+    controller.m_comparisonPending = true; controller.m_comparisonLoadingSlot = 1;
+    QPromise<AppController::OutingLapDetailResult> promise; promise.start();
+    controller.m_comparisonWatcher.setFuture(promise.future());
+    QVERIFY(controller.swapComparisonLaps());
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionA);
+    promise.addResult(stale); promise.finish();
+    QTRY_VERIFY(controller.comparisonPairReady());
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionA);
+    QVERIFY(controller.m_comparisonSlots[0].error.isEmpty());
+    QCOMPARE(controller.m_comparisonSlots[0].row.value("reference"), b.value("reference"));
+    // Replacing editor run A invalidates only its B slot, retaining the other run.
+    const auto retained = controller.m_comparisonSlots[0].session;
+    const auto replacement = directory.filePath("replacement.vbo");
+    QVERIFY(writeBytes(replacement, EventProjectFixture::routeVbo(200, -1.2, 1, false, 450)));
+    QCOMPARE(controller.activeRunId(), runA);
+    controller.loadVbo(QUrl::fromLocalFile(replacement));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_VERIFY(!controller.outingLapsLoading());
+    QCOMPARE(controller.m_comparisonSlots[1].state, QString("error"));
+    QCOMPARE(controller.m_comparisonSlots[0].state, QString("ready"));
+    QCOMPARE(controller.m_comparisonSlots[0].session, retained);
+    // Starting another document clears both and cannot accept a late pair result.
+    QTRY_VERIFY(!controller.m_comparisonPending);
+    stale.request = controller.m_comparisonSlots[0].request;
+    controller.m_comparisonSlots[0].state = "loading";
+    controller.m_comparisonPending = true; controller.m_comparisonLoadingSlot = 0;
+    QPromise<AppController::OutingLapDetailResult> late; late.start();
+    controller.m_comparisonWatcher.setFuture(late.future());
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("day.fetproject"))));
+    controller.requestNewProject();
+    late.addResult(stale); late.finish();
+    QTRY_VERIFY(!controller.m_comparisonPending);
+    QCOMPARE(controller.m_comparisonSlots[0].state, QString("empty"));
+    QCOMPARE(controller.m_comparisonSlots[1].state, QString("empty"));
+    QVERIFY(!controller.m_comparisonSlots[0].session && !controller.m_comparisonSlots[1].session);
 }
 
 void TelemetryTests::presentsDayResultStatesWithoutVideo()
