@@ -36,8 +36,8 @@ private slots:
     {
         QFETCH(QString, producer); QFETCH(int, mode);
         const QString text = "[comments]\n" + producer +
-            "\n[laptiming]\nStart -20 50 -20 49.99982 synthetic\n"
-            "[column names]\ntime lat long velocity\n[data]\n0 50 -20 72\n1 50.001 -20 72\n";
+            "\n[header]\ncoordinate units = arc-minutes\n[laptiming]\nStart -1200 3000 -1200 2999.9892 synthetic\n"
+            "[column names]\ntime lat long velocity\n[data]\n0 3000 -1200 72\n1 3000.06 -1200 72\n";
         const auto session = VboParser::parse(text);
         QCOMPARE(session.sampleCount, 2);
         if (mode == 2) {
@@ -49,7 +49,7 @@ private slots:
         const auto &gate = session.timingGates.first();
         if (mode == 0) {
             QCOMPARE(gate.endpointA.latitudeDegrees, 50.0);
-            QCOMPARE(gate.endpointB.latitudeDegrees, 49.99982);
+            QVERIFY(std::abs(gate.endpointB.latitudeDegrees - 49.99982) < 1e-10);
         } else {
             QCOMPARE(gate.endpointA.latitudeDegrees, 50.0);
             QCOMPARE(gate.endpointB.latitudeDegrees, 50.0);
@@ -57,11 +57,11 @@ private slots:
             const auto b = projectCoordinate(gate.endpointB, {50,-20});
             QVERIFY(std::abs(a.eastMeters + b.eastMeters) < .001);
             QVERIFY(std::abs(std::abs(a.eastMeters - b.eastMeters) - 20.0151) < .01);
-            auto bad = text; bad.replace("-20 49.99982", "-20 40");
+            auto bad = text; bad.replace("-1200 2999.9892", "-1200 2400");
             QVERIFY(VboParser::parse(bad).timingGates.isEmpty());
-            bad = text; bad.replace("-20 49.99982", "-20 50");
+            bad = text; bad.replace("-1200 2999.9892", "-1200 3000");
             QVERIFY(VboParser::parse(bad).timingGates.isEmpty());
-            bad = text; bad.replace("-20 49.99982", "nan 50");
+            bad = text; bad.replace("-1200 2999.9892", "nan 3000");
             QVERIFY(VboParser::parse(bad).timingGates.isEmpty());
         }
     }

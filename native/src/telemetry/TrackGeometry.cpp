@@ -38,8 +38,7 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session, const Cancella
         if ((index & 0xff) == 0) throwIfCancelled(cancelled);
         const double lat = latitude->values[index];
         const double lon = longitude->values[index];
-        if (!std::isfinite(lat) || !std::isfinite(lon) || std::abs(lat) > 90.0
-            || std::abs(lon) > 180.0) {
+        if (!isValidCoordinate({lat, lon})) {
             continue;
         }
         if (!geometry.valid) {
@@ -90,7 +89,7 @@ std::optional<QPointF> currentTrackPoint(
     }
     const auto latitude = session.valueAt("latitude", time);
     const auto longitude = session.valueAt("longitude", time);
-    if (!latitude || !longitude) {
+    if (!latitude || !longitude || !isValidCoordinate({*latitude, *longitude})) {
         return std::nullopt;
     }
     const QPointF local = toLocal(

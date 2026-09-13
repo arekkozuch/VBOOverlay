@@ -5,18 +5,13 @@
 
 namespace FlappedEar {
 
-std::optional<double> normalizeCoordinateDegrees(const CoordinateAxis axis, double value)
+std::optional<double> normalizeCoordinateDegrees(const CoordinateAxis axis, double value,
+                                                  const CoordinateUnit unit)
 {
     if (!std::isfinite(value)) {
         return std::nullopt;
     }
-    const double absolute = std::abs(value);
-    if (axis == CoordinateAxis::Latitude && absolute > 90.0 && absolute <= 5'400.0) {
-        value /= 60.0;
-    } else if (axis == CoordinateAxis::Longitude && absolute > 180.0
-               && absolute <= 10'800.0) {
-        value /= 60.0;
-    }
+    if (unit == CoordinateUnit::ArcMinutes) value /= 60.0;
     const double limit = axis == CoordinateAxis::Latitude ? 90.0 : 180.0;
     return std::abs(value) <= limit ? std::optional<double>(value) : std::nullopt;
 }

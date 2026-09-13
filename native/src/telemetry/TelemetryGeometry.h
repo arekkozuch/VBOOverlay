@@ -5,6 +5,7 @@
 namespace FlappedEar {
 
 enum class CoordinateAxis { Latitude, Longitude };
+enum class CoordinateUnit { Degrees, ArcMinutes };
 
 struct GeoCoordinate {
     double latitudeDegrees = 0.0;
@@ -17,7 +18,7 @@ struct MetricPoint {
 };
 
 [[nodiscard]] std::optional<double> normalizeCoordinateDegrees(
-    CoordinateAxis axis, double value);
+    CoordinateAxis axis, double value, CoordinateUnit unit);
 [[nodiscard]] bool isValidCoordinate(const GeoCoordinate &coordinate);
 [[nodiscard]] MetricPoint projectCoordinate(
     const GeoCoordinate &coordinate, const GeoCoordinate &origin);

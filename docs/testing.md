@@ -422,3 +422,29 @@ the final PR head and merged main belongs in
 [KAN-15](https://kozucharkadiusz.atlassian.net/browse/KAN-15). Hosted validation does
 not replace private-media or physical-hardware acceptance. Synchronization-engine
 bounds remain the separate KAN-17 task.
+
+
+### KAN-16: explicit VBO coordinate evidence
+
+Thirty new Qt cases cover degrees, declared arc-minutes and the verified
+RaceChrono Pro 10.2.4 marker in all four quadrants, crossings of both zero axes,
+and a track where only one raw axis exceeds the former magnitude threshold.
+Assertions check absolute sample coordinates, track origin/current marker,
+gate endpoints or centre, and a physical gate width of approximately 20 metres.
+Missing/unknown evidence, unsupported/empty declarations, conflicting units and
+exporters in both orders, and spoofed derived metadata withhold GPS/gates while
+preserving speed and timestamps. Bounds cover both signs, degree/minute limits,
+non-finite values, and invalid live track positions.
+
+Existing generic synthetic VBO fixtures now declare their degree units. Synthetic
+fixtures carrying the verified RaceChrono marker now encode actual arc-minutes,
+including dated RCZ pairing and the whole-outing/reopen regression. Existing lap
+and pairing assertions are retained. The extension and deliberately limited
+exporter recognition are documented in [telemetry-semantics.md](telemetry-semantics.md#gps-tracks).
+
+The coordinator has no CMake/CTest/Qt toolchain. Exact build, complete CTest and
+Release package/startup results for the PR and merged main are recorded in
+[KAN-16](https://kozucharkadiusz.atlassian.net/browse/KAN-16). Only macOS arm64
+Debug and Release are in scope under the owner's current platform instruction.
+Historical private RCZ/VBO evidence above is not a new private-media or hardware
+acceptance run.
