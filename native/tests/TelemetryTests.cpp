@@ -121,6 +121,12 @@ private slots:
     void cancelsVboParsingDeterministically();
     void cachesTelemetryChannelCadence();
     void enforcesVboResourceLimits();
+    void preservesVboScannerFormats();
+    void boundsSeparatorHeavyVboRows();
+    void enforcesVboScannerBoundaries();
+    void cancelsVboScanningBeforeLimitFailures_data();
+    void cancelsVboScanningBeforeLimitFailures();
+    void cancelsVboFieldScanningAtEveryCheckpoint();
     void convertsArcMinuteCoordinates();
     void parsesBoundedRaceChronoTimingGates();
     void derivesDirectionalPassesAndCompleteLaps();
@@ -2116,6 +2122,135 @@ void TelemetryTests::enforcesVboResourceLimits()
         ResourceLimitError,
         (void) VboParser::parse(
             QStringLiteral("[column names]\ntime speed\n[data]\n0 %1").arg(longField)));
+}
+
+void TelemetryTests::preservesVboScannerFormats()
+{
+    const auto comma = VboParser::parse(
+        u"\ufeff# ignored\r\n[column names]\r\ntime, 'speed',\r\n"
+        "rpm, sensor\u00a0name\r\n[data]\r\n0, 10, , 7, extra,\r\n"
+        "1, 20, 200, 8\r\n2, 30\r\n");
+    QCOMPARE(comma.sampleCount, 3);
+    QCOMPARE(comma.channels.value("speed").values, QVector<float>({10, 20, 30}));
+    QCOMPARE(comma.channels.value("speed").timestamps, QVector<double>({0, 1, 2}));
+    QVERIFY(std::isnan(comma.channels.value("rpm").values[0]));
+    QCOMPARE(comma.channels.value("rpm").values[1], 200.0F);
+    QVERIFY(std::isnan(comma.channels.value("rpm").values[2]));
+    QCOMPARE(comma.channels.value(QStringLiteral("sensor\u00a0name")).values[0], 7.0F);
+    QCOMPARE(comma.warnings, QStringList({"Row 1: ignored 2 extra value(s).",
+                                        "Row 3: missing 2 value(s)."}));
+
+    const auto whitespace = VboParser::parse(
+        u"[column names]\ntime\tspeed\nrpm\vsensor\u00a0name\n[data]\n"
+        "0\t10\v100\f7\n1 20\r200 8");
+    QCOMPARE(whitespace.sampleCount, 2);
+    QCOMPARE(whitespace.channels.value("rpm").values, QVector<float>({100, 200}));
+    QCOMPARE(whitespace.channels.value(QStringLiteral("sensor\u00a0name")).values,
+             QVector<float>({7, 8}));
+    QVERIFY(whitespace.warnings.isEmpty());
+}
+
+void TelemetryTests::boundsSeparatorHeavyVboRows()
+{
+    const QString separators(200'000, QLatin1Char(','));
+    const QString prefix = QStringLiteral("[column names]\ntime,speed\n[data]\n0,42");
+    const auto parsed = VboParser::parse(prefix + separators);
+    QCOMPARE(parsed.sampleCount, 1);
+    QCOMPARE(parsed.channels.value("speed").values, QVector<float>({42}));
+    QCOMPARE(parsed.warnings, QStringList({"Row 1: ignored 200000 extra value(s)."}));
+    // Ignored values still have to respect the field limit.
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(prefix + separators
+            + QString(VboParser::kMaximumFieldCharacters + 1, QLatin1Char('x'))));
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(QStringLiteral("[column names]\n") + separators
+            + QStringLiteral("\n[data]\n0")));
+}
+
+void TelemetryTests::enforcesVboScannerBoundaries()
+{
+    const QString valid = QStringLiteral("[column names]\ntime speed\n[data]\n0 42");
+    const QString comment = QStringLiteral("#")
+        + QString(VboParser::kMaximumLineCharacters - 1, QLatin1Char('x'));
+    QCOMPARE(VboParser::parse(comment + QStringLiteral("\r\n") + valid).sampleCount, 1);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(comment + QStringLiteral("x\n") + valid));
+    // A terminal CR is content, unlike CR in CRLF.
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(valid + QStringLiteral("\n") + comment + QLatin1Char('\r')));
+
+    const QString emptyLines(VboParser::kMaximumLines - 4, QLatin1Char('\n'));
+    QCOMPARE(VboParser::parse(emptyLines + valid).sampleCount, 1);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(emptyLines + valid + QLatin1Char('\n')));
+
+    QStringList names{"time"};
+    QStringList values{"0"};
+    for (qsizetype index = 1; index < VboParser::kMaximumColumns; ++index) {
+        names.append(QStringLiteral("c%1").arg(index));
+        values.append("1");
+    }
+    const QString wide = QStringLiteral("[column names]\n%1\n[data]\n%2")
+        .arg(names.join(' '), values.join(' '));
+    QCOMPARE(VboParser::parse(wide).channels.size(), VboParser::kMaximumColumns - 1);
+
+    const QString field(VboParser::kMaximumFieldCharacters, QLatin1Char('x'));
+    const QString header = QStringLiteral("[column names]\ntime,speed,%1\n[data]\n0,42,1");
+    QVERIFY(VboParser::parse(header.arg(field)).channels.contains(field));
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(header.arg(field + QLatin1Char('x'))));
+    // Trimming must not turn harmless padding into an oversized field.
+    const QString padding(VboParser::kMaximumFieldCharacters + 1, QChar(0x00a0));
+    const QString padded = QStringLiteral("[column names]\ntime,speed\n[data]\n0,")
+        + padding + QStringLiteral("42") + padding + QLatin1Char(',');
+    QCOMPARE(VboParser::parse(padded).channels.value("speed").values[0], 42.0F);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(QStringLiteral("[column names]\ntime,speed\n[data]\n0,4")
+            + padding + QStringLiteral("2")));
+    // A logical comma field can span header lines; no unbounded join is needed.
+    const QString half(VboParser::kMaximumFieldCharacters / 2, QLatin1Char('x'));
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError,
+        (void) VboParser::parse(QStringLiteral("[column names]\ntime,") + half
+            + QLatin1Char('\n') + half + QStringLiteral("\n[data]\n0,1")));
+}
+
+void TelemetryTests::cancelsVboScanningBeforeLimitFailures_data()
+{
+    QTest::addColumn<QString>("source");
+    QTest::newRow("too-many-lines") << QString(VboParser::kMaximumLines, QLatin1Char('\n'));
+    QTest::newRow("oversized-line")
+        << QString(VboParser::kMaximumLineCharacters + 1, QLatin1Char('x'));
+    QTest::newRow("oversized-field")
+        << (QStringLiteral("[column names]\ntime,speed\n[data]\n0,")
+            + QString(VboParser::kMaximumFieldCharacters + 1, QLatin1Char('x')));
+    QTest::newRow("too-many-comma-columns")
+        << (QStringLiteral("[column names]\n") + QString(200'000, QLatin1Char(','))
+            + QStringLiteral("\n[data]\n0"));
+}
+
+void TelemetryTests::cancelsVboScanningBeforeLimitFailures()
+{
+    QFETCH(QString, source);
+    int checks = 0;
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled,
+        (void) VboParser::parse(source, [&checks] { return ++checks == 4; }));
+    QCOMPARE(checks, 4);
+}
+
+void TelemetryTests::cancelsVboFieldScanningAtEveryCheckpoint()
+{
+    const QString source = QStringLiteral("[column names]\ntime,\nspeed\n[data]\n0,42")
+        + QString(16'384, QLatin1Char(','));
+    int totalChecks = 0;
+    QCOMPARE(VboParser::parse(source, [&] { ++totalChecks; return false; }).sampleCount, 1);
+    // Exercise cancellation throughout a successful parse, including scanning
+    // discarded fields. Do not assume a particular number or ordering of polls.
+    for (int stopAt = 1; stopAt <= totalChecks; ++stopAt) {
+        int checks = 0;
+        QVERIFY_THROWS_EXCEPTION(OperationCancelled,
+            (void) VboParser::parse(source, [&] { return ++checks == stopAt; }));
+        QCOMPARE(checks, stopAt);
+    }
 }
 
 void TelemetryTests::convertsArcMinuteCoordinates()

@@ -48,17 +48,77 @@ QString normalizeName(QString name)
     return name.replace(QRegularExpression("\\s+"), " ");
 }
 
-QStringList splitRow(const QString &line)
+// Visit the logical row without allocating columnSection.join(' '). Section
+// lines are already trimmed; a multiline header has one virtual space between lines.
+template<typename Visitor>
+void visitRow(const QStringList &lines, const CancellationCheck &cancelled, Visitor visit)
 {
-    const QString trimmed = line.trimmed();
-    if (trimmed.contains(',')) {
-        QStringList pieces = trimmed.split(',');
-        for (QString &piece : pieces) {
-            piece = piece.trimmed();
+    qsizetype visited = 0;
+    for (qsizetype index = 0; index < lines.size(); ++index) {
+        if (index && !visit(QLatin1Char(' '))) return;
+        for (const QChar character : lines[index]) {
+            if ((visited++ & 0xfff) == 0) throwIfCancelled(cancelled);
+            if (!visit(character)) return;
         }
-        return pieces;
     }
-    return trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+}
+
+struct ScannedRow {
+    QStringList cells;
+    qsizetype count = 0;
+};
+
+ScannedRow scanRow(const QStringList &lines, qsizetype retainedColumns,
+                   bool columnNames, const CancellationCheck &cancelled)
+{
+    bool commaSeparated = false;
+    visitRow(lines, cancelled, [&](QChar character) {
+        commaSeparated = character == ',';
+        return !commaSeparated;
+    });
+
+    ScannedRow row;
+    QString field;
+    qsizetype length = 0;
+    qsizetype trimmedLength = 0;
+    const auto finishField = [&] {
+        if (!commaSeparated && !length) return;
+        if (columnNames && row.count >= retainedColumns)
+            throw ResourceLimitError("VBO contains too many columns.");
+        if (row.count < retainedColumns) {
+            field.truncate(trimmedLength);
+            row.cells.append(std::move(field));
+            field = QString{};
+        }
+        ++row.count;
+        length = trimmedLength = 0;
+    };
+    visitRow(lines, cancelled, [&](QChar character) {
+        // Preserve QRegularExpression("\\s+") without Unicode properties.
+        const auto code = character.unicode();
+        const bool separator = commaSeparated ? character == ','
+            : code == ' ' || (code >= '\t' && code <= '\r');
+        if (separator) {
+            finishField();
+            return true;
+        }
+        if (columnNames && row.count >= retainedColumns)
+            throw ResourceLimitError("VBO contains too many columns.");
+        // Comma fields are trimmed. Count pending trailing whitespace without
+        // allocating it beyond the field budget; reject it only if it is interior.
+        if (commaSeparated && !length && character.isSpace()) return true;
+        ++length;
+        if (!commaSeparated || !character.isSpace()) {
+            trimmedLength = length;
+            if (trimmedLength > VboParser::kMaximumFieldCharacters)
+                throw ResourceLimitError("VBO contains a field longer than the supported 64 KiB limit.");
+        }
+        if (row.count < retainedColumns && length <= VboParser::kMaximumFieldCharacters)
+            field.append(character);
+        return true;
+    });
+    finishField();
+    return row;
 }
 
 QStringList uniqueNames(const QStringList &input)
@@ -295,10 +355,10 @@ TelemetrySession VboParser::parseFile(const QString &path, const CancellationChe
         if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
             throw VboParseError(QStringLiteral("Could not read VBO: %1").arg(file.errorString()));
         }
-        bytes.append(chunk);
-        if (bytes.size() > kMaximumFileBytes) {
+        if (chunk.size() > kMaximumFileBytes - bytes.size()) {
             throw ResourceLimitError("VBO exceeds the supported 128 MiB file size limit.");
         }
+        bytes.append(chunk);
     }
     throwIfCancelled(cancelled);
     return parse(QString::fromUtf8(bytes), cancelled);
@@ -310,28 +370,38 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
     if (text.size() > kMaximumFileBytes) {
         throw ResourceLimitError("VBO text exceeds the supported complexity limit.");
     }
-    QString content = text.toString();
-    if (content.startsWith(QChar::ByteOrderMark)) {
-        content.removeFirst();
+    if (text.startsWith(QChar::ByteOrderMark)) {
+        text = text.sliced(1);
     }
     QHash<QString, QStringList> sections;
     QString section;
-    const QStringList lines = content.split(QRegularExpression("\\r?\\n"));
-    if (lines.size() > kMaximumLines) {
-        throw ResourceLimitError("VBO contains too many lines.");
-    }
     qsizetype dataRows = 0;
-    for (qsizetype lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
-        if ((lineIndex & 0xff) == 0) throwIfCancelled(cancelled);
-        const QString &raw = lines[lineIndex];
-        if (raw.size() > kMaximumLineCharacters) {
-            throw ResourceLimitError("VBO contains a line longer than the supported 1 MiB limit.");
-        }
-        const QString line = raw.trimmed();
-        if (line.isEmpty() || line.startsWith(';') || line.startsWith('#')) {
+    qsizetype lineIndex = 0;
+    qsizetype start = 0;
+    static const QRegularExpression sectionPattern("^\\[([^\\]]+)\\]$");
+    // Include the final empty line, as split("\\r?\\n") did. Check each limit
+    // before creating a line string or growing a section's list.
+    for (qsizetype position = 0; position <= text.size(); ++position) {
+        if ((position & 0xfff) == 0) throwIfCancelled(cancelled);
+        if (position < text.size() && text[position] != '\n') {
+            const qsizetype length = position - start + 1;
+            const bool crlf = text[position] == '\r' && position + 1 < text.size()
+                && text[position + 1] == '\n';
+            if (length > kMaximumLineCharacters && !crlf)
+                throw ResourceLimitError("VBO contains a line longer than the supported 1 MiB limit.");
             continue;
         }
-        const auto match = QRegularExpression("^\\[([^\\]]+)\\]$").match(line);
+        if (++lineIndex > kMaximumLines)
+            throw ResourceLimitError("VBO contains too many lines.");
+        if ((lineIndex & 0xff) == 0) throwIfCancelled(cancelled);
+        qsizetype end = position;
+        if (position < text.size() && end > start && text[end - 1] == '\r') --end;
+        const QStringView view = text.sliced(start, end - start).trimmed();
+        start = position + 1;
+        if (view.isEmpty() || view.startsWith(';') || view.startsWith('#')) {
+            continue;
+        }
+        const auto match = sectionPattern.matchView(view);
         if (match.hasMatch()) {
             section = match.captured(1).trimmed().toLower();
             if (!sections.contains(section)) {
@@ -341,7 +411,7 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
             if (section.startsWith("data") && ++dataRows > kMaximumDataRows) {
                 throw ResourceLimitError("VBO contains too many data rows.");
             }
-            sections[section].append(line);
+            sections[section].append(view.toString());
         }
     }
 
@@ -391,12 +461,15 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
         }
         session.timingGates.append(*parsed.gate);
     }
+    qsizetype metadataEntries = 0;
     for (auto iterator = sections.cbegin(); iterator != sections.cend(); ++iterator) {
+        throwIfCancelled(cancelled);
         if (iterator.key().contains("column") || iterator.key().contains("data")
             || iterator.key() == QStringLiteral("laptiming")) {
             continue;
         }
         for (const QString &entry : iterator.value()) {
+            if ((metadataEntries++ & 0xff) == 0) throwIfCancelled(cancelled);
             const qsizetype separator = entry.indexOf(QRegularExpression("[:=]"));
             if (separator >= 0) {
                 session.metadata.insert(normalizeName(entry.first(separator)), entry.sliced(separator + 1).trimmed());
@@ -423,17 +496,11 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
         throw VboParseError("VBO has no [data] rows.");
     }
 
-    QStringList names = splitRow(columnSection.join(' '));
-    if (names.size() > kMaximumColumns) {
-        throw ResourceLimitError("VBO contains too many columns.");
-    }
+    QStringList names = scanRow(columnSection, kMaximumColumns, true, cancelled).cells;
     if (names.isEmpty()) {
         throw VboParseError("VBO contains no column names.");
     }
     for (QString &name : names) {
-        if (name.size() > kMaximumFieldCharacters) {
-            throw ResourceLimitError("VBO contains a column name longer than the supported field limit.");
-        }
         name = normalizeName(name);
     }
     names = uniqueNames(names);
@@ -456,21 +523,17 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
     constexpr double earlyDayThreshold = 1.0 * 3600.0;
     for (qsizetype rowIndex = 0; rowIndex < dataSection.size(); ++rowIndex) {
         if ((rowIndex & 0xff) == 0) throwIfCancelled(cancelled);
-        const QStringList cells = splitRow(dataSection[rowIndex]);
-        for (const QString &cell : cells) {
-            if (cell.size() > kMaximumFieldCharacters) {
-                throw ResourceLimitError("VBO contains a field longer than the supported 64 KiB limit.");
-            }
-        }
+        const auto row = scanRow({dataSection[rowIndex]}, names.size(), false, cancelled);
+        const QStringList &cells = row.cells;
         if (cells.size() < names.size()) {
             appendWarning(QStringLiteral("Row %1: missing %2 value(s).")
                               .arg(rowIndex + 1)
                               .arg(names.size() - cells.size()));
         }
-        if (cells.size() > names.size()) {
+        if (row.count > names.size()) {
             appendWarning(QStringLiteral("Row %1: ignored %2 extra value(s).")
                               .arg(rowIndex + 1)
-                              .arg(cells.size() - names.size()));
+                              .arg(row.count - names.size()));
         }
         const auto parsedTime = timeIndex >= 0
             ? (timeIndex < cells.size() ? parseTimestamp(cells[timeIndex])
