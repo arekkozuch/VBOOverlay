@@ -333,5 +333,5 @@ the document revision. Editing an inactive run does not select or reload it.
 Names and annotations are display metadata: they do not change source identity,
 lap references, derivation/cache keys, track configuration, exclusions or ranking
 eligibility. Current names are applied when publishing cached or newly derived
-rows, rankings and selected-lap labels, without resetting the detail session,
+rows, rankings, source diagnostics and selected-lap labels, without resetting the detail session,
 track geometry or cursor.

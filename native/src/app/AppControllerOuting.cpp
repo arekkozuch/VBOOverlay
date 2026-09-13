@@ -285,7 +285,10 @@ void AppController::refreshLapExclusionPolicy()
         if (it->fastestLapIndex) bestNumbers.insert(it.key(), it->timedLaps[*it->fastestLapIndex].number);
     }
     m_outingLapRows.clear();
-    m_outingLapMessages = m_outingSourceMessages;
+    m_outingLapMessages.clear();
+    for (const auto &message : m_outingSourceMessages)
+        m_outingLapMessages.append(message.runId.isEmpty() ? message.text
+            : names.value(message.runId) + ": " + message.text);
     const auto unmatched = exclusions.size() - matched.size();
     if (unmatched > 0) m_outingLapMessages.append(QStringLiteral(
         "%1 saved lap exclusion(s) could not be matched to the current recordings; retained without applying.").arg(unmatched));
@@ -465,19 +468,19 @@ void AppController::refreshOutingLaps()
                         if (row.reference.isEmpty()) throw std::runtime_error("Cannot identify this lap section.");
                     }
                     result.rows.append(rows);
-                    if (!recordingTimestamp(session)) result.messages.append(source.value("name").toString()
-                        + ": recording date/time unavailable; listed after chronological records in import order.");
-                    if (laps.acceptedPasses.isEmpty()) result.messages.append(source.value("name").toString()
-                        + ": no reliable start/finish passages; lap type is unknown.");
+                    if (!recordingTimestamp(session)) result.messages.append(OutingSourceMessage{
+                        source.value("runId").toString(), "recording date/time unavailable; listed after chronological records in import order."});
+                    if (laps.acceptedPasses.isEmpty()) result.messages.append(OutingSourceMessage{
+                        source.value("runId").toString(), "no reliable start/finish passages; lap type is unknown."});
                 } catch (const OperationCancelled &) { throw; }
                 catch (const std::exception &error) {
-                    result.messages.append(source.value("name").toString() + ": " + QString::fromUtf8(error.what()));
+                    result.messages.append(OutingSourceMessage{source.value("runId").toString(), QString::fromUtf8(error.what())});
                 }
             }
             throwIfCancelled(cancelled);
             sortOutingLaps(result.rows);
         } catch (const OperationCancelled &) { result.cancelled = true; result.rows.clear(); }
-        catch (const std::exception &error) { result.rows.clear(); result.messages.append(QString::fromUtf8(error.what())); }
+        catch (const std::exception &error) { result.rows.clear(); result.messages.append(OutingSourceMessage{{}, QString::fromUtf8(error.what())}); }
         return result;
     }));
 }

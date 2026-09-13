@@ -1133,6 +1133,8 @@ void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
         QCOMPARE(controller.selectedOutingLap().value("reference").toMap(), winner);
         QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap(), winner);
         QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("runName").toString(), QString("Renamed run"));
+        QVERIFY(controller.outingLapMessages().join('\n').contains("Renamed run: recording date/time unavailable"));
+        QVERIFY(!controller.outingLapMessages().join('\n').contains(metadata.value("name").toString() + ":"));
         for (const auto &value : controller.outingLaps()) if (value.toMap().value("runId").toString() == runId) {
             QCOMPARE(value.toMap().value("runName").toString(), QString("Renamed run"));
             QVERIFY(!value.toMap().value("chronologyKnown").toBool());

@@ -481,9 +481,13 @@ private:
     QStringList m_outingLapChannels;
     QVariantList m_outingLapTrack;
     double m_outingLapCursor = 0;
+    struct OutingSourceMessage {
+        QString runId;
+        QString text;
+    };
     struct OutingLapResult {
         QVector<OutingLapRow> rows;
-        QStringList messages;
+        QList<OutingSourceMessage> messages;
         QByteArray key;
         quint64 generation = 0;
         bool cancelled = false;
@@ -498,7 +502,7 @@ private:
     QString m_outingComparisonGroupId;
     QString m_outingCompatibilityDocumentId;
     QVector<OutingLapRow> m_outingRawLapRows;
-    QStringList m_outingSourceMessages;
+    QList<OutingSourceMessage> m_outingSourceMessages;
     QByteArray m_loadedSourceRevision;
     [[nodiscard]] QJsonArray outingLapSources() const;
     [[nodiscard]] QByteArray outingLapKey() const;
