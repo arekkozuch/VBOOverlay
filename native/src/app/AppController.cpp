@@ -1253,6 +1253,8 @@ QVariantMap AppController::sessionSeries(const TelemetrySession &session, const 
     const auto channel = session.channels.constFind(resolved);
     return {
         {"segments", segments},
+        // Presentation only: retain signed samples and units for inspection.
+        {"brakingUp", resolved == session.aliases.value("longitudinalAcceleration")},
         {"minimum", minimum},
         {"maximum", maximum},
         {"unit", channel == session.channels.cend() ? QString() : channel->unit},

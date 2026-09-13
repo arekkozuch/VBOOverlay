@@ -487,3 +487,23 @@ records which existing guards needed no change. Exact PR and main macOS arm64
 Debug/Release CI evidence is recorded in [KAN-17](https://kozucharkadiusz.atlassian.net/browse/KAN-17).
 The coordinator lacks CMake/CTest/Qt; native validation runs in CI. Windows remains
 paused, and private recordings/physical hardware require separate acceptance.
+
+## KAN-111: braking graph and lap-channel controls
+
+Longitudinal-G graphs use braking-up presentation, matching the existing G ball
+and radar. Signed samples, cursor readouts, other channel axes and track geometry
+are unchanged. A presentation test verifies the selected longitudinal alias and
+retained signs; the production QML regression checks opposite braking/acceleration
+positions and unchanged lateral mapping.
+
+Lap-detail controls add, replace and remove up to four recorded channels. The
+picker uses the selected lap recording, independently of the active editor run.
+Choices are stored as analysis preferences; unavailable channels are omitted in
+other recordings and an intentionally empty selection stays empty. Reopen tests
+cover preference retention, duplicate/unknown rejection, the four-channel bound,
+and unchanged project, active run, cursor and track. The native QML test clicks
+Add/Remove and operates the replacement selector with the keyboard.
+
+Validation evidence and final PR/main macOS CI links are recorded in
+[KAN-111](https://kozucharkadiusz.atlassian.net/browse/KAN-111). Windows execution
+remains paused. No GPS parser or track layout changes are included.

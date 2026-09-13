@@ -93,7 +93,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailError READ outingLapDetailError NOTIFY outingLapDetailChanged)
-    Q_PROPERTY(QStringList outingLapChannels READ outingLapChannels NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QStringList outingLapChannels READ outingLapChannels WRITE setOutingLapChannels NOTIFY outingLapDetailChanged)
+    Q_PROPERTY(QStringList outingLapAvailableChannels READ outingLapAvailableChannels NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
     Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
@@ -203,6 +204,8 @@ public:
     [[nodiscard]] QVariantMap selectedOutingLap() const { return m_selectedOutingLap; }
     [[nodiscard]] QString outingLapDetailState() const { return m_outingLapDetailState; }
     [[nodiscard]] QString outingLapDetailError() const { return m_outingLapDetailError; }
+    [[nodiscard]] QStringList outingLapAvailableChannels() const;
+    void setOutingLapChannels(const QStringList &channels);
     [[nodiscard]] QStringList outingLapChannels() const { return m_outingLapChannels; }
     [[nodiscard]] QVariantList outingLapTrack() const { return m_outingLapTrack; }
     [[nodiscard]] QVariantMap outingLapTrackPoint() const;
