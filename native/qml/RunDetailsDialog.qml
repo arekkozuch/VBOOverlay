@@ -61,6 +61,8 @@ Dialog {
             objectName: "runDetailsScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 0
+            Layout.preferredHeight: 1
             clip: true
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -118,23 +120,23 @@ Dialog {
             wrapMode: Text.WordWrap
             color: "#ff9585"
         }
-        RowLayout {
-            Layout.fillWidth: true
-            FeButton {
-                objectName: "cancelRunDetails"
-                text: qsTr("Cancel")
-                onClicked: root.close()
-            }
-            Item { Layout.fillWidth: true }
-            FeButton {
-                objectName: "saveRunDetails"
-                text: qsTr("Save details")
-                enabled: root.validDraft && !!root.captured.editToken && !appController.projectLoading
-                onClicked: {
-                    if (appController.updateRunMetadata(root.editingRunId, root.captured.editToken || "",
-                        nameField.text, notesField.text, conditionsField.text, setupField.text)) root.close();
-                    else errorLabel.text = qsTr("Could not save these details. Cancel and reopen to review the current run before editing again.");
-                }
+    }
+    footer: DialogButtonBox {
+        FeButton {
+            objectName: "cancelRunDetails"
+            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            text: qsTr("Cancel")
+            onClicked: root.close()
+        }
+        FeButton {
+            objectName: "saveRunDetails"
+            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+            text: qsTr("Save details")
+            enabled: root.validDraft && !!root.captured.editToken && !appController.projectLoading
+            onClicked: {
+                if (appController.updateRunMetadata(root.editingRunId, root.captured.editToken || "",
+                    nameField.text, notesField.text, conditionsField.text, setupField.text)) root.close();
+                else errorLabel.text = qsTr("Could not save these details. Cancel and reopen to review the current run before editing again.");
             }
         }
     }

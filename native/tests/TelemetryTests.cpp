@@ -1084,7 +1084,7 @@ void TelemetryTests::editsRunMetadataWithoutChangingAnalysis()
     const auto path = directory.filePath("20260901-rain.vbo");
     const auto secondPath = directory.filePath("second.vbo");
     QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
-    QVERIFY(writeBytes(secondPath, EventProjectFixture::lapsVbo()));
+    QVERIFY(writeBytes(secondPath, EventProjectFixture::lapsVbo().replace("15 52.0001", "16 52.0001")));
     const auto savedPath = directory.filePath("day.fetproject");
     const auto recoveryPath = directory.filePath("recovery.json");
     QString runId;
@@ -1213,8 +1213,8 @@ void TelemetryTests::editsRunMetadataThroughQml()
     QCOMPARE(notes->property("text").toString().size(), 4097); // Never silently truncate notes.
     notes->setProperty("text", "Notes"); conditions->setProperty("text", "Dry"); setup->setProperty("text", "Tyres changed");
     QVERIFY(save->isEnabled()); QVERIFY(scroll->height() > 50);
-    const auto footer = save->mapRectToScene(save->boundingRect());
-    QVERIFY(footer.top() >= 0 && footer.bottom() <= window->height());
+    QTRY_VERIFY(save->mapRectToScene(save->boundingRect()).top() >= 0
+        && save->mapRectToScene(save->boundingRect()).bottom() <= window->height());
     cancel->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
     QTRY_VERIFY(!dialog->property("visible").toBool()); QCOMPARE(controller.currentProjectObject(), before); QVERIFY(!controller.dirty());
     open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); QTRY_VERIFY(dialog->property("opened").toBool());
