@@ -16,7 +16,7 @@ Dialog {
     readonly property var slots: appController.comparisonSlots
     readonly property var laps: appController.comparisonLaps
     onOpened: actionError = ""
-    function result(ok) {
+    function reportSelection(ok) {
         actionError = ok ? "" : qsTr("Could not select this lap. Check its availability and track configuration.");
     }
     contentItem: ScrollView {
@@ -33,6 +33,7 @@ Dialog {
                 color: "#91a0b2"
             }
             Repeater {
+                objectName: "comparisonSlotEntries"
                 model: 2
                 delegate: ColumnLayout {
                     id: entry
@@ -59,7 +60,7 @@ Dialog {
                             enabled: entry.slot.state === "ready" && !appController.outingLapsLoading
                             onClicked: {
                                 const ok = appController.inspectComparisonLap(entry.index);
-                                root.result(ok);
+                                root.reportSelection(ok);
                                 if (ok) root.close();
                             }
                         }
@@ -84,7 +85,7 @@ Dialog {
                         enabled: !appController.outingLapsLoading && count > 0
                         onActivated: function(index) {
                             if (index >= 0 && index < entry.choices.length)
-                                root.result(appController.selectComparisonLap(entry.index, entry.choices[index].reference));
+                                root.reportSelection(appController.selectComparisonLap(entry.index, entry.choices[index].reference));
                         }
                     }
                     Label {
@@ -106,21 +107,21 @@ Dialog {
                     text: qsTr("Swap A / B")
                     compact: true
                     enabled: !!root.slots[0].lap.reference && !!root.slots[1].lap.reference
-                    onClicked: root.result(appController.swapComparisonLaps())
+                    onClicked: root.reportSelection(appController.swapComparisonLaps())
                 }
                 FeButton {
                     objectName: "bestRunAsComparisonB"
                     text: qsTr("Best of A’s run → B")
                     compact: true
                     enabled: !!root.slots[0].lap.reference && !appController.outingLapsLoading
-                    onClicked: root.result(appController.useBestComparisonLap(false))
+                    onClicked: root.reportSelection(appController.useBestComparisonLap(false))
                 }
                 FeButton {
                     objectName: "bestDayAsComparisonB"
                     text: qsTr("Best of group → B")
                     compact: true
                     enabled: root.laps.length > 0 && !appController.outingLapsLoading
-                    onClicked: root.result(appController.useBestComparisonLap(true))
+                    onClicked: root.reportSelection(appController.useBestComparisonLap(true))
                 }
             }
             Label {

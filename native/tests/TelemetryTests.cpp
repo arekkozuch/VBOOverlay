@@ -2802,8 +2802,12 @@ void TelemetryTests::selectsIndependentComparisonLapsThroughQml()
     open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
     auto *dialog = window->findChild<QObject *>("comparisonLapDialog"); QVERIFY(dialog);
     QTRY_VERIFY(dialog->property("opened").toBool());
-    auto *pickerA = window->findChild<QObject *>("comparisonLapPicker0");
-    auto *pickerB = window->findChild<QObject *>("comparisonLapPicker1"); QVERIFY(pickerA && pickerB);
+    auto *entries = window->findChild<QObject *>("comparisonSlotEntries"); QVERIFY(entries);
+    QQuickItem *entryA = nullptr, *entryB = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(entries, "itemAt", Q_RETURN_ARG(QQuickItem *, entryA), Q_ARG(int, 0)) && entryA);
+    QTRY_VERIFY(QMetaObject::invokeMethod(entries, "itemAt", Q_RETURN_ARG(QQuickItem *, entryB), Q_ARG(int, 1)) && entryB);
+    auto *pickerA = entryA->findChild<QObject *>("comparisonLapPicker0");
+    auto *pickerB = entryB->findChild<QObject *>("comparisonLapPicker1"); QVERIFY(pickerA && pickerB);
     // Exercise the production selectors, including a different compatible run.
     QVERIFY(QMetaObject::invokeMethod(pickerA, "activated", Q_ARG(int, 0)));
     QTRY_COMPARE(controller.comparisonSlots()[0].toMap().value("state").toString(), QString("ready"));
@@ -2846,7 +2850,7 @@ void TelemetryTests::selectsIndependentComparisonLapsThroughQml()
         if (group.value("id") == b.value("compatibilityGroupId"))
             QCOMPARE(controller.m_comparisonSlots[1].row.value("reference"), group.value("ranking").toMap().value("bestOfDay").toMap().value("reference"));
     }
-    auto *inspect = window->findChild<QQuickItem *>("inspectComparison0"); QVERIFY(inspect);
+    auto *inspect = entryA->findChild<QQuickItem *>("inspectComparison0"); QVERIFY(inspect);
     inspect->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
     QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
     QCOMPARE(controller.selectedOutingLap().value("reference"), b.value("reference"));
