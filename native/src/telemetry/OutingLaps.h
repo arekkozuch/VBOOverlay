@@ -2,6 +2,8 @@
 
 #include "telemetry/LapTiming.h"
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QHash>
 
 namespace FlappedEar {
 
@@ -29,6 +31,13 @@ inline constexpr auto lapReferenceAlgorithm = "source-laps-v1";
 [[nodiscard]] QJsonObject makeLapReference(const OutingLapRow &row, const QString &eventId,
     const QString &sourceId, const QByteArray &sourceRevision, const QByteArray &derivationKey);
 [[nodiscard]] bool validLapReference(const QJsonObject &reference);
+
+// Historical references are retained but only exact current references apply.
+using LapExclusionReasons = QHash<QByteArray, QString>;
+[[nodiscard]] QByteArray lapReferenceKey(const QJsonObject &reference);
+[[nodiscard]] bool validLapExclusions(const QJsonValue &value, const QString &eventId);
+[[nodiscard]] LapExclusionReasons lapExclusionReasons(const QJsonArray &exclusions);
+void applyLapExclusions(LapSession &laps, const QJsonObject &binding, const QJsonArray &exclusions);
 
 inline constexpr qsizetype maximumOutingLapRows = 20'000;
 

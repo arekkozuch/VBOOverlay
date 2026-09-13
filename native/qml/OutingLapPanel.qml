@@ -108,10 +108,11 @@ Rectangle {
                         font.weight: Font.DemiBold
                     }
                     Label {
-                        text: row.modelData.runName + (row.modelData.referenceIssue ? " · " + row.modelData.referenceIssue
+                        text: row.modelData.runName + (row.modelData.excluded ? qsTr(" · Excluded: ") + row.modelData.exclusionReason
+                            : row.modelData.referenceIssue ? " · " + row.modelData.referenceIssue
                             : row.modelData.bestOfRun ? qsTr(" · Best of run") : "")
                         Layout.fillWidth: true
-                        color: row.modelData.referenceIssue ? "#d6a457" : "#dce4ee"
+                        color: row.modelData.excluded || row.modelData.referenceIssue ? "#d6a457" : "#dce4ee"
                         font.pixelSize: 12
                         elide: Text.ElideMiddle
                     }

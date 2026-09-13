@@ -594,6 +594,7 @@ QVariantList AppController::lapSummaries() const
             {QStringLiteral("durationSeconds"), lap.durationSeconds},
             {QStringLiteral("hasDelta"), lap.referenceEligible() && m_lapSession.fastestLapIndex.has_value()},
             {QStringLiteral("referenceEligible"), lap.referenceEligible()},
+            {QStringLiteral("exclusionReason"), lap.userExclusionReason},
             {QStringLiteral("referenceIssue"), lap.referenceIssue == LapReferenceIssue::GpsGap
                 ? QStringLiteral("GPS gap") : lap.referenceIssue == LapReferenceIssue::InvalidGps
                     ? QStringLiteral("Invalid GPS") : QString()},
@@ -953,6 +954,9 @@ void AppController::startVboLoad(
         result.expectedFingerprint = expectedFingerprint;
         result.relink = relink;
         try {
+            const auto sourceSize = QFileInfo(path).size();
+            result.contentRevision = TelemetrySource::contentSha256(path, sourceSize,
+                [cancellation] { return cancellation->load(); }).toHex();
             result.session = TelemetrySource::load(
                 path, [cancellation] { return cancellation->load(); });
             if (cancellation->load()) {
@@ -966,6 +970,8 @@ void AppController::startVboLoad(
             result.lapSession = deriveSourceLapSession(result.session, {}, cancelled);
             result.fingerprint = ProjectSourceReferenceCodec::telemetryFingerprint(
                 path, result.session);
+            if (TelemetrySource::contentSha256(path, sourceSize, cancelled).toHex() != result.contentRevision)
+                throw std::runtime_error("Recording changed during loading; reload this source.");
             result.success = !cancellation->load();
             if (!result.success) {
                 result.cancelled = true;
@@ -1011,6 +1017,7 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     m_session = std::make_unique<TelemetrySession>(result.session);
     m_trackGeometry = result.geometry;
     m_lapSession = result.lapSession;
+    m_loadedSourceRevision = result.contentRevision;
     m_trackPoints = trackPointsFor(m_trackGeometry);
     m_telemetryPath = result.path;
     m_vboReference = ProjectSourceReferenceCodec::forLoadedSource(
@@ -1020,7 +1027,7 @@ void AppController::commitVboLoad(const VboLoadResult &result, const bool markDo
     m_syncCandidate.clear();
     m_previewRenderContext.setSession(m_session.get());
     m_previewRenderContext.setTrackGeometry(&m_trackGeometry);
-    m_previewRenderContext.setLapSession(m_lapSession);
+    refreshLapExclusionPolicy();
     reconcileAnalysisChannels();
     emit telemetryChanged();
     emit lapNavigationChanged();
@@ -1146,6 +1153,7 @@ void AppController::performClearProject()
     m_vboReference = {};
     m_session.reset();
     m_lapSession = {};
+    m_loadedSourceRevision.clear();
     m_trackGeometry = {};
     m_previewRenderContext.setSession(nullptr);
     m_previewRenderContext.setTrackGeometry(nullptr);
@@ -1551,6 +1559,7 @@ bool AppController::commitProjectLoad(const ProjectLoadResult &result)
     m_telemetryPath.clear();
     m_session.reset();
     m_lapSession = {};
+    m_loadedSourceRevision.clear();
     m_trackGeometry = {};
     m_trackPoints = trackPointsFor(m_trackGeometry);
     m_vboLoadState = result.vboReference.isEmpty() ? QStringLiteral("idle")
@@ -1971,6 +1980,8 @@ bool AppController::startExport(
         {"inputPath", inputPath},
         {"outputPath", m_exportOutputTransaction->stagingPath()},
         {"vboPath", m_telemetryPath},
+        {"lapBinding", activeLapBinding()},
+        {"lapExclusions", currentProjectObject().value("event").toObject().value("lapExclusions").toArray()},
         {"widgets", m_widgetModel.toJson()},
         {"sync", QJsonObject{{"offset", m_sync.offset}, {"timeScale", m_sync.timeScale}}},
         {"outputWidth", outputSize.width()}, {"outputHeight", outputSize.height()},

@@ -191,3 +191,34 @@ cover run selection, laps, dirty state, Save As, relink/fingerprint policy,
 recovery, stale worker rejection and the actual Analysis QML selector. Existing
 native, import, RCZ, render/export and startup suites remain required. Hosted
 checks do not replace interactive macOS or private-recording validation.
+
+## User lap exclusions (step 011)
+
+An optional `event.lapExclusions` array stores `{reference, reason}` entries.
+`reference` is the step-010 portable LAP reference: event, run, source, complete
+source SHA-256, derivation key, algorithm version and exact time bounds. Reasons
+must contain text, contain no NUL, and fit within 256 characters. Duplicate
+references and more than 20,000 entries are rejected, alongside the existing
+project byte limit. Legacy documents without this array include every otherwise
+eligible lap.
+
+In lap detail, enter a reason (for example Traffic or Cooldown) and choose
+**Exclude lap**. **Restore lap** removes the exclusion. The lap, map, charts and
+cursor remain inspectable. Excluded rows show their reason. Save, Save As and
+unsaved-document recovery preserve exclusions through the ordinary project
+transaction. Source or derivation changes never transfer a reason by lap number
+or nearby time: unmatched entries remain saved and a notice identifies the count.
+The controller API also permits explicit removal of a historical reference.
+
+`TimedLap::referenceEligible()` combines GPS quality with user exclusion.
+`eligibleLapIndices()` is the shared input policy for ranking and future
+potential/statistics calculations; those later analysis features are not introduced
+by this step. Recomputing best/deltas retains all measured laps and raw traces;
+restoring a GPS-ineligible lap does not make it a valid reference. An all-excluded
+run has no best lap. Preview and the export worker use the same policy, and export
+verifies the complete source revision before and after deriving laps.
+
+Validation includes malformed documents, exact-reference invalidation, all-excluded
+ranking, shared render-context results, keyboard-operated production QML controls,
+and actual save/reopen/recovery flows. Native macOS Debug/Release CI provides the
+build/test gate; private recordings and physical-Mac acceptance remain separate.

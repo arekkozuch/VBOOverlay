@@ -14,6 +14,97 @@
 
 namespace FlappedEar {
 
+QJsonObject AppController::activeLapBinding() const
+{
+    for (auto value : outingLapSources()) {
+        auto source = value.toObject();
+        if (source.value("runId").toString() != activeRunId()) continue;
+        source.insert("sourceRevision", QString::fromLatin1(m_loadedSourceRevision));
+        source.remove("reference"); source.remove("name"); source.remove("trackConfiguration");
+        return source;
+    }
+    return {};
+}
+
+bool AppController::setOutingLapExcluded(const QVariantMap &referenceMap, bool excluded, const QString &reason)
+{
+    if (!EventProjectCodec::isEvent(m_projectTemplate) || projectLoading() || exporting()
+        || recoveryPending() || m_batchPending
+        || m_documentState.pendingAction() != ProjectDocumentState::DestructiveAction::None
+        || m_documentState.revision() == std::numeric_limits<quint64>::max()) return false;
+    const auto reference = QJsonObject::fromVariantMap(referenceMap);
+    if (!validLapReference(reference) || reference.value("type") != "LAP") return false;
+    if (excluded && (resolveOutingLapReference(referenceMap).value("state").toString() != "resolved"
+        || reason.trimmed().isEmpty() || reason.size() > 256 || reason.contains(QChar::Null))) return false;
+    auto project = currentProjectObject();
+    auto event = project.value("event").toObject();
+    QJsonArray exclusions;
+    for (const auto &item : event.value("lapExclusions").toArray())
+        if (item.toObject().value("reference").toObject() != reference) exclusions.append(item);
+    if (excluded) exclusions.append(QJsonObject{{"reference", reference}, {"reason", reason.trimmed()}});
+    if (exclusions == event.value("lapExclusions").toArray()) return true;
+    event.insert("lapExclusions", exclusions); project.insert("event", event);
+    QString error;
+    if (!ProjectLimits::validateProject(project, &error)) return false;
+    m_projectTemplate = project;
+    markPersistentChange();
+    return true;
+}
+
+void AppController::refreshLapExclusionPolicy()
+{
+    const auto event = currentProjectObject().value("event").toObject();
+    const auto exclusions = event.value("lapExclusions").toArray();
+    applyLapExclusions(m_lapSession, activeLapBinding(), exclusions);
+    m_previewRenderContext.setLapSession(m_lapSession);
+    emit lapNavigationChanged();
+    emit liveValuesChanged();
+    if (m_outingLapRequestedKey != outingLapKey() || m_outingLapGeneration != m_sourceGeneration) return;
+    const auto reasons = lapExclusionReasons(exclusions);
+    QSet<QByteArray> matched;
+    QHash<QString, LapSession> runs;
+    for (const auto &row : m_outingRawLapRows) {
+        if (row.type != LapSectionType::Lap) continue;
+        TimedLap lap;
+        lap.number = row.lapNumber; lap.startTelemetryTime = row.start; lap.endTelemetryTime = row.end;
+        lap.durationSeconds = row.end - row.start; lap.referenceIssue = row.referenceIssue;
+        lap.userExclusionReason = reasons.value(lapReferenceKey(row.reference));
+        if (!lap.userExclusionReason.isEmpty()) matched.insert(lapReferenceKey(row.reference));
+        runs[row.runId].timedLaps.append(lap);
+    }
+    QHash<QString, int> bestNumbers;
+    for (auto it = runs.begin(); it != runs.end(); ++it) {
+        recomputeLapRanking(it.value());
+        if (it->fastestLapIndex) bestNumbers.insert(it.key(), it->timedLaps[*it->fastestLapIndex].number);
+    }
+    m_outingLapRows.clear();
+    m_outingLapMessages = m_outingSourceMessages;
+    const auto unmatched = exclusions.size() - matched.size();
+    if (unmatched > 0) m_outingLapMessages.append(QStringLiteral(
+        "%1 saved lap exclusion(s) could not be matched to the current recordings; retained without applying.").arg(unmatched));
+    for (const auto &row : m_outingRawLapRows) {
+        const auto reason = reasons.value(lapReferenceKey(row.reference));
+        const QString clock = row.timestampMilliseconds
+            ? QDateTime::fromMSecsSinceEpoch(*row.timestampMilliseconds, QTimeZone::UTC).toString("yyyy-MM-dd HH:mm:ss.zzz")
+            : QStringLiteral("Time unavailable");
+        const QVariantMap item{{"runId", row.runId}, {"runName", row.runName},
+            {"type", lapSectionName(row.type)}, {"reference", row.reference.toVariantMap()}, {"lapNumber", row.lapNumber},
+            {"startTime", row.start}, {"endTime", row.end}, {"durationSeconds", row.end - row.start}, {"clock", clock},
+            {"excluded", !reason.isEmpty()}, {"exclusionReason", reason},
+            {"referenceEligible", row.referenceEligible && reason.isEmpty()},
+            {"bestOfRun", row.type == LapSectionType::Lap && bestNumbers.value(row.runId, -1) == row.lapNumber},
+            {"referenceIssue", row.referenceIssue == LapReferenceIssue::GpsGap ? QStringLiteral("GPS gap")
+                : row.referenceIssue == LapReferenceIssue::InvalidGps ? QStringLiteral("Invalid GPS") : QString()},
+            {"chronologyKnown", row.timestampMilliseconds.has_value()}};
+        m_outingLapRows.append(item);
+        if (!m_selectedOutingLap.isEmpty() && m_selectedOutingLap.value("reference") == item.value("reference")) {
+            m_selectedOutingLap = item;
+            emit outingLapDetailChanged();
+        }
+    }
+    emit outingLapsChanged();
+}
+
 bool AppController::setRunTrackConfiguration(
     const QString &runId, const QString &layoutId, const QString &direction)
 {
@@ -71,6 +162,7 @@ void AppController::initializeOutingLaps()
     m_outingLapTimer.setSingleShot(true);
     m_outingLapTimer.setInterval(0);
     const auto schedule = [this] { m_outingLapTimer.start(); };
+    connect(this, &AppController::documentStateChanged, this, &AppController::refreshLapExclusionPolicy);
     connect(this, &AppController::documentStateChanged, this, schedule);
     connect(this, &AppController::sourceLoadStateChanged, this, schedule);
     connect(&m_outingLapTimer, &QTimer::timeout, this, &AppController::refreshOutingLaps);
@@ -81,22 +173,10 @@ void AppController::initializeOutingLaps()
             m_outingLapTimer.start();
             return;
         }
-        m_outingLapRows.clear();
         m_outingStaleRunIds.clear();
-        m_outingLapMessages = result.messages;
-        for (const auto &row : result.rows) {
-            const QString type = lapSectionName(row.type);
-            const QString clock = row.timestampMilliseconds
-                ? QDateTime::fromMSecsSinceEpoch(*row.timestampMilliseconds, QTimeZone::UTC).toString("yyyy-MM-dd HH:mm:ss.zzz")
-                : QStringLiteral("Time unavailable");
-            m_outingLapRows.append(QVariantMap{{"runId", row.runId}, {"runName", row.runName},
-                {"type", type}, {"reference", row.reference.toVariantMap()}, {"lapNumber", row.lapNumber}, {"startTime", row.start},
-                {"endTime", row.end}, {"durationSeconds", row.end - row.start}, {"clock", clock},
-                {"referenceEligible", row.referenceEligible}, {"bestOfRun", row.bestOfRun},
-                {"referenceIssue", row.referenceIssue == LapReferenceIssue::GpsGap ? QStringLiteral("GPS gap")
-                    : row.referenceIssue == LapReferenceIssue::InvalidGps ? QStringLiteral("Invalid GPS") : QString()},
-                {"chronologyKnown", row.timestampMilliseconds.has_value()}});
-        }
+        m_outingRawLapRows = result.rows;
+        m_outingSourceMessages = result.messages;
+        refreshLapExclusionPolicy();
         m_outingLapsLoading = false;
         emit outingLapsChanged();
     });
@@ -108,6 +188,8 @@ void AppController::refreshOutingLaps()
     if (key == m_outingLapRequestedKey && m_sourceGeneration == m_outingLapGeneration) return;
     if (m_outingLapCancellation) m_outingLapCancellation->store(true);
     m_outingLapRows.clear();
+    m_outingRawLapRows.clear();
+    m_outingSourceMessages.clear();
     m_outingLapMessages.clear();
     const auto sources = outingLapSources();
     m_outingLapsLoading = !sources.isEmpty();

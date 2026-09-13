@@ -108,6 +108,11 @@ private slots:
     void derivesOutingLapSections();
     void rejectsMalformedLapReferences_data();
     void rejectsMalformedLapReferences();
+    void lapExclusionPolicySharesRankingAndRenderInputs();
+    void rejectsMalformedLapExclusions_data();
+    void rejectsMalformedLapExclusions();
+    void excludesAndRestoresLapThroughQml();
+    void lapExclusionsSurviveSaveRecoveryAndInvalidateSafely();
     void lapReferencesSurviveReopenAndReordering();
     void lapReferencesRejectSourceAndGateChanges();
     void lapReferencesDetectUnsampledContentChanges();
@@ -1321,6 +1326,173 @@ void TelemetryTests::rejectsMalformedLapReferences()
     auto reference = makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'));
     QVERIFY(validLapReference(reference)); reference.insert(field, value);
     QVERIFY(!validLapReference(reference));
+}
+
+void TelemetryTests::lapExclusionPolicySharesRankingAndRenderInputs()
+{
+    LapSession laps;
+    laps.status = LapSessionStatus::Available;
+    laps.acceptedPasses = {{1}, {5}, {10}, {16}};
+    laps.timedLaps = {{1, 1, 5, 4, 0}, {2, 5, 10, 5, 0}, {3, 10, 16, 6, 0}};
+    laps.timedLaps[2].referenceIssue = LapReferenceIssue::GpsGap;
+    OutingLapRow row; row.runId = "run"; row.type = LapSectionType::Lap; row.start = 1; row.end = 5;
+    const auto reference = makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    const QJsonArray exclusions{QJsonObject{{"reference", reference}, {"reason", "Traffic"}}};
+    applyLapExclusions(laps, reference, exclusions);
+    QCOMPARE(laps.timedLaps.size(), 3);
+    QCOMPARE(eligibleLapIndices(laps), QVector<qsizetype>{1});
+    QCOMPARE(laps.fastestLapIndex, std::optional<qsizetype>(1));
+    QVERIFY(!laps.timedLaps[0].referenceEligible());
+    QVERIFY(!laps.timedLaps[2].referenceEligible());
+    TelemetrySession source; source.duration = 20;
+    TelemetryRenderContext preview, offscreen;
+    for (auto *context : {&preview, &offscreen}) {
+        context->setSession(&source); context->setLapSession(laps); context->setTime(16);
+    }
+    QCOMPARE(preview.lapTiming(), offscreen.lapTiming());
+    QCOMPARE(preview.lapTiming().value("bestLapSeconds").toDouble(), 5.0);
+    row.start = 5; row.end = 10;
+    auto all = exclusions;
+    all.append(QJsonObject{{"reference", makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'))}, {"reason", "Cooldown"}});
+    applyLapExclusions(laps, reference, all);
+    QVERIFY(eligibleLapIndices(laps).isEmpty()); QVERIFY(!laps.fastestLapIndex);
+    for (const auto &lap : laps.timedLaps) QCOMPARE(lap.deltaToBestSeconds, 0.0);
+    applyLapExclusions(laps, reference, {});
+    QCOMPARE(eligibleLapIndices(laps), (QVector<qsizetype>{0, 1}));
+    QCOMPARE(laps.fastestLapIndex, std::optional<qsizetype>(0));
+    QVERIFY(!laps.timedLaps[2].referenceEligible());
+    auto stale = reference; stale.insert("sourceRevision", QString(64, 'c'));
+    applyLapExclusions(laps, stale, exclusions);
+    QVERIFY(laps.timedLaps[0].referenceEligible());
+}
+
+void TelemetryTests::rejectsMalformedLapExclusions_data()
+{
+    QTest::addColumn<QString>("kind");
+    for (const auto *kind : {"non-array", "duplicate", "blank", "long", "null-byte", "number-reason", "foreign-event", "out-section", "malformed-reference", "extra-field", "too-many"})
+        QTest::newRow(kind) << QString(kind);
+}
+
+void TelemetryTests::rejectsMalformedLapExclusions()
+{
+    QFETCH(QString, kind);
+    auto project = EventProjectFixture::project(); auto event = project.value("event").toObject();
+    OutingLapRow row; row.runId = "run-a"; row.type = LapSectionType::Lap; row.start = 1; row.end = 5;
+    auto reference = makeLapReference(row, event.value("id").toString(), "run-a-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    QJsonObject entry{{"reference", reference}, {"reason", "Traffic"}};
+    event.insert("lapExclusions", QJsonArray{entry}); project.insert("event", event);
+    QString error; QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+    if (kind == "blank") entry.insert("reason", "  ");
+    if (kind == "long") entry.insert("reason", QString(257, 'a'));
+    if (kind == "null-byte") entry.insert("reason", QString("a") + QChar::Null);
+    if (kind == "number-reason") entry.insert("reason", 42);
+    if (kind == "foreign-event") reference.insert("eventId", "elsewhere");
+    if (kind == "out-section") reference.insert("type", "OUT");
+    if (kind == "malformed-reference") reference.remove("sourceRevision");
+    entry.insert("reference", reference);
+    if (kind == "extra-field") entry.insert("unknown", true);
+    QJsonArray exclusions{entry};
+    if (kind == "duplicate") exclusions.append(entry);
+    if (kind == "too-many") for (int i = 0; i < maximumOutingLapRows; ++i) exclusions.append(entry);
+    event.insert("lapExclusions", kind == "non-array" ? QJsonValue(QJsonObject{}) : QJsonValue(exclusions));
+    project.insert("event", event);
+    QVERIFY(!ProjectLimits::validateProject(project, &error));
+}
+
+void TelemetryTests::excludesAndRestoresLapThroughQml()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo"); QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Exclusions", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_COMPARE(controller.outingLaps().size(), 5);
+    QVariantMap best;
+    for (const auto &item : controller.outingLaps()) if (item.toMap().value("bestOfRun").toBool()) best = item.toMap();
+    QVERIFY(!best.isEmpty()); const auto reference = best.value("reference").toMap();
+    QVERIFY(controller.selectOutingLapReference(reference));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto track = controller.outingLapTrack(); const auto cursor = controller.outingLapCursor();
+    const auto detailSession = controller.m_outingLapDetailSession;
+    const auto before = controller.currentProjectObject();
+    QVERIFY(!controller.setOutingLapExcluded(reference, true, " "));
+    QVERIFY(!controller.setOutingLapExcluded(controller.outingLaps()[0].toMap().value("reference").toMap(), true, "Traffic"));
+    QCOMPARE(controller.currentProjectObject(), before);
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 1180; height: 720; OutingLapDetailPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *reason = window->findChild<QQuickItem *>("lapExclusionReason");
+    auto *toggle = window->findChild<QQuickItem *>("toggleLapExclusion");
+    QVERIFY(reason); QVERIFY(toggle); QVERIFY(!toggle->isEnabled());
+    reason->setProperty("text", "Traffic"); QVERIFY(toggle->isEnabled());
+    toggle->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(controller.selectedOutingLap().value("excluded").toBool());
+    QCOMPARE(controller.selectedOutingLap().value("exclusionReason").toString(), QString("Traffic"));
+    QVERIFY(!controller.selectedOutingLap().value("referenceEligible").toBool());
+    QVERIFY(!controller.selectedOutingLap().value("bestOfRun").toBool());
+    QCOMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.outingLapTrack(), track); QCOMPARE(controller.outingLapCursor(), cursor);
+    QCOMPARE(controller.m_outingLapDetailSession, detailSession);
+    QCOMPARE(controller.outingLaps().size(), 5);
+    const auto bestIndex = best.value("lapNumber").toInt() - 1;
+    QVERIFY(!controller.m_lapSession.timedLaps[bestIndex].referenceEligible());
+    QVERIFY(controller.m_lapSession.fastestLapIndex != std::optional<qsizetype>(bestIndex));
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(!controller.selectedOutingLap().value("excluded").toBool());
+    QVERIFY(controller.selectedOutingLap().value("bestOfRun").toBool());
+    QCOMPARE(controller.m_lapSession.fastestLapIndex, std::optional<qsizetype>(bestIndex));
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::lapExclusionsSurviveSaveRecoveryAndInvalidateSafely()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo"); QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    const auto savedPath = directory.filePath("day.fetproject"); const auto recoveryPath = directory.filePath("recovery.json");
+    QVariantMap reference;
+    {
+        AppController controller(nullptr, recoveryPath);
+        QVERIFY(controller.importAnalysisRuns("Exclusions", {QUrl::fromLocalFile(path)}));
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+        reference = controller.outingLaps()[1].toMap().value("reference").toMap();
+        QVERIFY(controller.setOutingLapExcluded(reference, true, "Traffic"));
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+        QTRY_COMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("resolved"));
+    }
+    {
+        AppController controller(nullptr, recoveryPath);
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+        QCOMPARE(controller.outingLaps()[1].toMap().value("exclusionReason").toString(), QString("Traffic"));
+        QVERIFY(!controller.m_lapSession.timedLaps[0].referenceEligible());
+        QVERIFY(controller.setOutingLapExcluded(reference, true, "Cooldown"));
+        controller.writeRecoverySnapshot(); QVERIFY(QFileInfo::exists(recoveryPath));
+    }
+    {
+        AppController controller(nullptr, recoveryPath); QVERIFY(controller.recoveryPending());
+        controller.resolveStartupRecovery("recover");
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+        QVERIFY(controller.dirty());
+        QCOMPARE(controller.outingLaps()[1].toMap().value("exclusionReason").toString(), QString("Cooldown"));
+        QVERIFY(!controller.m_lapSession.timedLaps[0].referenceEligible());
+        QVERIFY(controller.setRunTrackConfiguration(controller.activeRunId(), "other-layout", "unknown"));
+        QTRY_COMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+        QTRY_VERIFY(!controller.outingLapsLoading() && controller.outingLaps().size() == 5);
+        QVERIFY(!controller.outingLaps()[1].toMap().value("excluded").toBool());
+        QVERIFY(controller.m_lapSession.timedLaps[0].referenceEligible());
+        QVERIFY(controller.outingLapMessages().join(' ').contains("could not be matched"));
+        QCOMPARE(controller.currentProjectObject().value("event").toObject().value("lapExclusions").toArray().size(), 1);
+        QVERIFY(controller.setOutingLapExcluded(reference, false));
+        QVERIFY(controller.currentProjectObject().value("event").toObject().value("lapExclusions").toArray().isEmpty());
+        QVERIFY(controller.outingLapMessages().join(' ').contains("could not be matched") == false);
+    }
 }
 
 void TelemetryTests::lapReferencesSurviveReopenAndReordering()
