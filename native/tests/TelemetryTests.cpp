@@ -1120,14 +1120,23 @@ void TelemetryTests::startsOutingThroughAnalysisQml()
     };
     QQuickItem *replace = nullptr;
     QTRY_VERIFY((replace = findVisual(findVisual, charts, "analysisReplaceChannel-" + added)) && replace->isVisible());
-    // Operate the real ComboBox through keyboard selection.
+    // Let SplitView finish laying out the newly created row before input.
+    QSignalSpy presented(quickWindow, &QQuickWindow::frameSwapped);
+    quickWindow->requestUpdate();
+    QTRY_VERIFY(!presented.isEmpty());
+    // End activates the last choice on a closed ComboBox. Do not send Return
+    // to a delegate that replacement may already have destroyed.
     replace->forceActiveFocus();
     QTest::keyClick(quickWindow, Qt::Key_End);
-    QTest::keyClick(quickWindow, Qt::Key_Return);
     QTRY_VERIFY(!controller.outingLapChannels().contains(added));
     const auto replacement = controller.outingLapChannels().last();
     QQuickItem *remove = nullptr;
     QTRY_VERIFY((remove = findVisual(findVisual, charts, "analysisRemoveChannel-" + replacement)) && remove->isVisible());
+    presented.clear();
+    quickWindow->requestUpdate();
+    QTRY_VERIFY(!presented.isEmpty());
+    QVERIFY(remove->width() > 0 && remove->height() > 0);
+    QVERIFY(quickWindow->contentItem()->contains(remove->mapToScene(QPointF(remove->width() / 2, remove->height() / 2))));
     QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
         remove->mapToScene(QPointF(remove->width() / 2, remove->height() / 2)).toPoint());
     QTRY_COMPARE(controller.outingLapChannels().size(), 3);
