@@ -70,6 +70,10 @@
 #include <limits>
 #include <numbers>
 #include <thread>
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 using namespace FlappedEar;
 
@@ -187,6 +191,9 @@ private slots:
     void cleansOnlyManifestOwnedArtifacts();
     void preservesLiveManifestForStartupRecovery();
     void supervisesUnixExportProcessTree();
+    void stopsUnixWritersAcrossLeaderExit_data();
+    void stopsUnixWritersAcrossLeaderExit();
+    void stopsUnixWritersBeforeControllerCleanup();
     void stopsExportWorkerWhenCancellationMarkerCannotBeCreated();
     void detectsHevcEncoders();
     void cancelsEncoderDiscovery();
@@ -3925,6 +3932,130 @@ void TelemetryTests::supervisesUnixExportProcessTree()
     QTRY_VERIFY(!ExportArtifactManifest::processIsActive(grandchildPid));
 #else
     QSKIP("Unix process-group behavior is runtime-tested on this platform only.");
+#endif
+}
+
+void TelemetryTests::stopsUnixWritersAcrossLeaderExit_data()
+{
+    QTest::addColumn<QString>("action");
+    QTest::newRow("leader-already-exited") << QStringLiteral("stop");
+    QTest::newRow("leader-exits-during-grace") << QStringLiteral("grace");
+    QTest::newRow("destructor-after-leader-exit") << QStringLiteral("destructor");
+    QTest::newRow("failed-marker-after-leader-exit") << QStringLiteral("marker");
+}
+
+void TelemetryTests::stopsUnixWritersAcrossLeaderExit()
+{
+#ifdef Q_OS_UNIX
+    QFETCH(QString, action);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString artifact = directory.filePath("staging.part.mp4");
+    const QString ready = directory.filePath("writer.ready");
+    QProcess process;
+    auto supervisor = std::make_unique<ExportProcessSupervisor>(process);
+    supervisor->start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH),
+        {action == "grace" ? QStringLiteral("tree-leader-waits") : QStringLiteral("tree-leader-exits"),
+         artifact, ready});
+    QVERIFY2(supervisor->waitForStarted(), qPrintable(process.errorString()));
+    const auto leaderPid = static_cast<pid_t>(process.processId());
+    const auto emergencyStop = qScopeGuard([leaderPid] { if (leaderPid > 1) ::kill(-leaderPid, SIGKILL); });
+    QTRY_VERIFY_WITH_TIMEOUT(!readBytes(ready).isEmpty(), 2'000);
+    const qint64 writerPid = readBytes(ready).toLongLong();
+    QVERIFY(writerPid > 1);
+    QCOMPARE(process.write("R", 1), qint64(1));
+    QVERIFY(process.waitForBytesWritten(2'000));
+    if (action != "grace") QVERIFY(process.waitForFinished(2'000));
+    QVERIFY(ExportArtifactManifest::processIsActive(writerPid));
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+    if (action == "destructor") {
+        supervisor.reset();
+    } else if (action == "marker") {
+        const auto result = ExportCancellation::request(directory.filePath("cancel"), supervisor.get(),
+            [](const QString &, QString *error) {
+                if (error) *error = QStringLiteral("injected marker failure");
+                return false;
+            });
+        QVERIFY(!result.markerCreated);
+        QVERIFY(result.workerStopped);
+    } else {
+        QVERIFY(supervisor->stopAndWait(200, 2'000));
+    }
+    QVERIFY2(elapsed.elapsed() < 12'000, "Process-tree shutdown exceeded the bounded budgets.");
+    // This must hold on return, before any owned-path cleanup is allowed.
+    QVERIFY(!ExportArtifactManifest::processIsActive(writerPid));
+    if (supervisor) {
+        QVERIFY(!supervisor->isRunning());
+        QVERIFY(supervisor->stopAndWait(0, 0));
+    }
+    QVERIFY(QFile::remove(artifact));
+    QTest::qWait(150);
+    QVERIFY2(!QFileInfo::exists(artifact), "A surviving writer recreated the cleaned transaction artifact.");
+#else
+    QSKIP("Unix leader-exit and SIGTERM-resistant writer regression.");
+#endif
+}
+
+void TelemetryTests::stopsUnixWritersBeforeControllerCleanup()
+{
+#ifdef Q_OS_UNIX
+    QSettings settings;
+    settings.clear();
+    settings.sync();
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    AppController controller;
+    controller.m_exportOutputTransaction = std::make_unique<ExportOutputTransaction>();
+    const QString target = directory.filePath("result.mp4");
+    QVERIFY(writeBytes(target, "existing user target"));
+    const auto prepared = controller.m_exportOutputTransaction->prepare(target, {}, {}, true);
+    QCOMPARE(prepared.status, ExportOutputTransaction::PreparationStatus::Ready);
+    const QString staging = controller.m_exportOutputTransaction->stagingPath();
+    const QString id = controller.m_exportOutputTransaction->transactionId();
+    const QString overlay = QDir::temp().filePath(QStringLiteral("flappedear-overlay-%1.mkv").arg(id));
+    QVERIFY(writeBytes(overlay, "owned overlay"));
+    controller.m_exportCancelPath = directory.filePath("cancel");
+    QVERIFY(writeBytes(controller.m_exportCancelPath, {}));
+    controller.m_exportState = QStringLiteral("cancelling");
+    controller.m_exportProcess = std::make_unique<QProcess>();
+    controller.m_exportSupervisor = std::make_unique<ExportProcessSupervisor>(*controller.m_exportProcess);
+    const QString ready = directory.filePath("writer.ready");
+    controller.m_exportSupervisor->start(QStringLiteral(RAW_TRANSPORT_CONSUMER_PATH),
+        {QStringLiteral("tree-leader-exits"), staging, ready});
+    QVERIFY(controller.m_exportSupervisor->waitForStarted());
+    const auto leaderPid = static_cast<pid_t>(controller.m_exportProcess->processId());
+    const auto emergencyStop = qScopeGuard([leaderPid] { if (leaderPid > 1) ::kill(-leaderPid, SIGKILL); });
+    QTRY_VERIFY_WITH_TIMEOUT(!readBytes(ready).isEmpty(), 2'000);
+    const qint64 writerPid = readBytes(ready).toLongLong();
+    QVERIFY(writerPid > 1);
+    const ExportArtifactManifestData manifest{id, QDateTime::currentMSecsSinceEpoch(), overlay,
+        staging, target, leaderPid, QStringLiteral("stageB")};
+    QString error;
+    QVERIFY2(ExportArtifactManifest::create(manifest, &error), qPrintable(error));
+    const QString manifestPath = ExportArtifactManifest::manifestPathFor(id);
+    controller.m_exportManifestPath = manifestPath;
+    QCOMPARE(controller.m_exportProcess->write("R", 1), qint64(1));
+    QVERIFY(controller.m_exportProcess->waitForBytesWritten(2'000));
+    QVERIFY(controller.m_exportProcess->waitForFinished(2'000));
+
+    QVERIFY(!ExportArtifactManifest::recoverStale().contains(manifestPath));
+    QVERIFY(QFileInfo::exists(staging));
+    QVERIFY(QFileInfo::exists(overlay));
+    QVERIFY(controller.exporting());
+    controller.finishExport(0, QProcess::NormalExit);
+    QVERIFY(!controller.exporting());
+    QCOMPARE(controller.exportState(), QStringLiteral("cancelled"));
+    QVERIFY(!ExportArtifactManifest::processIsActive(writerPid));
+    QVERIFY(!QFileInfo::exists(manifestPath));
+    QVERIFY(!QFileInfo::exists(overlay));
+    QVERIFY(!QFileInfo::exists(staging));
+    QTest::qWait(150);
+    QVERIFY(!QFileInfo::exists(staging));
+    QCOMPARE(readBytes(target), QByteArray("existing user target"));
+#else
+    QSKIP("Unix controller cleanup after leader exit regression.");
 #endif
 }
 
