@@ -11,6 +11,16 @@ Run the local gate appropriate to the change before claiming a behavior works. C
 
 The native suite assigns a unique test application identity and checks a default `QSettings` round trip before controller tests run. It retains the platform's native settings backend, including the Windows registry, and clears that test namespace afterward. Recovery cleanup failures use the existing injected deletion operation so stale-snapshot and Save As assertions run on every platform; these checks do not replace native Windows ACL-denial coverage. File-content checks close their read handles before attempting atomic replacement.
 
+## M1 acceptance (KAN-28)
+
+The [M1 acceptance record](kan28-m1-acceptance.md) maps the executed multi-run,
+configuration, OUT/IN, exclusion, missing-source and reopen scenarios to their
+regressions and exact source/CI revisions. It also separates the existing
+KAN-26 local private-VBO evidence from hosted synthetic tests and remaining
+owner/private-GoPro acceptance. The record contains the measured M0/M1 cycle
+times and the 27 September planning target; the current capability/scope ledger
+is [product-delivery.md](product-delivery.md).
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
