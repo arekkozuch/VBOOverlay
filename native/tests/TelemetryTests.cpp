@@ -108,6 +108,8 @@ private slots:
     void derivesOutingLapSections();
     void rejectsMalformedLapReferences_data();
     void rejectsMalformedLapReferences();
+    void groupsOutingLapsAfterExplicitConfiguration();
+    void confirmsTrackConfigurationThroughQml();
     void lapExclusionPolicySharesRankingAndRenderInputs();
     void rejectsMalformedLapExclusions_data();
     void rejectsMalformedLapExclusions();
@@ -1326,6 +1328,133 @@ void TelemetryTests::rejectsMalformedLapReferences()
     auto reference = makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'));
     QVERIFY(validLapReference(reference)); reference.insert(field, value);
     QVERIFY(!validLapReference(reference));
+}
+
+void TelemetryTests::groupsOutingLapsAfterExplicitConfiguration()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::lapsVbo()));
+    auto other = EventProjectFixture::lapsVbo(); other.replace("52.0008", "52.0007");
+    QVERIFY(writeBytes(second, other));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Compatibility", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_COMPARE(controller.outingLaps().size(), 10);
+    QCOMPARE(controller.outingCompatibilityGroups().size(), 2);
+    for (const auto &value : controller.outingCompatibilityGroups()) {
+        QVERIFY(!value.toMap().value("resolved").toBool());
+        QVERIFY(value.toMap().value("eligibleMembers").toList().isEmpty());
+        QVERIFY(!controller.selectOutingComparisonGroup(value.toMap().value("id").toString()));
+    }
+    const auto run1 = controller.eventRuns()[0].toMap().value("id").toString();
+    const auto run2 = controller.eventRuns()[1].toMap().value("id").toString();
+    const auto confirm = [&](const QString &run, const QString &layout, const QString &direction) {
+        return controller.confirmRunTrackConfiguration(run, controller.runTrackConfiguration(run).value("derivationKey").toString(), layout, direction);
+    };
+    QVERIFY(!controller.confirmRunTrackConfiguration(run1, "stale", "Circuit", "clockwise"));
+    const auto previous = controller.runTrackConfiguration(run1);
+    QVERIFY(confirm(run1, "Circuit", "clockwise"));
+    QVERIFY(!controller.confirmRunTrackConfiguration(run1, previous.value("derivationKey").toString(), "Other", "clockwise"));
+    QVERIFY(confirm(run2, "Circuit", "clockwise"));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    QCOMPARE(controller.outingCompatibilityGroups().size(), 1);
+    const auto group = controller.outingCompatibilityGroups()[0].toMap();
+    const auto groupId = group.value("id").toString();
+    QCOMPARE(group.value("lapCount").toInt(), 6);
+    QCOMPARE(group.value("eligibleLapCount").toInt(), 6);
+    QVERIFY(controller.outingComparisonGroupId().isEmpty());
+    QVERIFY(controller.selectOutingComparisonGroup(groupId));
+    QVariantMap excludedReference;
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("type") == "LAP") {
+            QVERIFY(row.value("comparisonEligible").toBool());
+            excludedReference = row.value("reference").toMap();
+        } else QVERIFY(!row.value("comparisonEligible").toBool());
+    }
+    QVERIFY(controller.setOutingLapExcluded(excludedReference, true, "Traffic"));
+    QCOMPARE(controller.outingCompatibilityGroups()[0].toMap().value("eligibleLapCount").toInt(), 5);
+    QCOMPARE(controller.outingCompatibilityGroups()[0].toMap().value("lapCount").toInt(), 6);
+    QVERIFY(controller.selectOutingLapReference(excludedReference));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QVERIFY(controller.selectedOutingLap().value("compatibilityReasons").toStringList().contains("user-exclusion"));
+    // GPS and user restrictions coexist rather than replacing one another.
+    for (auto &row : controller.m_outingRawLapRows)
+        if (row.reference.toVariantMap() == excludedReference) { row.referenceIssue = LapReferenceIssue::GpsGap; row.referenceEligible = false; }
+    controller.refreshLapExclusionPolicy();
+    const auto reasons = controller.selectedOutingLap().value("compatibilityReasons").toStringList();
+    QVERIFY(reasons.contains("incomplete-gps")); QVERIFY(reasons.contains("user-exclusion"));
+    // Opposite direction creates a distinct group, even with identical gates/layout.
+    QVERIFY(confirm(run2, "Circuit", "counterclockwise"));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    QCOMPARE(controller.outingCompatibilityGroups().size(), 2);
+    QVERIFY(controller.selectOutingComparisonGroup(groupId));
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("runId") == run2) {
+            QVERIFY(row.value("compatibilityReasons").toStringList().contains("opposite-direction"));
+            QVERIFY(!row.value("comparisonEligible").toBool());
+        }
+    }
+    // Save As/reopen retains the explicit decisions, but comparison selection is session-only.
+    const auto savedPath = directory.filePath("day.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    const auto groups = controller.outingCompatibilityGroups();
+    AppController reopened(nullptr, directory.filePath("reopened.json"));
+    QTRY_COMPARE(reopened.outingCompatibilityGroups(), groups);
+    QVERIFY(reopened.outingComparisonGroupId().isEmpty());
+    // New derivation/generation cannot serve stale groups during the timer gap.
+    QVERIFY(confirm(run1, "Changed circuit", "clockwise"));
+    QVERIFY(controller.outingCompatibilityGroups().isEmpty());
+    QVERIFY(!controller.selectOutingComparisonGroup(groupId));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    QVERIFY(controller.outingComparisonGroupId().isEmpty());
+}
+
+void TelemetryTests::confirmsTrackConfigurationThroughQml()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo"); QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Configuration", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 1180; height: 720; OutingLapPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *open = window->findChild<QQuickItem *>("openTrackConfiguration"); QVERIFY(open);
+    open->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *dialog = window->findChild<QObject *>("outingTrackConfigurationDialog"); QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto *layout = window->findChild<QQuickItem *>("compatibilityLayoutName");
+    auto *direction = window->findChild<QQuickItem *>("compatibilityDirectionPicker");
+    auto *confirm = window->findChild<QQuickItem *>("confirmTrackConfiguration");
+    QVERIFY(layout); QVERIFY(direction); QVERIFY(confirm); QVERIFY(!confirm->isEnabled());
+    layout->setProperty("text", "Jastrzab full circuit");
+    direction->forceActiveFocus(); QTest::keyClick(window, Qt::Key_End);
+    QTRY_COMPARE(direction->property("currentIndex").toInt(), 2);
+    QVERIFY(confirm->isEnabled());
+    confirm->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    const auto config = controller.runTrackConfiguration(controller.activeRunId());
+    QCOMPARE(config.value("layoutId").toString(), QString("Jastrzab full circuit"));
+    QCOMPARE(config.value("direction").toString(), QString("counterclockwise"));
+    QVERIFY(controller.outingCompatibilityGroups()[0].toMap().value("resolved").toBool());
+    auto *picker = window->findChild<QQuickItem *>("outingComparisonGroupPicker"); QVERIFY(picker);
+    picker->forceActiveFocus(); QTest::keyClick(window, Qt::Key_End);
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    QVERIFY(controller.dirty());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::lapExclusionPolicySharesRankingAndRenderInputs()

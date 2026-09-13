@@ -98,6 +98,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
     Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
+    Q_PROPERTY(QVariantList outingCompatibilityGroups READ outingCompatibilityGroups NOTIFY outingLapsChanged)
+    Q_PROPERTY(QString outingComparisonGroupId READ outingComparisonGroupId NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingLaps READ outingLaps NOTIFY outingLapsChanged)
     Q_PROPERTY(QStringList outingLapMessages READ outingLapMessages NOTIFY outingLapsChanged)
     Q_PROPERTY(bool outingLapsLoading READ outingLapsLoading NOTIFY outingLapsChanged)
@@ -194,6 +196,12 @@ public:
     Q_INVOKABLE void loadVideo(const QUrl &url);
     Q_INVOKABLE void loadVbo(const QUrl &url);
     Q_INVOKABLE bool selectEventRun(const QString &runId);
+    Q_INVOKABLE QVariantMap runTrackConfiguration(const QString &runId) const;
+    Q_INVOKABLE bool confirmRunTrackConfiguration(const QString &runId, const QString &expectedDerivationKey,
+        const QString &layoutId, const QString &direction);
+    Q_INVOKABLE bool selectOutingComparisonGroup(const QString &groupId);
+    [[nodiscard]] QVariantList outingCompatibilityGroups() const;
+    [[nodiscard]] QString outingComparisonGroupId() const;
     Q_INVOKABLE bool setRunTrackConfiguration(
         const QString &runId, const QString &layoutId, const QString &direction);
     [[nodiscard]] QString batchImportState() const { return m_batchState; }
@@ -479,6 +487,10 @@ private:
     void refreshOutingLaps();
     void refreshLapExclusionPolicy();
     [[nodiscard]] QJsonObject activeLapBinding() const;
+    void refreshOutingCompatibility();
+    QVariantList m_outingCompatibilityGroups;
+    QString m_outingComparisonGroupId;
+    QString m_outingCompatibilityDocumentId;
     QVector<OutingLapRow> m_outingRawLapRows;
     QStringList m_outingSourceMessages;
     QByteArray m_loadedSourceRevision;
