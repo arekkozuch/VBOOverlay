@@ -1484,7 +1484,8 @@ void TelemetryTests::lapExclusionsSurviveSaveRecoveryAndInvalidateSafely()
         QVERIFY(!controller.m_lapSession.timedLaps[0].referenceEligible());
         QVERIFY(controller.setRunTrackConfiguration(controller.activeRunId(), "other-layout", "unknown"));
         QTRY_COMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
-        QTRY_VERIFY(!controller.outingLapsLoading() && controller.outingLaps().size() == 5);
+        QTRY_VERIFY(controller.m_outingLapRequestedKey == controller.outingLapKey()
+            && !controller.outingLapsLoading() && controller.outingLaps().size() == 5);
         QVERIFY(!controller.outingLaps()[1].toMap().value("excluded").toBool());
         QVERIFY(controller.m_lapSession.timedLaps[0].referenceEligible());
         QVERIFY(controller.outingLapMessages().join(' ').contains("could not be matched"));
