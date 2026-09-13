@@ -31,7 +31,9 @@ event-wide performance analysis. See the [event implementation plan](docs/event-
 
 Lap analysis lets you add up to four recorded channels, change a channel using
 its row selector, and remove it with ×. Selections are remembered as analysis
-preferences. Longitudinal-G graphs show braking upward while retaining the
+preferences. Channel selectors use a wider label column and a dropdown at least
+320 px wide when the window allows; long names wrap instead of being shortened.
+Dropdowns stay within the window. Longitudinal-G graphs show braking upward while retaining the
 original signed values.
 
 ## Keyboard controls
