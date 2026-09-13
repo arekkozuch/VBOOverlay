@@ -22,9 +22,9 @@ def main():
     repo = Path(__file__).resolve().parents[1]
     manifest = json.loads((args.stage / 'candidate-manifest.json').read_text(encoding='utf-8'))
     sha = manifest['commit'][:12]
-    installer = repo / f'native-dist/artifacts/FlappedEar-Telemetry-Windows-x64-{sha}-setup.exe'
+    installer = repo / f'native-dist/artifacts/Flapped-Ear-Telemetry-Windows-x64-{sha}-setup.exe'
     root = Path(os.environ['LOCALAPPDATA']) / 'Programs/FlappedEar Telemetry'
-    shortcuts = Path(os.environ['APPDATA']) / 'Microsoft/Windows/Start Menu/Programs/FlappedEar Telemetry'
+    shortcuts = Path(os.environ['APPDATA']) / 'Microsoft/Windows/Start Menu/Programs/Flapped Ear Telemetry'
     if root.exists() or shortcuts.exists():
         raise RuntimeError('Installer smoke requires an isolated runner without an existing installation')
     try:
@@ -43,8 +43,8 @@ def main():
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, KEY, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
             assert winreg.QueryValueEx(key, 'InstallLocation')[0] == str(root)
             assert winreg.QueryValueEx(key, 'BuildCommit')[0] == sha
-        assert (shortcuts / 'FlappedEar Telemetry.lnk').is_file()
-        smoke_installed(root / 'bin/FlappedEar Telemetry.exe', args.qt_root.resolve(),
+        assert (shortcuts / 'Flapped Ear Telemetry.lnk').is_file()
+        smoke_installed(root / 'bin/Flapped Ear Telemetry.exe', args.qt_root.resolve(),
                         repo / f'ci-logs/installer-startup-{cycle}.txt')
         # Rerunning must fail without changing the installed build.
         rejected = subprocess.run([str(installer), '/S'], timeout=60)
@@ -59,7 +59,7 @@ def main():
             command = subprocess.list2cmdline([str(uninstaller), '/S']) + ' _?=' + str(root)
             subprocess.run(command, check=True, timeout=120)
         assert sentinel.read_text(encoding='utf-8') == 'preserve this user file'
-        assert not (root / 'bin/FlappedEar Telemetry.exe').exists()
+        assert not (root / 'bin/Flapped Ear Telemetry.exe').exists()
         assert not (root / 'Uninstall.exe').exists()
         assert not shortcuts.exists()
         assert [p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()] == ['user-added-file.txt']

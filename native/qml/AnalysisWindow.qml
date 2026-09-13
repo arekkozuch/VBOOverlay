@@ -22,7 +22,7 @@ Window {
     minimumHeight: 480
     x: appController.analysisWindowX >= 0 ? appController.analysisWindowX : Screen.width / 2 - width / 2
     y: appController.analysisWindowY >= 0 ? appController.analysisWindowY : Screen.height / 2 - height / 2
-    title: qsTr("FlappedEar · Lap Analysis")
+    title: qsTr("%1 · Lap Analysis").arg(Application.displayName)
     color: "#070b10"
     flags: Qt.Window
     transientParent: null

@@ -3,7 +3,9 @@ Unicode true
 !include "MUI2.nsh"
 !include "x64.nsh"
 !include "LogicLib.nsh"
-!define APP "FlappedEar Telemetry"
+!define APP "Flapped Ear Telemetry"
+; Keep the old directory for existing-candidate detection and uninstall/reinstall.
+!define INSTALL_DIRECTORY "FlappedEar Telemetry"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\FlappedEarTelemetry"
 Name "${APP} (internal candidate)"
 OutFile "${OUTPUT_FILE}"
@@ -29,7 +31,7 @@ Function .onInit
     Abort
   ${EndIf}
   ; Fixed per-user location; deliberately ignore /D and never request elevation.
-  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${APP}"
+  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${INSTALL_DIRECTORY}"
   IfFileExists "$INSTDIR\Uninstall.exe" 0 ready
     MessageBox MB_OK|MB_ICONSTOP "Close ${APP} and uninstall the existing candidate from Windows Settings before installing this one. Projects and settings are preserved." /SD IDOK
     SetErrorLevel 2
@@ -68,7 +70,7 @@ Function un.onInit
     Abort
   ${EndIf}
   ; Do not derive the deletion root from where somebody moved Uninstall.exe.
-  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${APP}"
+  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${INSTALL_DIRECTORY}"
 FunctionEnd
 
 Section "Uninstall"

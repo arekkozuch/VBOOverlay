@@ -5,7 +5,7 @@ import QtQuick.Layouts
 Window {
     id: window
     property string message: ""
-    title: qsTr("FlappedEar Telemetry")
+    title: Application.displayName
     width: 520
     height: Math.max(200, content.implicitHeight + 48)
     visible: true

@@ -31,6 +31,7 @@ FetchContent_Declare(flappedear_zlib
 FetchContent_MakeAvailable(flappedear_zlib)
 
 qt_add_library(flappedear_core STATIC
+    src/app/ApplicationIdentity.h
     src/app/GuiSessionLock.cpp
     src/app/GuiSessionLock.h
     src/app/AppLog.cpp
@@ -227,8 +228,8 @@ qt_add_qml_module(flappedear_native
 )
 
 set_target_properties(flappedear_native PROPERTIES
-    OUTPUT_NAME "FlappedEar Telemetry"
-    MACOSX_BUNDLE_BUNDLE_NAME "FlappedEar Telemetry"
+    OUTPUT_NAME "Flapped Ear Telemetry"
+    MACOSX_BUNDLE_BUNDLE_NAME "Flapped Ear Telemetry"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.flappedear.telemetry"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "0.2.0"
     MACOSX_BUNDLE_BUNDLE_VERSION "1"

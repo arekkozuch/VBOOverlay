@@ -20,16 +20,16 @@ bool GuiSessionLock::tryAcquire(QString *error)
 {
     if (m_lock.isLocked()) return true;
     if (m_directory.isEmpty() || !QDir().mkpath(m_directory)) {
-        if (error) *error = QStringLiteral("FlappedEar cannot open its application data directory. "
+        if (error) *error = QStringLiteral("Flapped Ear Telemetry cannot open its application data directory. "
                                           "Check the directory permissions and available disk space.");
         return false;
     }
     if (m_lock.tryLock(0)) return true;
     if (error) {
         *error = m_lock.error() == QLockFile::LockFailedError
-            ? QStringLiteral("FlappedEar is already running. Use the existing window, or close it "
+            ? QStringLiteral("Flapped Ear Telemetry is already running. Use the existing window, or close it "
                              "before opening another. Your recovery data has not been changed.")
-            : QStringLiteral("FlappedEar could not protect its recovery data. "
+            : QStringLiteral("Flapped Ear Telemetry could not protect its recovery data. "
                              "Check the application data directory permissions and available disk space.");
     }
     return false;

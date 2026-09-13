@@ -44,9 +44,16 @@ evidence-linked report. Raw OBD/HR charts do not yet constitute vehicle/driver
 analysis. The full original vision remains itemized as F00–F20.
 
 The editor/export foundation should be preserved. Remaining hardening includes
-slow/full destinations and consistent user-facing package naming.
+slow/full destinations.
 
 ## Subsequent task changes
+
+[KAN-18](https://kozucharkadiusz.atlassian.net/browse/KAN-18) standardizes the
+Flapped Ear Telemetry display, About, bundle and candidate names while retaining
+existing settings, recovery and installation identities. See [application identity
+and upgrades](docs/application-identity.md). macOS startup and preservation
+regressions cover the change; exact PR/main CI evidence belongs in Jira. Windows
+name edits are static only while Windows execution remains paused.
 
 [KAN-12](https://kozucharkadiusz.atlassian.net/browse/KAN-12) reconciled this
 baseline and the 100-task backlog in PR #13, merged at `a2fde85`.

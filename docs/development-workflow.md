@@ -1,7 +1,7 @@
 # Task delivery and local acceptance
 
 The owner has authorized the coordinator to implement the ordered
-[FlappedEar Telemetry Jira backlog](https://kozucharkadiusz.atlassian.net/browse/KAN).
+[Flapped Ear Telemetry Jira backlog](https://kozucharkadiusz.atlassian.net/browse/KAN).
 There are 100 separate numbered tasks; the seven milestone epics are additional
 containers. Task numbers define queue order. The product contract remains
 [F00–F20](product-vision.md).
@@ -82,7 +82,7 @@ For the documented Apple Silicon/Homebrew setup, configuration and launch are:
 cmake -S . -B build-native \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt
-open "build-native/native/FlappedEar Telemetry.app"
+open "build-native/native/Flapped Ear Telemetry.app"
 ```
 
 Run the build and tests between configuration and launch. If a different Qt
