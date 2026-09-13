@@ -1,6 +1,7 @@
 # Flapped Ear Telemetry — audit and delivery ledger
 
-Audit date: 12 September 2026; reconciled for [KAN-12](https://kozucharkadiusz.atlassian.net/browse/KAN-12).
+Audit date: 13 September 2026; M1 acceptance and reforecast for [KAN-28].
+Original KAN-12 audit: 12 September 2026 (retained in Git history).
 Product scope: [product contract](product-vision.md).
 This is the current delivery authority; old checkpoints and narrow beta documents
 must not override it. Feature implementation is not the same as runtime acceptance.
@@ -8,33 +9,30 @@ must not override it. Feature implementation is not the same as runtime acceptan
 ## Verified baseline
 
 This reconciliation uses `main` at
-[`7138fbd511e3d06ed9b237130d385e1f62bde027`](https://github.com/arekkozuch/VBOOverlay/commit/7138fbd511e3d06ed9b237130d385e1f62bde027).
-It is a dated source/evidence snapshot, not a moving reference. Later task PRs,
-merge SHAs and CI results belong in their Jira completion records.
+[`5d71a1a5e5d31579102e93b6912838a122baa763`](https://github.com/arekkozuch/VBOOverlay/commit/5d71a1a5e5d31579102e93b6912838a122baa763).
+It is a dated source/evidence snapshot. Later task PRs and exact validation
+results belong in their Jira completion records.
 
 | Integrated change | Source state | Verification |
 | --- | --- | --- |
-| PRs #7–#10: event/source foundations and calculated-G corrections | Original audit `d7e195e`; retained in this baseline | Included in the baseline's full Native CI suite |
-| [PR #11](https://github.com/arekkozuch/VBOOverlay/pull/11): whole-outing import, chronological sections and independent detail | Merged at `a0122ab9851d3db8240708b2554d56ab4f5eb5b8`; native-QPA fix `8aeb572` retained rendering/input assertions | [Integrated-main CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34712830140) passed; also covered by the newer baseline run |
-| [PR #12](https://github.com/arekkozuch/VBOOverlay/pull/12), [KAN-5](https://kozucharkadiusz.atlassian.net/browse/KAN-5): GPS reference eligibility, production UUID log retention and delivery contract | Final PR head `6f8479248034e236c533dd855bb517ab08a49e75`; merged at `7138fbd511e3d06ed9b237130d385e1f62bde027` | [PR CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34715062783) and [main CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34715471586) passed all four jobs; KAN-5 is complete |
-
-The PR #12 fixture correction preserves gate passages while injecting interior
-GPS defects. It retains measured lap timing, reference exclusions and rendering
-assertions; see [the regression record](testing.md#kan-5-preserve-gate-evidence-in-interior-defect-fixtures).
+| M0 steps 001–008: GPS eligibility, log retention, parser/process/sync hardening and product naming | PRs #12–#16 and #18–#20; retained in this baseline | Exact per-task integration evidence in [KAN-5], [KAN-12]–[KAN-18]; full baseline suite reruns the regressions |
+| M1 steps 009–016: identity, exclusions, rankings, metadata, progression, persistent decisions and automatic GPS grouping | PRs #23–#29 plus owner-local commit `ddb095a514c06cd7ad090257b9a74108e85d810d` | [Local private-recording evidence](kan26-local-validation.md), separately from hosted synthetic coverage |
+| Step 017: complete video-free result states and bounded retry | [PR #31](https://github.com/arekkozuch/VBOOverlay/pull/31), merge `f2f1af0262e6ed20d2426aece241e10e77b33912` | [PR CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34773978691) and [main CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34774340031), macOS Debug and Release |
+| Readable channel selectors | [PR #32](https://github.com/arekkozuch/VBOOverlay/pull/32), merge `5d71a1a5e5d31579102e93b6912838a122baa763` | [PR CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34775248771); [main CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34775598217); exact acceptance matrix in [KAN-28 record](kan28-m1-acceptance.md) |
 
 ## Evidence levels
 
 - **Implementation** describes code present at the baseline. Partial, raw-channel
   and visualization foundations do not satisfy an entire F00–F20 capability.
 - **CI verification** means the configured synthetic coverage passed on that
-  source state. Baseline Native CI built macOS arm64 and Windows x64 in Debug
-  and Release with Qt 6.8.3. Each job passed all seven CTest registrations;
-  Release jobs also passed Qt deployment/package startup, and Windows Release
-  passed the NSIS lifecycle checks. This is not coverage of missing features.
+  source state. Current Native CI builds macOS arm64 Debug and Release with Qt
+  6.8.3: seven CTest registrations, 501 Qt Test passes, zero failures and eight
+  explicit private/hardware skips per configuration. Release also exercises
+  deployment and SDK-isolated package startup. Windows execution remains paused.
 - **Physical acceptance** requires an identified candidate, environment and
-  executed scenario. Earlier private-media/hardware results remain historical
-  development evidence. No new physical-Mac or full-day/private-video acceptance
-  is claimed for `7138fbd`. M5 and M6 acceptance tasks below remain required.
+  executed scenario. KAN-26 includes local Mac/Qt 6.11 execution and six private
+  VBO recordings; it is not a new owner-operated walkthrough of this baseline.
+  Private GoPro validation and M5/M6 physical acceptance remain outstanding.
 
 This coordinator environment has no CMake/Qt. Native execution evidence comes
 from CI; the owner's local Codex follows the [build/test handoff](development-workflow.md).
@@ -47,29 +45,29 @@ configured CI coverage; missing analytical outcomes have neither implementation
 nor execution acceptance. Jira links identify concrete implementation/acceptance
 work, not evidence that a future capability already works. Ranges are inclusive.
 
-| ID | Implementation at `7138fbd` | Remaining outcome and Jira ownership |
+| ID | Implementation at `5d71a1a` | Remaining outcome and Jira ownership |
 | --- | --- | --- |
-| F00 | Partial: EventProjectCodec v3, transactional multi-file import, dated pairing and whole-outing workflow | Day identity/metadata/persistence: [KAN-19], [KAN-24], [KAN-26]–[KAN-28]; parser bounds: [KAN-14]–[KAN-16]; folder/drop, reusable profiles and existing-run alternatives: [KAN-87]–[KAN-90] |
-| F01 | Partial: LapTiming, live comparison tiles, single-section inspection; GPS eligibility verified in [KAN-5] | Compatible ranking and exclusions: [KAN-19]–[KAN-23]; independent A/B, shared progress and delta: [KAN-29]–[KAN-42] |
+| F00 | Partial: transactional multi-file import, portable event projects, day metadata, automatic track identity and persistent decisions | Folder/drop, reusable profiles and existing-run alternatives: [KAN-87]–[KAN-90]; whole-product acceptance remains in M5/M6 |
+| F01 | Partial: inspectable OUT/LAP/IN, stable references, exclusions and compatible best-run/day rankings; automatic GPS layout/direction grouping | Independent A/B, shared progress and delta: [KAN-29]–[KAN-42] |
 | F02 | Missing: source Start gate is only a foundation | Proposed/reviewed/editable sectors and corners: [KAN-43]–[KAN-50]; acceptance: [KAN-58] |
 | F03 | Missing | Non-overlapping ranked losses and evidence navigation: [KAN-59]–[KAN-61]; acceptance: [KAN-74] |
 | F04 | Missing | Sector theoretical and donor provenance: [KAN-50], [KAN-51], [KAN-56]–[KAN-58]; separately validated realistic potential: [KAN-94]–[KAN-96] |
-| F05 | Partial: single trace and independent detail cursor | Shared progress, paired traces/cursor: [KAN-31], [KAN-33], [KAN-37]–[KAN-42]; available-channel map layers: [KAN-97] |
+| F05 | Partial: single-lap trace and independent cursor, readable channel selector | Shared progress, paired traces/cursor: [KAN-31], [KAN-33], [KAN-37]–[KAN-42]; available-channel map layers: [KAN-97]; interval/map UX: [KAN-114] |
 | F06 | Missing | Entry/apex/exit, braking and throttle metrics and Corner Analyzer: [KAN-46], [KAN-47], [KAN-51]–[KAN-55]; acceptance: [KAN-58] |
 | F07 | Missing | Measured/inferred coasting duration, distance and locations: [KAN-92] |
 | F08 | Missing | Overlapping driving states with prerequisites and provenance: [KAN-91] |
 | F09 | Missing | Braking/cornering overlap, with measured/inferred distinction: [KAN-93] |
 | F10 | Missing | Eligible populations, timing/braking/exit/line variability and presentation: [KAN-62]–[KAN-64]; acceptance: [KAN-74] |
-| F11 | Partial foundation: chronological run/section organization | Within-day progression and conditions: [KAN-21], [KAN-24], [KAN-25], [KAN-28], [KAN-64]; reusable profiles and comparable visits: [KAN-89], [KAN-98], [KAN-99] |
+| F11 | Partial: within-day progression, notes, conditions and setup edits; scoped exclusions and persisted choices | Variability: [KAN-64]; reusable profiles and comparable visits: [KAN-89], [KAN-98], [KAN-99] |
 | F12 | Raw channels only: recorded temperatures can be plotted | Covered extrema, thermal trends and recorded recovery: [KAN-67], [KAN-68]; acceptance: [KAN-74] |
 | F13 | Raw channels only: recorded temperature/performance inputs | Sample-backed associations, without causal claims: [KAN-100] |
 | F14 | Partial visualization: G ball/radar/bar and calculated-G aliases | Timed G-G pairs, scatter and observed peaks: [KAN-65], [KAN-66]; acceptance: [KAN-74] |
 | F15 | Partial: central single-video sync and independent video-free detail | Analysis/video navigation: [KAN-39], [KAN-42]; chapter review/timeline/export and side-by-side video: [KAN-104]–[KAN-107]; private-video acceptance: [KAN-80] |
 | F16 | Partial foundation: GPS/OBD/HR coexist; alternative files persist | Channel provenance in A/B: [KAN-35]; existing-run alternatives: [KAN-90]; actual cross-file clock alignment/fusion/conflict review: [KAN-101]–[KAN-103] |
 | F17 | Raw channels only: imported/plotted HR | Run/lap/sector summaries and comparisons: [KAN-69], [KAN-70]; acceptance: [KAN-74] |
-| F18 | Missing | Computed report, best results and click-through observations: [KAN-23], [KAN-71]–[KAN-74] |
+| F18 | Partial: best-run/day results with lap click-through; full report missing | Computed report and evidence observations: [KAN-71]–[KAN-74] |
 | F19 | Missing | Computed observation guidance: [KAN-73]; evidence package and Explain this lap: [KAN-108], [KAN-109] |
-| F20 | Substantial implementation: WidgetModel, shared TelemetryScene/FrameRenderer, transactions, recovery and verified UUID log retention | Descendant shutdown implementation: [KAN-13]; time-bound and naming implementation: [KAN-17], [KAN-18]; export/installed-candidate acceptance: [KAN-75]–[KAN-85]; chapter export: [KAN-106] |
+| F20 | Substantial implementation: shared preview/export scene, transactions, recovery, log retention, descendant shutdown, checked time bounds and consistent naming | Export/installed-candidate acceptance: [KAN-75]–[KAN-85]; chapter export: [KAN-106] |
 
 Core physical acceptance closes in [KAN-86]; full F00–F20 acceptance closes in
 [KAN-110]. Neither is complete at this baseline. Reuse PR #11's independent
@@ -88,14 +86,17 @@ verified-source loader, bounded row service and detail view for subsequent work.
 | C07 | Slow/full export destination behavior | Open: [KAN-75] exercises cancellation, scan and transaction cleanup under slow/filling volume |
 | C08 | User-visible name/package drift | [KAN-18] standardizes Flapped Ear Telemetry display/About/bundle/package names with settings/recovery preservation checks; macOS integration evidence in Jira; Windows execution paused |
 
-Event ranking needs additional compatibility and exclusion rules beyond C02.
-Do not present a GPS-continuous interval as proof of a comparable racing lap.
+M1 implements compatibility and exclusion rules beyond C02. Route evidence,
+direction and timing-definition identity govern grouping; the same date alone
+does not establish compatibility. OUT/IN and route outliers remain inspectable.
 
 ## Dependency-ordered delivery
 
 The backlog contains **100 separate numbered Tasks plus seven milestone Epics**.
-At this reconciliation's start, [KAN-5] was complete, [KAN-12] was selected and
-steps 003–100 remained open. Jira holds live status and task acceptance criteria.
+Steps 001–017 are complete; this reconciliation is step 018. After its closure,
+82 numbered tasks (019–100) remain. Jira holds live status and acceptance criteria.
+Additional analysis UX items [KAN-113]–[KAN-115] remain in the backlog outside the
+100 numbered tasks; their scope is included in the deadline capacity discussion.
 
 | Milestone epic | Steps | Task keys | Count |
 | --- | --- | --- | --- |
@@ -125,11 +126,36 @@ elapsed-time guarantees and are not divided by agent count.
 
 The original core workflow estimate was **25–45 focused working days** from
 the `d7e195e` audit; the full-vision estimate was **50–90 working days total**.
-Confidence is low until actual cycle times and acceptance availability are known.
-These are retained planning history, not a claim that autonomous work continues between turns.
-A defensible calendar date needs a demonstrated execution rate and Mac acceptance
-availability. Reforecast in [KAN-28] after M1 and [KAN-42] after M2 using actual cycle time; report scope
-changes explicitly rather than silently dropping F00–F20 items to meet a date.
+These are retained historical estimates, superseded for near-term planning by
+the [measured M1 reforecast](kan28-m1-acceptance.md#measured-cycle-time-and-reforecast).
+
+### Two-week owner target — 27 September 2026
+
+The owner set a two-week deadline on 13 September, before the next track visit.
+**27 September is the planning target**, derived from that instruction, not a
+separately confirmed event date. Preserve all F00–F20 scope. Reserve 26–27
+September for candidate regression, the owner's Mac/private GoPro walkthrough
+and track preparation; fix issues discovered earlier as each increment lands.
+
+M0's eight recorded Jira cycles had a median of 25.4 minutes; M1 implementation
+had a median of 23.3 minutes across eight measurable cycles. KAN-26 has no
+recorded start and is excluded from duration statistics. These are workflow
+status intervals, including CI and administration, not measured engineering hours
+or a sustained daily delivery rate. Future alignment, corner and inference work
+is not demonstrated by this small sample.
+
+After 018, the full target contains 82 numbered tasks plus three UX tasks.
+With 12 delivery days and two acceptance days, it requires about **7.1 completed
+items per delivery day**. Capacity scenarios of 4/6/8 items per day imply
+24/17/13 calendar days including that buffer; they are arithmetic sensitivity
+checks, not confidence bounds or commitments. Full-scope completion in two weeks
+remains low-confidence until M2 demonstrates the harder analysis work and the
+private acceptance window is exercised. The target does not authorize dropping
+features or counting skipped physical checks as passed.
+
+Next: [KAN-29], step 019, independent A/B selection. Continue numbered dependency
+order and reforecast at [KAN-42] using actual M2 results. The recorded UX tickets
+remain backlog work, as requested. No unattended execution between turns is implied.
 
 The owner's near-term benefit arrives incrementally: integrated PR #11 gives day/lap inspection;
 M1 gives day results; M2 gives actionable comparison; M4 gives the original
@@ -159,9 +185,8 @@ task, an implementation PR, passing PR and integrated-main CI, and an exact-SHA
 handoff for local Codex compilation. All Jira content is English. KAN-5 starts
 the numbered backlog; milestone containers do not count towards its 100 tasks.
 
-Primary agent owns this ledger, integration, PR verification and reporting. Delegate
-bounded non-overlapping tasks, check current main/open PRs before work, and keep
-implementation commits focused. Each handoff must state completed evidence,
+Primary agent owns this ledger, integration, PR verification and reporting. Check
+current main/open PRs before work and keep implementation commits focused. Each handoff must state completed evidence,
 remaining blockers, current milestone and next acceptance outcome. Do not hand
 the owner a fresh list of prompts in place of executing authorized work.
 
@@ -239,3 +264,9 @@ the owner a fresh list of prompts in place of executing authorized work.
 [KAN-108]: https://kozucharkadiusz.atlassian.net/browse/KAN-108
 [KAN-109]: https://kozucharkadiusz.atlassian.net/browse/KAN-109
 [KAN-110]: https://kozucharkadiusz.atlassian.net/browse/KAN-110
+
+[KAN-113]: https://kozucharkadiusz.atlassian.net/browse/KAN-113
+
+[KAN-114]: https://kozucharkadiusz.atlassian.net/browse/KAN-114
+
+[KAN-115]: https://kozucharkadiusz.atlassian.net/browse/KAN-115
