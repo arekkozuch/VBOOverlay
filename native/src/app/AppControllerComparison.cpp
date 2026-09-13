@@ -206,8 +206,8 @@ void AppController::loadComparisonLap()
         const auto cancellation = m_comparisonCancellation;
         m_comparisonPending = true;
         m_comparisonLoadingSlot = i;
-        m_comparisonWatcher.setFuture(QtConcurrent::run([source, projectPath, row, request, cancellation] {
-            return readOutingLapDetail(source, projectPath, row, request, cancellation);
+        m_comparisonWatcher.setFuture(QtConcurrent::run([source, projectPath, row, request, cancellation, cache = m_analysisSourceCache] {
+            return readOutingLapDetail(source, projectPath, row, request, cancellation, cache);
         }));
         return;
     }

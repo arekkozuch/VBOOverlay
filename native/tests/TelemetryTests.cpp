@@ -58,6 +58,7 @@
 #include <QQuickItem>
 #include <QSettings>
 #include <QScopeGuard>
+#include <QSemaphore>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QThread>
@@ -135,6 +136,9 @@ private slots:
     void presentsDayResultStatesWithoutVideo();
     void selectsIndependentComparisonLapsThroughQml();
     void preservesComparisonSlotAcrossFailuresAndReplacement();
+    void sharesComparisonCacheAndRevalidatesSources();
+    void rejectsComparisonBeyondSharedBudget();
+    void cancelsSupersededComparisonWaitingForCache();
     void groupsOnlyDatedUnambiguousAlternatives();
     void prefersRaceChronoCalculatedAcceleration();
     void presentsBrakingUpInGForceWidgets();
@@ -2629,6 +2633,9 @@ void TelemetryTests::lapReferencesDetectUnsampledContentChanges()
     QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
     const auto saved = QJsonDocument::fromJson(readBytes(savedPath)).object();
     QCOMPARE(reference.value("sourceRevision").toString().toLatin1(), full.toHex());
+    QVERIFY(controller.selectOutingLapReference(reference));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QVERIFY(controller.m_analysisSourceCache->usedBytes() > 0); // Prime the verified cache before mutation.
     bytes[100000] = 'b'; QVERIFY(writeBytes(path, bytes));
     QCOMPARE(ProjectSourceReferenceCodec::telemetryFingerprint(path, TelemetrySource::load(path)), sampled);
     QVERIFY(TelemetrySource::contentSha256(path, bytes.size()) != full);
@@ -2935,6 +2942,118 @@ void TelemetryTests::preservesComparisonSlotAcrossFailuresAndReplacement()
     QCOMPARE(controller.m_comparisonSlots[0].state, QString("empty"));
     QCOMPARE(controller.m_comparisonSlots[1].state, QString("empty"));
     QVERIFY(!controller.m_comparisonSlots[0].session && !controller.m_comparisonSlots[1].session);
+}
+
+void TelemetryTests::sharesComparisonCacheAndRevalidatesSources()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("shared.vbo");
+    const auto bytes = EventProjectFixture::routeVbo(); QVERIFY(writeBytes(path, bytes));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Shared source", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto choices = controller.comparisonLaps(); QVERIFY(choices.size() >= 2);
+    const auto a = choices[0].toMap(), b = choices[1].toMap();
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QTRY_COMPARE(controller.m_comparisonSlots[0].state, QString("ready"));
+    const auto session = controller.m_comparisonSlots[0].session;
+    const auto cost = controller.m_analysisSourceCache->usedBytes();
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    QCOMPARE(controller.m_comparisonSlots[1].session, session);
+    QCOMPARE(controller.m_comparisonSlots[1].row.value("reference"), b.value("reference"));
+    QVERIFY(controller.inspectComparisonLap(1));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.m_outingLapDetailSession, session);
+    QCOMPARE(controller.m_analysisSourceCache->usedBytes(), cost);
+    // The cache is source-wide; a different derivation cannot reuse its entry.
+    const auto source = controller.m_comparisonSlots[0].source;
+    auto revised = a; auto reference = a.value("reference").toMap();
+    reference.insert("derivationKey", QString(64, 'b')); revised.insert("reference", reference);
+    const auto token = std::make_shared<std::atomic_bool>(false);
+    const auto changedRevision = AppController::readOutingLapDetail(source, {}, revised, 1, token, controller.m_analysisSourceCache);
+    QVERIFY2(changedRevision.session != nullptr, qPrintable(changedRevision.error));
+    QVERIFY(changedRevision.session != session);
+    // Even a cached source must still exist and match its full content digest.
+    QVERIFY(QFile::remove(path));
+    const auto missing = AppController::readOutingLapDetail(source, {}, a, 2, token, controller.m_analysisSourceCache);
+    QVERIFY(!missing.session); QVERIFY(missing.track.isEmpty()); QVERIFY(!missing.error.isEmpty());
+    QVERIFY(writeBytes(path, bytes));
+    const auto restored = AppController::readOutingLapDetail(source, {}, a, 3, token, controller.m_analysisSourceCache);
+    QCOMPARE(restored.session, session);
+    auto changed = bytes; changed.replace("coordinate units = degrees", "coordinate units = degreeS");
+    QCOMPARE(changed.size(), bytes.size()); QVERIFY(changed != bytes); QVERIFY(writeBytes(path, changed));
+    const auto stale = AppController::readOutingLapDetail(source, {}, a, 4, token, controller.m_analysisSourceCache);
+    QVERIFY(!stale.session); QVERIFY(stale.track.isEmpty()); QVERIFY(stale.staleReference);
+    QCOMPARE(controller.m_comparisonSlots[0].session, session); // Read-only worker cannot mutate GUI state.
+}
+
+void TelemetryTests::rejectsComparisonBeyondSharedBudget()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo(2400)));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(6800)));
+    constexpr qint64 budget = 2 * 1024 * 1024;
+    QVERIFY(TelemetrySource::load(second, {}, budget).sampleCount > 0); // B fits alone.
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    controller.m_analysisSourceCache = std::make_shared<TelemetrySessionCache>(budget);
+    QVERIFY(controller.importAnalysisRuns("Shared budget", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto runA = controller.eventRuns()[0].toMap().value("id");
+    QVariantMap a, b;
+    for (const auto &value : controller.comparisonLaps()) {
+        const auto row = value.toMap();
+        if (row.value("runId") == runA) a = row; else b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QTRY_COMPARE(controller.m_comparisonSlots[0].state, QString("ready"));
+    const auto track = controller.m_comparisonSlots[0].track;
+    const auto retained = controller.m_comparisonSlots[0].session.get();
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_COMPARE(controller.m_comparisonSlots[1].state, QString("error"));
+    QVERIFY(controller.m_comparisonSlots[1].error.contains("memory budget"));
+    QCOMPARE(controller.m_comparisonSlots[0].session.get(), retained);
+    QCOMPARE(controller.m_comparisonSlots[0].track, track);
+    QVERIFY(controller.m_analysisSourceCache->usedBytes() <= budget);
+    controller.clearComparisonLap(0);
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_COMPARE(controller.m_comparisonSlots[1].state, QString("ready"));
+    QVERIFY(controller.m_analysisSourceCache->usedBytes() <= budget);
+}
+
+void TelemetryTests::cancelsSupersededComparisonWaitingForCache()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("source.vbo"); QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Rapid selections", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto choices = controller.comparisonLaps(); QVERIFY(choices.size() >= 2);
+    const auto a = choices[0].toMap().value("reference").toMap();
+    const auto b = choices[1].toMap().value("reference").toMap();
+    QSemaphore entered, release;
+    std::thread blocker([&] {
+        (void)controller.m_analysisSourceCache->load("held-test-decoder", {}, [&](qint64) {
+            entered.release(); release.acquire(); return TelemetrySession{};
+        }, [](const TelemetrySession &) {});
+    });
+    const auto unblock = qScopeGuard([&] { release.release(); if (blocker.joinable()) blocker.join(); });
+    QVERIFY(entered.tryAcquire(1, 5000));
+    QVERIFY(controller.selectComparisonLap(0, a)); QTRY_VERIFY(controller.m_comparisonPending);
+    const auto obsolete = controller.m_comparisonCancellation;
+    QVERIFY(controller.selectComparisonLap(0, b)); QVERIFY(obsolete->load());
+    QVERIFY(controller.selectComparisonLap(0, a)); QVERIFY(controller.selectComparisonLap(0, b));
+    release.release(); blocker.join();
+    QTRY_COMPARE(controller.m_comparisonSlots[0].state, QString("ready"));
+    QCOMPARE(controller.m_comparisonSlots[0].row.value("reference").toMap(), b);
+    QCOMPARE(controller.m_comparisonSlots[1].state, QString("empty"));
+    QVERIFY(controller.m_comparisonSlots[0].error.isEmpty());
+    QVERIFY(controller.m_analysisSourceCache->usedBytes() <= controller.m_analysisSourceCache->limitBytes());
 }
 
 void TelemetryTests::presentsDayResultStatesWithoutVideo()

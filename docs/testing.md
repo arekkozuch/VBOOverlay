@@ -40,6 +40,31 @@ laps from different runs, swap, choose best run/group as B and inspect each. Che
 readability and keyboard navigation on the owner's Mac. These checks do not yet
 accept shared-progress delta or paired chart/map presentation.
 
+## Shared comparison source budget (KAN-30)
+
+`flappedear_source_cache_tests` exercises reuse with validation on every hit,
+fingerprint/revision separation, immutable cadence statistics, lease accounting
+after pinned-entry eviction, idle eviction, failed validation, oversized decode,
+cancellation after decoding and cancellation while waiting for the decode lock.
+VBO tests compare bounded/default output with malformed rows, reject a wide source
+before sample allocation and retain malformed-section/cancellation behavior. RCZ
+tests retain gap semantics and reject compressed expansion against the allowance;
+the existing malformed-archive and parser-limit suites remain mandatory.
+
+Controller regressions verify that A/B and the inspector share a source session,
+different derivations get separate entries, cache reuse rejects missing/changed
+files, and a source that fits alone is rejected against the pair's remaining
+budget without losing A. Clearing A permits B to load. A blocked decoder makes
+rapid reselection deterministic: the old request is cancelled and only the final
+lap reaches the slot. Existing QML selection, source replacement, document-change
+and stale-completion regressions remain enabled.
+
+The coordinator lacks CMake/CTest/Qt. Exact macOS Debug/Release PR and main build,
+test and installed-startup evidence is recorded in
+[KAN-30](https://kozucharkadiusz.atlassian.net/browse/KAN-30). Synthetic allocation
+and lifecycle tests do not establish process RSS, private-recording throughput,
+physical Mac acceptance or private GoPro validation. Windows remains paused.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

@@ -958,14 +958,14 @@ void AppController::loadOutingLapDetail()
     m_outingLapDetailCancellation = std::make_shared<std::atomic_bool>(false);
     const auto cancellation = m_outingLapDetailCancellation;
     m_outingLapDetailPending = true;
-    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, row, request, cancellation] {
-        return readOutingLapDetail(source, projectPath, row, request, cancellation);
+    m_outingLapDetailWatcher.setFuture(QtConcurrent::run([source, projectPath, row, request, cancellation, cache = m_analysisSourceCache] {
+        return readOutingLapDetail(source, projectPath, row, request, cancellation, cache);
     }));
 }
 
 AppController::OutingLapDetailResult AppController::readOutingLapDetail(const QJsonObject &source,
     const QString &projectPath, const QVariantMap &row, const quint64 request,
-    const std::shared_ptr<std::atomic_bool> &cancellation)
+    const std::shared_ptr<std::atomic_bool> &cancellation, const std::shared_ptr<TelemetrySessionCache> &cache)
 {
     const auto start = row.value("startTime").toDouble();
     const auto end = row.value("endTime").toDouble();
@@ -988,15 +988,22 @@ AppController::OutingLapDetailResult AppController::readOutingLapDetail(const QJ
             result.staleReference = true;
             throw std::runtime_error("Lap reference is stale: recording content changed. Reload this source.");
         }
-        auto session = std::make_shared<TelemetrySession>(TelemetrySource::load(path, cancelled));
-        if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision) {
-            result.staleReference = true;
-            throw std::runtime_error("Lap reference is stale: recording changed while opening it.");
-        }
+        const auto cacheKey = QCryptographicHash::hash(QJsonDocument(QJsonObject{
+            {"fingerprint", reference.fingerprint}, {"content", QString::fromLatin1(contentRevision)},
+            {"derivation", lapReference.value("derivationKey")}, {"algorithm", lapReference.value("algorithm")},
+            {"format", QFileInfo(path).suffix().toLower()}}).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256);
+        const auto session = cache->load(cacheKey, cancelled,
+            [&](qint64 available) { return TelemetrySource::load(path, cancelled, available); },
+            [&](const TelemetrySession &candidate) {
+                if (TelemetrySource::contentSha256(path, bytes, cancelled).toHex() != contentRevision) {
+                    result.staleReference = true;
+                    throw std::runtime_error("Lap reference is stale: recording changed while opening it.");
+                }
+                if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
+                    ProjectSourceReferenceCodec::telemetryFingerprint(path, candidate)) != SourceFingerprintMatch::Match)
+                    throw std::runtime_error("Recording changed. Relink its source before opening this lap.");
+            });
         throwIfCancelled(cancelled);
-        if (ProjectSourceReferenceCodec::compareFingerprints(reference.fingerprint,
-            ProjectSourceReferenceCodec::telemetryFingerprint(path, *session)) != SourceFingerprintMatch::Match)
-            throw std::runtime_error("Recording changed. Relink its source before opening this lap.");
         if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end <= start || end > session->duration)
             throw std::runtime_error("Lap range is no longer valid for this recording.");
         // Build map bounds only from this section. Keep gaps as separate

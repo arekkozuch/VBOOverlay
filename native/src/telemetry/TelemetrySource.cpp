@@ -39,12 +39,12 @@ QByteArray TelemetrySource::contentSha256(const QString &path, const qint64 expe
     }
     return hash.result();
 }
-TelemetrySession TelemetrySource::load(const QString &path, const CancellationCheck &cancelled)
+TelemetrySession TelemetrySource::load(const QString &path, const CancellationCheck &cancelled, const qint64 maximumDecodedBytes)
 {
     throwIfCancelled(cancelled);
     const auto suffix = QFileInfo(path).suffix().toLower();
-    if (suffix == "vbo") return VboParser::parseFile(path, cancelled);
-    if (suffix == "rcz") return RczParser::parseFile(path, cancelled);
+    if (suffix == "vbo") return VboParser::parseFile(path, cancelled, maximumDecodedBytes);
+    if (suffix == "rcz") return RczParser::parseFile(path, cancelled, maximumDecodedBytes);
     throw std::runtime_error("Choose a VBO or RaceChrono RCZ telemetry file.");
 }
 }

@@ -64,6 +64,29 @@ These are in-memory analysis selections. Saving an A/B workspace, shared progres
 distance delta and paired traces/charts belong to subsequent M2 tasks. The existing
 single-lap inspector remains the evidence view for each selected lap.
 
+## Shared comparison source budget (KAN-30)
+
+A/B and the single-lap inspector share a **256 MiB decoded-source budget** and
+one cancellable decode lock. Selecting another lap from a loaded source reuses
+its immutable session; each lap still builds its own gap-preserving map range.
+Up to two verified sources remain in the reuse cache. Sessions held by a slot,
+inspector or worker remain charged after cache eviction until their last owner
+releases them. Idle entries are evicted before another source is decoded.
+
+Every request resolves the source again and checks its full content hash and
+fingerprint, including cache hits. Keys also include the lap derivation revision,
+algorithm and file format. A missing, changed, cancelled or superseded read cannot
+replace the current selection. Budget rejection leaves the other slot intact;
+clear an unused selection or close its inspector to make room, then select again.
+
+This is a conservative limit for retained decoded sessions and the allowance
+reserved by their decoder, not a process-RSS ceiling. VBO sample vectors and RCZ
+expanded members are checked against the remaining allowance before large sample
+allocation. Shared buffers are counted per channel, so admission can be stricter
+than their physical size. Parser input/section/JSON/decompression scratch keeps
+its existing separate hard limits; editor telemetry, day-summary derivation and
+bounded per-lap map geometry are outside this source-cache budget.
+
 ## Next product outcomes
 
 1. M1 synthetic acceptance is recorded in [KAN-28](kan28-m1-acceptance.md), with local private-VBO evidence separate.

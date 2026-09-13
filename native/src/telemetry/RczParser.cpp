@@ -233,9 +233,20 @@ Mapping mapping(int kind, int channel)
 }
 } // namespace
 
-TelemetrySession RczParser::parseFile(const QString &path, const CancellationCheck &cancelled)
+TelemetrySession RczParser::parseFile(const QString &path, const CancellationCheck &cancelled, const qint64 maximumDecodedBytes)
 {
     Archive archive(path, cancelled);
+    const bool boundedDecode = maximumDecodedBytes != std::numeric_limits<qint64>::max();
+    if (boundedDecode) {
+        // Up to three output samples per input (gap markers), two position
+        // channels per eight-byte input, and twelve bytes per output sample.
+        // All expanded members are counted, including shared timestamp files.
+        qint64 expanded = 0;
+        for (const auto &member : archive.members) expanded += member.expanded;
+        if (maximumDecodedBytes < 16LL * 1024 * 1024
+            || expanded > (maximumDecodedBytes - 16LL * 1024 * 1024) / 9)
+            throw ResourceLimitError("Recording exceeds the remaining shared analysis memory budget. Clear an unused lap or close its inspector.");
+    }
     // A shared single session has flat members. Backups/resumed archives need a
     // selection/timeline model; never import only the first fragment silently.
     for (auto i = archive.members.cbegin(); i != archive.members.cend(); ++i)
@@ -285,6 +296,16 @@ TelemetrySession RczParser::parseFile(const QString &path, const CancellationChe
         const double gapLimit = telemetryGapThreshold(channel);
         QVector<double> gapTimes;
         QVector<float> gapValues;
+        if (boundedDecode) {
+            qsizetype count = channel.timestamps.size();
+            for (qsizetype i = 1; i < channel.timestamps.size(); ++i) {
+                if ((i & 0xfff) == 0) throwIfCancelled(cancelled);
+                if (channel.timestamps[i] - channel.timestamps[i - 1] > gapLimit) count += 2;
+            }
+            if (count > 8'000'000 - totalSamples + channel.values.size())
+                fail("Decoded gap/sample budget exceeded.");
+            gapTimes.reserve(count); gapValues.reserve(count);
+        }
         for (qsizetype index = 0; index < channel.timestamps.size(); ++index) {
             if ((index & 0xfff) == 0) throwIfCancelled(cancelled);
             const double time = channel.timestamps[index];
