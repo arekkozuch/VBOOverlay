@@ -1,5 +1,11 @@
 # macOS product candidate acceptance
 
+> Current owner direction (13 September 2026): Cloud CI and Windows execution
+> are paused. New candidates require recorded local macOS build/test and
+> package/startup evidence. References below to hosted CI describe the previous
+> pipeline and do not authorize cloud execution. See [task delivery](development-workflow.md).
+
+
 Updated 12 September 2026. Internal candidates are not approved for distribution
 until the exact delivered archive passes acceptance. Version remains 0.2.0.
 The old single-session-only product scope is superseded by
@@ -79,7 +85,7 @@ an advertised platform or capability.
 | Gate | Required evidence | Current status |
 |---|---|---|
 | Identity | Archive SHA-256, manifest commit, OS build, CPU/GPU, driver, FFmpeg/ffprobe versions | Pending exact candidate |
-| Automated tests | Green Debug/Release CI, RCZ suite, startup, deployed startup | Required on candidate |
+| Automated tests | Local macOS Debug/Release builds/tests, RCZ suite, startup, deployed startup | Required on candidate |
 | Clean installation | Finder/Explorer launch without Qt SDK; media playback; missing/incompatible FFmpeg message | Pending physical machines |
 | Real media | Supplied RCZ/VBO plus matching real video through the full workflow below | Telemetry pair passed locally; matching video unavailable in this workspace |
 | Hardware export | Actual selected HEVC encoder, output metadata, decoded frames and audio alignment | Pending candidate run |

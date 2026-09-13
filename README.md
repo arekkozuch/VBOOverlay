@@ -47,14 +47,14 @@ Very Verbose export diagnostics follow the live tail until the user scrolls into
 - Qt 6.8 or newer with Concurrent, Core, Gui and matching GuiPrivate headers, Qml, Quick, Quick Controls 2, Multimedia, and Test; include the SVG and Shader Tools modules in binary SDK installations.
 - FFmpeg and ffprobe available at runtime. Export depends on an externally installed FFmpeg and a working HEVC encoder; the command-line tools are not bundled. A small production-filter preflight also requires explicit alpha-mode support.
 
-Current development and CI focus is macOS only, per owner direction on 13 September 2026. Windows builds and validation are paused until explicitly resumed. CI pins Qt 6.8.3 and produces internal macOS Release candidates with deployed Qt runtimes. Existing [Windows NSIS packaging](docs/windows-installer.md) remains available for later resumption. Installation, external FFmpeg prerequisites and clean-machine acceptance are documented in [beta acceptance](docs/beta-acceptance.md).
+Current development uses local Codex on macOS. Cloud CI is paused by owner direction on 13 September 2026 due to quota limits; Windows builds and validation also remain paused. See [task delivery](docs/development-workflow.md) for local implementation and validation instructions. Existing [Windows NSIS packaging](docs/windows-installer.md) is retained for later resumption.
 
 For replacing an older named bundle without losing preferences or recovery, see
 [application identity and upgrades](docs/application-identity.md).
 
 ## Build
 
-For the coordinator's per-task PR/CI gate and local Codex update/build/test
+For per-task local Codex instructions and the update/build/test
 handoff, see [task delivery and local acceptance](docs/development-workflow.md).
 
 On Apple Silicon with Homebrew Qt in `/opt/homebrew/opt/qt`:
@@ -70,7 +70,7 @@ open "build-native/native/Flapped Ear Telemetry.app"
 
 ## Continuous integration
 
-[Native CI](.github/workflows/build.yml) builds Debug and Release configurations and runs Qt Test, QML startup smoke, QRhi rendering regressions, and synthetic FFmpeg integrations on macOS arm64 with Qt 6.8.3. Windows jobs are currently disabled. It runs on pull requests, pushes to `main`, and manual dispatch. Hardware-encoder and private real-media acceptance remain separate local gates. Successful Release jobs also deploy Qt and check installed startup with the build SDK hidden. Candidate archives carry file hashes and a checkout manifest; these are internal acceptance artifacts, not an approved release. Logs and JUnit results are attached to each run; see [testing guidance](docs/testing.md#cloud-ci) for scope and exclusions.
+[Native CI](.github/workflows/build.yml) is paused: push/PR triggers are removed and manual jobs are disabled. Do not dispatch, rerun or restore Cloud CI without explicit owner authorization. Use local builds and CTest; report hardware-encoder and private-media acceptance separately. The retained workflow and [historical CI guidance](docs/testing.md#cloud-ci) document the previous environment.
 
 ## Architecture
 

@@ -1,54 +1,45 @@
 # Task delivery and local acceptance
 
-The owner has authorized the coordinator to implement the ordered
-[Flapped Ear Telemetry Jira backlog](https://kozucharkadiusz.atlassian.net/browse/KAN).
-There are 100 separate numbered tasks; the seven milestone epics are additional
-containers. Task numbers define queue order. The product contract remains
-[F00–F20](product-vision.md).
+## Current owner direction — 13 September 2026
 
-## Current platform focus — 13 September 2026
+Cloud CI is paused because the account has reached its quota. The workflow has
+no push or pull-request triggers and its manual job is disabled. Do not dispatch,
+rerun or re-enable cloud jobs without explicit owner authorization. This
+supersedes earlier PR/main CI requirements in Jira and historical delivery notes.
+Tasks 001–015 retain their recorded CI evidence; it is not evidence for new code.
+Windows builds, tests and packaging remain paused. Development targets macOS.
 
-The owner has paused Windows development builds and validation. Start only macOS
-arm64 Debug and Release jobs, including the macOS Release package/startup checks.
-Do not run Windows builds, tests or installer checks until the owner explicitly
-resumes them. This direction supersedes older dual-platform completion wording
-in Jira and historical delivery records. Keep existing Windows code and packaging
-scripts available for a later resumption. The ordered backlog remains 100 tasks.
+## One local Codex instruction per Jira task
 
-## One task at a time
+The coordinator prepares one self-contained English implementation prompt for the
+next requested task in the ordered 100-task Jira backlog. The local Codex session
+implements and verifies it on the owner's Mac. The prompt must contain:
 
-1. Read the Jira acceptance criteria and dependencies. Inspect current `main`,
-   open PRs and uncommitted work before selecting the next unblocked task.
-2. Move that task into progress and state the intended result. Continue an
-   existing implementation PR when one already covers the task. Preserve other
-   working copies and their uncommitted changes.
-3. Implement only that task, using focused commits and updating relevant docs.
-   Run applicable local build/tests. If the coordinator lacks the native
-   toolchain, record that limitation and obtain build/test evidence through CI.
-4. Push a PR referencing the Jira key. Review its actual diff and results; fix
-   failed checks without removing required coverage or weakening acceptance.
-5. Require Native CI on the final PR head: macOS arm64, Debug and Release,
-   on the configured Qt version. Verify every required job and its
-   test/package steps rather than relying on an earlier successful run.
-6. Merge only the verified head under the owner's development authorization.
-   Recheck `main` and require its push-triggered Native CI to pass as well.
-   If the head changes, reconcile the change and verify that exact source state.
-7. Record the PR, implementation SHA, merge SHA, PR/main CI links, executed
-   results and limitations in Jira. Mark the task done only after its criteria
-   and the integration gate pass. Then take the next task.
+- Jira key, goal, acceptance criteria and dependencies checked against current code.
+- Relevant source paths, bounded scope and the applicable AGENTS.md invariants.
+- A safe starting point: inspect branch/status/history and preserve unrelated work.
+- Implementation, regression coverage and documentation requirements.
+- Exact applicable local configure/build/test commands and an interactive scenario.
+- A focused local commit and a report of SHA, commands, results, skips and limitations.
 
-Keep one implementation task active. If blocked, document the concrete blocker
-before selecting another unblocked task; never mark blocked acceptance as done.
-Give the owner progress updates and a short completed-task handoff, including
-the revision available for local compilation. All Jira titles, descriptions,
-acceptance criteria and updates must be in English.
+Do not replace implementation instructions with an instruction to start Cloud CI.
+Do not claim completion from a prompt or unexecuted commands. If the local native
+toolchain is unavailable, report what is missing and leave validation outstanding.
 
-Hosted CI exercises synthetic tests and internal package checks. Physical Mac,
-private recordings, hardware encoders and interactive acceptance are separate
-evidence. When a task explicitly requires them, it remains open until those
-criteria are met. Development merge authorization does not authorize public
-releases, tags or distribution. Work does not continue between conversation
-turns unless a separately configured execution mechanism is actually running.
+Keep one implementation task active. Review the local Codex result and actual
+changes before updating Jira. A code task is complete only when its acceptance
+criteria and applicable local build/tests pass. Run Debug application/tests as
+the default local gate; also validate Release and deployed startup for packaging,
+release-sensitive changes or when the task requires them. Keep private-media,
+physical hardware/encoder and interactive checks separate from synthetic tests.
+
+Local Codex must not push, open a PR, merge or publish unless the owner explicitly
+requests it. When publication is authorized, use a focused PR and record local
+verification for its exact head. After integration, verify the resulting main
+revision locally; never substitute old CI results or silently enable Cloud CI.
+All Jira content remains in English. Record the implementation SHA, local results,
+limitations and any authorized PR/merge links. No public releases or tags are
+implied. Historical CI wording elsewhere does not override this workflow.
 
 ## Local Codex: update, compile and test current main
 
@@ -64,7 +55,7 @@ version:
    it instead of rewriting it. Do not push from the local session unless asked.
 3. Record `git rev-parse HEAD`, Qt and compiler versions. Configure using the
    existing [build instructions](../README.md#build); preserve a valid local
-   toolchain rather than assuming CI's installation path.
+   toolchain rather than assuming a hosted runner's installation path.
 4. Run the application build and test suite:
 
    ```bash
