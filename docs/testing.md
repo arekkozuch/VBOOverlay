@@ -13,12 +13,11 @@ The native suite assigns a unique test application identity and checks a default
 
 ## Cloud CI
 
-[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Four jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows Release also compiles NSIS and runs two install/uninstall cycles, checking payload hashes, per-user registration/shortcuts, SDK-hidden startup, overwrite rejection and preservation of a user-added file. See [Windows installer](windows-installer.md).
+[Native CI](../.github/workflows/build.yml) runs on pull requests, pushes to `main`, and manual dispatch. Two macOS arm64 jobs configure Debug and Release Ninja builds with Qt 6.8.3 (the supported minimum minor), compile the application and tests with C++20, and run the complete CTest registration: the application, RCZ/parser, import, event-project, GPS-lap-eligibility and export-log suites, plus production QML startup smoke. Release jobs additionally deploy Qt and run installed startup with the build SDK hidden, then attach internal candidate archives. Windows builds, tests and installer validation are paused by owner direction on 13 September 2026; resume them only when explicitly requested. Earlier Windows results below are historical. See [Windows installer](windows-installer.md).
 
 | Job | Renderer | Toolchain |
 | --- | --- | --- |
 | `macOS arm64 / Debug or Release / Qt 6.8.3` | Metal; Cocoa for native window interaction | `macos-15`, Apple Clang |
-| `Windows x64 / Debug or Release / Qt 6.8.3` | D3D11 WARP; Windows QPA for native window interaction | `windows-2022`, MSVC 2022 x64 |
 
 Native interaction tests expose real windows and therefore require native QPA handles. Offscreen QPA cannot supply the NSView/HWND required by a native QRhi swapchain. Export pixel tests retain QRhi render-control targets; the separate startup smoke explicitly uses offscreen/software. Do not suppress input assertions or renderer coverage to avoid a platform mismatch.
 
@@ -43,7 +42,7 @@ The Qt 6.8 build also covers the `QImage::mirrored(false, true)` vertical-readba
 
 Cancellation-marker failure uses the existing native stalled-process helper on both platforms, so the forced worker-stop assertions also exercise Windows Job Object supervision without requiring a POSIX shell.
 
-The four jobs use read-only repository permissions, do not retain checkout credentials, pin action implementations to commit SHAs, cancel superseded runs, limit build parallelism to two, and retain only logs/JUnit results for 14 days. The pinned Qt installer implementation is called directly so its wrapper cannot introduce mutable nested action references. Build/job/test timeouts bound stalled runs. `qmllint` is deliberately excluded because its previous project invocation exhausted memory.
+The two active macOS jobs use read-only repository permissions, do not retain checkout credentials, pin action implementations to commit SHAs, cancel superseded runs, limit build parallelism to two, and retain only logs/JUnit results for 14 days. The pinned Qt installer implementation is called directly so its wrapper cannot introduce mutable nested action references. Build/job/test timeouts bound stalled runs. `qmllint` is deliberately excluded because its previous project invocation exhausted memory.
 
 A successful cloud run verifies this synthetic regression gate. It does not certify hardware encoders, private VBO/GoPro recordings, interactive UI behavior, installers, signing, or notarization. Branch protection is a separate repository setting; after all required jobs pass, verify the exact PR head before merging. See each run's actual results before claiming CI passes.
 

@@ -6,6 +6,15 @@ There are 100 separate numbered tasks; the seven milestone epics are additional
 containers. Task numbers define queue order. The product contract remains
 [F00–F20](product-vision.md).
 
+## Current platform focus — 13 September 2026
+
+The owner has paused Windows development builds and validation. Start only macOS
+arm64 Debug and Release jobs, including the macOS Release package/startup checks.
+Do not run Windows builds, tests or installer checks until the owner explicitly
+resumes them. This direction supersedes older dual-platform completion wording
+in Jira and historical delivery records. Keep existing Windows code and packaging
+scripts available for a later resumption. The ordered backlog remains 100 tasks.
+
 ## One task at a time
 
 1. Read the Jira acceptance criteria and dependencies. Inspect current `main`,
@@ -18,8 +27,8 @@ containers. Task numbers define queue order. The product contract remains
    toolchain, record that limitation and obtain build/test evidence through CI.
 4. Push a PR referencing the Jira key. Review its actual diff and results; fix
    failed checks without removing required coverage or weakening acceptance.
-5. Require Native CI on the final PR head: macOS arm64 and Windows x64, Debug
-   and Release, on the configured Qt version. Verify every required job and its
+5. Require Native CI on the final PR head: macOS arm64, Debug and Release,
+   on the configured Qt version. Verify every required job and its
    test/package steps rather than relying on an earlier successful run.
 6. Merge only the verified head under the owner's development authorization.
    Recheck `main` and require its push-triggered Native CI to pass as well.

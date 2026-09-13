@@ -83,7 +83,9 @@ earlier results do not certify a newly built candidate. This coordinator workspa
 lacks native CMake/Qt and cannot claim local native execution; the baseline build
 and synthetic test evidence above comes from CI.
 
-CI covers macOS/Windows Debug/Release synthetic tests and internal candidates.
+Current CI covers macOS arm64 Debug/Release synthetic tests and internal candidates.
+Windows builds, tests and installer validation are paused by owner direction on
+13 September 2026 until explicitly resumed; prior Windows results are historical.
 It does not certify the exact installed Mac candidate on the owner's full-day
 telemetry and matching GoPro media. [Candidate acceptance](docs/beta-acceptance.md)
 remains required, tracked through [M5](https://kozucharkadiusz.atlassian.net/browse/KAN-10)

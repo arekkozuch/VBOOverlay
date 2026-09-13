@@ -86,8 +86,11 @@
 - Preview widget geometry is derived from loaded media display geometry, never from transient
   `VideoOutput` decoded-frame state. User-accessible playback end is the last actual video frame,
   not the media-duration boundary after it.
-- Cloud CI builds and runs synthetic tests on macOS and Windows. Keep both CI jobs green, run the
-  applicable local gate, and report real-media and hardware-encoder validation separately. An explicit
+- Current owner direction (2026-09-13): focus on macOS only. Do not start Windows builds,
+  tests, packaging or installer validation until the owner explicitly resumes them. This
+  supersedes older dual-platform gates in Jira and historical documentation. Keep macOS
+  arm64 Debug and Release CI green, run the applicable local gate, and report real-media
+  and hardware-encoder validation separately. An explicit
   cloud hardware-test skip must not disable QRhi rendering assertions or software FFmpeg integrations.
 - QRhi/GuiPrivate use is version-sensitive. A Qt upgrade requires explicit local render/export smoke
   validation.
