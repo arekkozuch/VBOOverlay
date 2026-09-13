@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QCryptographicHash>
 #include <QSet>
+#include <QMap>
 
 #include <algorithm>
 #include <cmath>
@@ -116,7 +117,99 @@ QString lapCompatibilityReasonText(const QString &reason)
     if (reason == "user-exclusion") return "User exclusion";
     if (reason == "not-timed-lap") return "Not a complete timed lap";
     if (reason == "stale-source") return "Source changed; reload recording";
+    if (reason == "ineligible-lap") return "Lap is not eligible";
+    if (reason == "invalid-reference") return "Lap identity is invalid";
     return reason;
+}
+
+QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &groupId,
+    const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
+    const QSet<QString> &staleRunIds)
+{
+    QJsonObject result{{"groupId", groupId}, {"state", "selection-required"},
+        {"bestOfDay", QJsonValue::Null}, {"runs", QJsonArray{}}, {"excludedLaps", QJsonArray{}},
+        {"lapCount", 0}, {"eligibleLapCount", 0}, {"tieCount", 0}};
+    if (groupId.isEmpty()) return result;
+    if (rows.size() > maximumOutingLapRows || exclusions.size() > maximumOutingLapRows)
+        throw ResourceLimitError("Too many laps or exclusions to rank this outing.");
+    // Source order, display names and lap numbering never break a timing tie.
+    const auto less = [](const OutingLapRow *a, const OutingLapRow *b) {
+        const auto durationA = a->end - a->start, durationB = b->end - b->start;
+        if (durationA != durationB) return durationA < durationB;
+        if (a->timestampMilliseconds != b->timestampMilliseconds) {
+            if (!a->timestampMilliseconds) return false;
+            if (!b->timestampMilliseconds) return true;
+            return *a->timestampMilliseconds < *b->timestampMilliseconds;
+        }
+        if (a->runId != b->runId) return a->runId < b->runId;
+        if (a->start != b->start) return a->start < b->start;
+        if (a->end != b->end) return a->end < b->end;
+        return lapReferenceKey(a->reference) < lapReferenceKey(b->reference);
+    };
+    const auto record = [&groupId](const OutingLapRow &row) {
+        return QJsonObject{{"runId", row.runId}, {"runName", row.runName}, {"lapNumber", row.lapNumber},
+            {"reference", row.reference}, {"groupId", groupId},
+            {"durationSeconds", std::isfinite(row.end - row.start) ? QJsonValue(row.end - row.start) : QJsonValue(QJsonValue::Null)}};
+    };
+    struct Run { const OutingLapRow *first = nullptr; QVector<const OutingLapRow *> eligible; int count = 0; };
+    QMap<QString, Run> runs;
+    QVector<const OutingLapRow *> eligible;
+    QJsonArray rejected;
+    const auto reasonsByReference = lapExclusionReasons(exclusions);
+    for (const auto &row : rows) {
+        if (lapCompatibilityGroupId(configurations.value(row.runId)) != groupId) continue;
+        auto &run = runs[row.runId];
+        if (!run.first) run.first = &row;
+        if (row.type != LapSectionType::Lap) continue;
+        ++run.count;
+        const auto reason = reasonsByReference.value(lapReferenceKey(row.reference));
+        auto reasons = lapCompatibilityReasons(configurations.value(row.runId), {}, row.referenceIssue, !reason.isEmpty());
+        if (staleRunIds.contains(row.runId)) reasons.append("stale-source");
+        if (!row.referenceEligible && reasons.isEmpty()) reasons.append("ineligible-lap");
+        if (!validLapReference(row.reference) || row.reference.value("algorithm") != lapReferenceAlgorithm
+            || row.reference.value("type") != "LAP" || row.reference.value("runId") != row.runId
+            || row.reference.value("startTime").toDouble() != row.start || row.reference.value("endTime").toDouble() != row.end)
+            reasons.append("invalid-reference");
+        if (reasons.isEmpty()) { eligible.append(&row); run.eligible.append(&row); }
+        else {
+            auto item = record(row); QStringList labels;
+            for (const auto &code : reasons) labels.append(lapCompatibilityReasonText(code));
+            item.insert("reasons", QJsonArray::fromStringList(reasons));
+            item.insert("reasonLabels", QJsonArray::fromStringList(labels)); item.insert("userReason", reason);
+            rejected.append(item);
+        }
+    }
+    std::sort(eligible.begin(), eligible.end(), less);
+    QVector<QString> runOrder;
+    for (auto it = runs.begin(); it != runs.end(); ++it) {
+        std::sort(it->eligible.begin(), it->eligible.end(), less);
+        runOrder.append(it.key());
+    }
+    std::sort(runOrder.begin(), runOrder.end(), [&](const QString &a, const QString &b) {
+        const auto &left = runs[a].eligible, &right = runs[b].eligible;
+        if (left.isEmpty() != right.isEmpty()) return !left.isEmpty();
+        return left.isEmpty() ? a < b : less(left.first(), right.first());
+    });
+    const auto ties = [](const QVector<const OutingLapRow *> &laps) {
+        if (laps.isEmpty()) return 0;
+        const double best = laps.first()->end - laps.first()->start;
+        return static_cast<int>(std::count_if(laps.cbegin(), laps.cend(), [best](const auto *lap) { return lap->end - lap->start == best; }));
+    };
+    QJsonArray rankedRuns;
+    int lapCount = 0;
+    for (const auto &id : runOrder) {
+        const auto &run = runs[id]; lapCount += run.count;
+        rankedRuns.append(QJsonObject{{"runId", id}, {"runName", run.first->runName}, {"groupId", groupId},
+            {"state", run.eligible.isEmpty() ? "no-eligible-laps" : "available"}, {"lapCount", run.count},
+            {"eligibleLapCount", run.eligible.size()}, {"tieCount", ties(run.eligible)},
+            {"bestLap", run.eligible.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(record(*run.eligible.first()))}});
+    }
+    result.insert("state", eligible.isEmpty() ? "no-eligible-laps" : "available");
+    result.insert("runs", rankedRuns); result.insert("excludedLaps", rejected);
+    result.insert("lapCount", lapCount); result.insert("eligibleLapCount", eligible.size());
+    result.insert("tieCount", ties(eligible));
+    if (!eligible.isEmpty()) result.insert("bestOfDay", record(*eligible.first()));
+    return result;
 }
 
 QByteArray lapReferenceKey(const QJsonObject &reference)

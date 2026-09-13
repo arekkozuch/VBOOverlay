@@ -266,3 +266,43 @@ rejection, simultaneous GPS/user/compatibility reasons, durable explicit decisio
 generation invalidation, and keyboard interaction with the production QML dialog
 and group selector. Native verification uses macOS arm64 Debug and Release CI;
 physical-Mac and private-recording acceptance remain separate.
+
+## Compatible run/day rankings (step 013)
+
+After choosing a resolved compatibility group, **Best day** opens that group's
+fastest eligible lap. The matching lap row carries a **Best day in group** badge.
+**Ranking details…** shows each run's best lap and an **Applied exclusions** tab;
+results carry the run, lap, group and exact portable reference. Selecting a result
+opens its source lap through the existing reference resolver and asynchronous
+source-content verification. Excluded laps remain available for inspection.
+
+Ranking includes complete LAP sections only, with the shared GPS/user eligibility
+policy, a valid current lap reference and no known stale source. Faster laps from
+other layouts/directions/gate groups never participate. Unknown compatibility is
+not silently promoted. A group or run with no eligible lap explicitly reports
+**No eligible lap**, with no winner or best-day badge. The details retain total and
+eligible counts plus every applied exclusion's independent reasons and user text.
+Historical unmatched exclusions remain covered by the existing outing notice;
+they are not presented as applied to newly derived laps.
+
+Timing comparisons use full source precision. Exactly equal durations prefer a
+known earlier absolute lap-start timestamp; missing timestamps sort after known
+ones. Further ties use stable run ID, telemetry start/end bounds and the canonical
+portable reference. Display name, display lap number and input/list order do not
+break ties. Equal-duration counts are exposed per run and group; equal displayed
+milliseconds do not necessarily mean equal source-precision durations.
+
+The selected group's rankings are derived in memory and recomputed on eligibility,
+configuration and source changes. No independent ranking cache is saved. Loading
+or outdated generations suppress results immediately, and clearing the project
+removes its former winner. Existing same-run badges remain available outside a
+selected day comparison; best-day results always identify their compatibility group.
+
+Regression tests cover deterministic ties and input reversal, incompatible faster
+laps, unknown groups, combined GPS/user exclusions, invalid references, stale
+sources, resource bounds, all-excluded groups, restore/recompute behavior and
+keyboard navigation from production QML day/run results. The ranking controls and
+lap list are exercised at the analysis window's 760×480 minimum. The verbose
+chronology hint is hidden at short heights and notices remain scrollable so the
+lap list stays reachable. Native macOS Debug/Release CI is the build/test gate;
+private recordings and physical-Mac acceptance remain separate.

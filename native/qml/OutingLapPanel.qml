@@ -6,9 +6,98 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     color: "#090e14"
+    readonly property var ranking: appController.outingRanking
     function duration(seconds) {
         const minutes = Math.floor(seconds / 60);
         return minutes + ":" + (seconds - minutes * 60).toFixed(3).padStart(6, "0");
+    }
+    Dialog {
+        id: rankingDialog
+        objectName: "outingRankingDialog"
+        title: qsTr("Ranking in selected group")
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(700, root.width - 40)
+        height: Math.min(480, root.height - 30)
+        standardButtons: Dialog.Close
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                text: root.ranking.groupLabel || qsTr("Choose a compatibility group")
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#dce4ee"
+            }
+            Label {
+                text: qsTr("%1 of %2 complete laps eligible · %3 excluded")
+                    .arg(root.ranking.eligibleLapCount || 0).arg(root.ranking.lapCount || 0)
+                    .arg((root.ranking.excludedLaps || []).length)
+                Layout.fillWidth: true
+                color: "#91a0b2"
+                wrapMode: Text.WordWrap
+            }
+            TabBar {
+                id: rankingTabs
+                Layout.fillWidth: true
+                TabButton { text: qsTr("Best by run") }
+                TabButton { text: qsTr("Applied exclusions") }
+            }
+            StackLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: rankingTabs.currentIndex
+                ListView {
+                    id: bestRuns
+                    objectName: "outingBestRuns"
+                    clip: true
+                    spacing: 6
+                    model: root.ranking.runs || []
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: FeButton {
+                        id: runResult
+                        required property var modelData
+                        required property int index
+                        objectName: "openBestRun" + index
+                        width: bestRuns.width - 18
+                        height: 52
+                        enabled: modelData.state === "available"
+                        text: modelData.runName + " · " + (modelData.bestLap
+                            ? qsTr("LAP %1 · %2").arg(modelData.bestLap.lapNumber).arg(root.duration(modelData.bestLap.durationSeconds))
+                                + (modelData.tieCount > 1 ? qsTr(" · %1 equal times").arg(modelData.tieCount) : "")
+                            : qsTr("No eligible lap"))
+                        onClicked: { rankingDialog.close(); appController.selectOutingLapReference(modelData.bestLap.reference); }
+                        ToolTip.visible: hovered
+                        ToolTip.text: text
+                    }
+                }
+                ListView {
+                    id: excludedLaps
+                    objectName: "outingRankingExclusions"
+                    clip: true
+                    spacing: 6
+                    model: root.ranking.excludedLaps || []
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: FeButton {
+                        required property var modelData
+                        required property int index
+                        objectName: "openRankingExclusion" + index
+                        width: excludedLaps.width - 18
+                        height: 52
+                        text: modelData.runName + " · LAP " + modelData.lapNumber + " · "
+                            + modelData.reasonLabels.join("; ") + (modelData.userReason ? ": " + modelData.userReason : "")
+                        onClicked: { rankingDialog.close(); appController.selectOutingLapReference(modelData.reference); }
+                        ToolTip.visible: hovered
+                        ToolTip.text: text
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        visible: excludedLaps.count === 0
+                        text: qsTr("No applied lap exclusions in this group")
+                        color: "#91a0b2"
+                    }
+                }
+            }
+        }
     }
     Dialog {
         id: configurationDialog
@@ -115,6 +204,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
+            visible: root.height >= 600
             text: qsTr("Click a row to open it. Chronological order · UTC. OUT before the first start/finish crossing; IN after the last. Entries without a reliable clock or crossing are marked.")
             wrapMode: Text.WordWrap
             color: "#657386"
@@ -150,10 +240,35 @@ Rectangle {
             color: "#91a0b2"
             font.pixelSize: 11
         }
+        RowLayout {
+            Layout.fillWidth: true
+            FeButton {
+                objectName: "openBestDayLap"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                accent: root.ranking.state === "available"
+                enabled: root.ranking.state === "available"
+                text: root.ranking.bestOfDay
+                    ? qsTr("Best day · %1 · %2 · LAP %3").arg(root.duration(root.ranking.bestOfDay.durationSeconds))
+                        .arg(root.ranking.bestOfDay.runName).arg(root.ranking.bestOfDay.lapNumber)
+                    : root.ranking.state === "loading" ? qsTr("Updating rankings…")
+                    : root.ranking.state === "no-eligible-laps" ? qsTr("No eligible lap in this group")
+                    : qsTr("Choose a compatibility group for best-day results")
+                onClicked: appController.selectOutingLapReference(root.ranking.bestOfDay.reference)
+                ToolTip.visible: hovered
+                ToolTip.text: text + (root.ranking.groupLabel ? " · " + root.ranking.groupLabel : "")
+            }
+            FeButton {
+                objectName: "openOutingRankingDetails"
+                text: qsTr("Ranking details…")
+                enabled: ["available", "no-eligible-laps"].indexOf(root.ranking.state) >= 0
+                onClicked: rankingDialog.open()
+            }
+        }
         BusyIndicator { running: appController.outingLapsLoading; visible: running; Layout.alignment: Qt.AlignHCenter }
         ScrollView {
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(80, notices.implicitHeight)
+            Layout.preferredHeight: Math.min(root.height < 600 ? 40 : 80, notices.implicitHeight)
             visible: appController.outingLapMessages.length > 0
             contentWidth: availableWidth
             Label {
@@ -235,7 +350,8 @@ Rectangle {
                             text: row.modelData.runName
                                 + (row.modelData.excluded ? qsTr(" · Excluded: ") + row.modelData.exclusionReason : "")
                                 + (row.modelData.referenceIssue ? " · " + row.modelData.referenceIssue : "")
-                                + (row.modelData.bestOfRun ? qsTr(" · Best of run") : "")
+                                + (row.modelData.bestOfDay ? qsTr(" · Best day in group")
+                                    : row.modelData.bestOfRun ? qsTr(" · Best of run") : "")
                             Layout.fillWidth: true
                             color: "#dce4ee"
                             font.pixelSize: 12

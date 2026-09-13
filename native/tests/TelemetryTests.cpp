@@ -108,6 +108,7 @@ private slots:
     void derivesOutingLapSections();
     void rejectsMalformedLapReferences_data();
     void rejectsMalformedLapReferences();
+    void opensRankedLapsAndRecomputesAfterExclusion();
     void groupsOutingLapsAfterExplicitConfiguration();
     void confirmsTrackConfigurationThroughQml();
     void lapExclusionPolicySharesRankingAndRenderInputs();
@@ -1328,6 +1329,84 @@ void TelemetryTests::rejectsMalformedLapReferences()
     auto reference = makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'));
     QVERIFY(validLapReference(reference)); reference.insert(field, value);
     QVERIFY(!validLapReference(reference));
+}
+
+void TelemetryTests::opensRankedLapsAndRecomputesAfterExclusion()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo"); QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Rankings", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+    QCOMPARE(controller.outingRanking().value("state").toString(), QString("selection-required"));
+    QVERIFY(controller.setRunTrackConfiguration(controller.activeRunId(), "Full", "clockwise"));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    const auto group = controller.outingCompatibilityGroups()[0].toMap().value("id").toString();
+    QVERIFY(controller.selectOutingComparisonGroup(group));
+    QCOMPARE(controller.outingRanking().value("state").toString(), QString("available"));
+    const auto original = controller.outingRanking().value("bestOfDay").toMap();
+    const auto originalRef = original.value("reference").toMap();
+    QCOMPARE(original.value("groupId").toString(), group);
+    QCOMPARE(original.value("runId").toString(), controller.activeRunId());
+    int badges = 0;
+    for (const auto &row : controller.outingLaps()) if (row.toMap().value("bestOfDay").toBool()) ++badges;
+    QCOMPARE(badges, 1);
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 760; height: 480; OutingLapPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *day = window->findChild<QQuickItem *>("openBestDayLap");
+    auto *details = window->findChild<QQuickItem *>("openOutingRankingDetails");
+    auto *list = window->findChild<QQuickItem *>("outingLapList");
+    QVERIFY(day); QVERIFY(details); QVERIFY(list);
+    QTRY_VERIFY(list->height() >= 66);
+    QVERIFY(day->isEnabled()); day->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.selectedOutingLap().value("reference").toMap(), originalRef);
+    controller.closeOutingLap();
+    details->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *dialog = window->findChild<QObject *>("outingRankingDialog"); QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto *runs = window->findChild<QObject *>("outingBestRuns"); QVERIFY(runs);
+    QQuickItem *runButton = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(runs, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, runButton), Q_ARG(int, 0)) && runButton);
+    runButton->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QCOMPARE(controller.selectedOutingLap().value("reference").toMap(), originalRef);
+    QVERIFY(controller.setOutingLapExcluded(originalRef, true, "Traffic"));
+    QVERIFY(controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap() != originalRef);
+    QCOMPARE(controller.outingRanking().value("excludedLaps").toList().first().toMap().value("userReason").toString(), QString("Traffic"));
+    // Every excluded lap remains visible, but an all-excluded group has no winner.
+    const auto rows = controller.outingLaps();
+    for (const auto &value : rows) if (value.toMap().value("type") == "LAP")
+        QVERIFY(controller.setOutingLapExcluded(value.toMap().value("reference").toMap(), true, "Cooldown"));
+    QCOMPARE(controller.outingRanking().value("state").toString(), QString("no-eligible-laps"));
+    QVERIFY(controller.outingRanking().value("bestOfDay").toMap().isEmpty());
+    QCOMPARE(controller.outingRanking().value("excludedLaps").toList().size(), 3);
+    QCOMPARE(controller.outingLaps().size(), 5);
+    QTRY_VERIFY(!day->isEnabled());
+    QVERIFY(day->property("text").toString().contains("No eligible lap"));
+    QVERIFY(controller.setOutingLapExcluded(originalRef, false));
+    QCOMPARE(controller.outingRanking().value("bestOfDay").toMap().value("reference").toMap(), originalRef);
+    // Stale generations cannot expose a former winning result during async refresh.
+    QVERIFY(controller.setRunTrackConfiguration(controller.activeRunId(), "Changed", "clockwise"));
+    QCOMPARE(controller.outingRanking().value("state").toString(), QString("loading"));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    QCOMPARE(controller.outingRanking().value("state").toString(), QString("selection-required"));
+    const auto savedPath = directory.filePath("day.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+    QTRY_VERIFY(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    controller.requestNewProject();
+    QTRY_VERIFY(controller.eventRuns().isEmpty());
+    QTRY_COMPARE(controller.outingRanking().value("state").toString(), QString("selection-required"));
+    QVERIFY(controller.outingRanking().value("bestOfDay").toMap().isEmpty());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::groupsOutingLapsAfterExplicitConfiguration()
