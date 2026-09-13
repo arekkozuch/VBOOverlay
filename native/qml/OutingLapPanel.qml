@@ -83,16 +83,16 @@ Rectangle {
                 border.color: activeFocus ? "#55e6a5" : "transparent"
                 Accessible.role: Accessible.Button
                 Accessible.name: modelData.type + " " + modelData.lapNumber + " · " + modelData.runName
-                Accessible.onPressAction: appController.selectOutingLap(index)
-                Keys.onReturnPressed: appController.selectOutingLap(index)
-                Keys.onEnterPressed: appController.selectOutingLap(index)
-                Keys.onSpacePressed: appController.selectOutingLap(index)
+                Accessible.onPressAction: appController.selectOutingLapReference(row.modelData.reference)
+                Keys.onReturnPressed: appController.selectOutingLapReference(row.modelData.reference)
+                Keys.onEnterPressed: appController.selectOutingLapReference(row.modelData.reference)
+                Keys.onSpacePressed: appController.selectOutingLapReference(row.modelData.reference)
                 MouseArea {
                     id: pointer
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { row.forceActiveFocus(); appController.selectOutingLap(row.index); }
+                    onClicked: { row.forceActiveFocus(); appController.selectOutingLapReference(row.modelData.reference); }
                 }
                 RowLayout {
                     anchors.fill: parent

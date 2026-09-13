@@ -200,6 +200,9 @@ public:
     [[nodiscard]] QString batchImportError() const { return m_batchError; }
     [[nodiscard]] QStringList analysisImportMessages() const { return m_analysisImportMessages; }
     Q_INVOKABLE bool selectOutingLap(int index);
+    // Snapshot resolution: opening detail revalidates source content off-thread.
+    Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
+    Q_INVOKABLE bool selectOutingLapReference(const QVariantMap &reference);
     Q_INVOKABLE void closeOutingLap();
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QString outingLapValueText(const QString &channel) const;
@@ -437,6 +440,7 @@ private:
     QSettings m_settings;
     struct OutingLapDetailResult {
         quint64 request = 0;
+        bool staleReference = false;
         std::shared_ptr<const TelemetrySession> session;
         TrackGeometry geometry;
         QVariantList track;
@@ -479,6 +483,7 @@ private:
     QByteArray m_outingLapRequestedKey;
     quint64 m_outingLapGeneration = 0;
     QVariantList m_outingLapRows;
+    QSet<QString> m_outingStaleRunIds;
     QStringList m_outingLapMessages;
     bool m_outingLapsLoading = false;
     struct BatchImportResult {

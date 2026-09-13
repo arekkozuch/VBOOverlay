@@ -4,9 +4,7 @@
 #include "telemetry/TelemetryGeometry.h"
 #include "telemetry/TelemetrySource.h"
 
-#include <QCryptographicHash>
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <algorithm>
 #include <array>
@@ -34,32 +32,6 @@ void validateLimits(const TelemetryImportLimits &limits)
         || limits.maximumRetainedChannelSamples > ceilings.maximumRetainedChannelSamples) {
         throw std::invalid_argument("Import limits must be positive and no greater than the safety ceilings.");
     }
-}
-
-QByteArray fullDigest(const QString &path, const qint64 expectedBytes,
-                      const CancellationCheck &cancelled)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        throw std::runtime_error("Cannot read telemetry source.");
-    }
-    if (file.size() != expectedBytes) {
-        throw std::runtime_error("Telemetry source changed during import; retry with a stable file.");
-    }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    qint64 remaining = expectedBytes;
-    while (remaining > 0) {
-        throwIfCancelled(cancelled);
-        const QByteArray bytes = file.read(std::min<qint64>(remaining, 64 * 1024));
-        if (bytes.isEmpty()) throw std::runtime_error("Telemetry source read failed or was truncated.");
-        hash.addData(bytes);
-        remaining -= bytes.size();
-    }
-    throwIfCancelled(cancelled);
-    if (file.size() != expectedBytes || !file.atEnd()) {
-        throw std::runtime_error("Telemetry source changed during import; retry with a stable file.");
-    }
-    return hash.result();
 }
 
 qsizetype channelSamples(const TelemetrySession &session, const qsizetype available,
@@ -242,7 +214,7 @@ TelemetryImportPlan prepareTelemetryImport(const QStringList &paths,
             // Keep the selected extension for parser dispatch, including links
             // to content stored under a differently named backing file.
             const QString sourcePath = QDir::cleanPath(info.absoluteFilePath());
-            const auto digest = fullDigest(sourcePath, size, cancelled);
+            const auto digest = TelemetrySource::contentSha256(sourcePath, size, cancelled);
             // A VBO renamed to RCZ must fail that parser, not inherit a ready
             // result from the real VBO just because its bytes are identical.
             const QByteArray digestKey = info.suffix().toLower().toUtf8() + ':' + digest;
@@ -256,7 +228,7 @@ TelemetryImportPlan prepareTelemetryImport(const QStringList &paths,
                 const qsizetype samples = channelSamples(
                     session, limits.maximumRetainedChannelSamples - retainedSamples, cancelled);
                 auto laps = deriveSourceLapSession(session, {}, cancelled);
-                if (fullDigest(sourcePath, size, cancelled) != digest) {
+                if (TelemetrySource::contentSha256(sourcePath, size, cancelled) != digest) {
                     throw std::runtime_error("Telemetry source changed during import; retry with a stable file.");
                 }
                 TelemetryRunProposal run;

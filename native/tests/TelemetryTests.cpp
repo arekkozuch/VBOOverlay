@@ -25,6 +25,7 @@
 #include "export/TemporaryOverlayValidation.h"
 #include "sync/TelemetrySyncEngine.h"
 #include "telemetry/TelemetrySession.h"
+#include "telemetry/TelemetrySource.h"
 #include "telemetry/LapTiming.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
@@ -105,6 +106,11 @@ private slots:
     void startsOutingThroughAnalysisQml();
     void opensOutingLapWithoutChangingEditor();
     void derivesOutingLapSections();
+    void rejectsMalformedLapReferences_data();
+    void rejectsMalformedLapReferences();
+    void lapReferencesSurviveReopenAndReordering();
+    void lapReferencesRejectSourceAndGateChanges();
+    void lapReferencesDetectUnsampledContentChanges();
     void recordsVboUtcChronology();
     void ordersWholeOutingAndReopensSources();
     void groupsOnlyDatedUnambiguousAlternatives();
@@ -494,7 +500,7 @@ void TelemetryTests::persistsEditableLapChannels()
         QTRY_COMPARE(controller.outingLaps().size(), 1);
         QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
         QVERIFY(controller.saveProject(QUrl::fromLocalFile(project)));
-        QVERIFY(controller.selectOutingLap(0));
+        QTRY_VERIFY(controller.selectOutingLap(0));
         QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
         const auto document = controller.currentProjectObject();
         const auto geometry = controller.outingLapTrack();
@@ -1288,6 +1294,168 @@ void TelemetryTests::derivesOutingLapSections()
     QCOMPARE(mixed.first().type, LapSectionType::Out);
     QVERIFY(mixed.first().timestampMilliseconds.has_value());
     QVERIFY(!mixed.last().timestampMilliseconds.has_value());
+}
+
+void TelemetryTests::rejectsMalformedLapReferences_data()
+{
+    QTest::addColumn<QString>("field"); QTest::addColumn<QJsonValue>("value");
+    QTest::newRow("old-number-only") << QString("version") << QJsonValue(QJsonValue::Undefined);
+    QTest::newRow("future-version") << QString("version") << QJsonValue(2);
+    QTest::newRow("fractional-version") << QString("version") << QJsonValue(1.1);
+    QTest::newRow("missing-event") << QString("eventId") << QJsonValue("");
+    QTest::newRow("long-run") << QString("runId") << QJsonValue(QString(129, 'r'));
+    QTest::newRow("null-source") << QString("sourceId") << QJsonValue(QJsonValue::Null);
+    QTest::newRow("bad-content-revision") << QString("sourceRevision") << QJsonValue("abc");
+    QTest::newRow("bad-derivation") << QString("derivationKey") << QJsonValue(QString(64, 'z'));
+    QTest::newRow("wrong-type") << QString("type") << QJsonValue("lap");
+    QTest::newRow("negative-start") << QString("startTime") << QJsonValue(-1);
+    QTest::newRow("empty-range") << QString("endTime") << QJsonValue(1.5);
+    QTest::newRow("string-end") << QString("endTime") << QJsonValue("3.5");
+    QTest::newRow("nonfinite-end") << QString("endTime") << QJsonValue(std::numeric_limits<double>::infinity());
+}
+
+void TelemetryTests::rejectsMalformedLapReferences()
+{
+    QFETCH(QString, field); QFETCH(QJsonValue, value);
+    OutingLapRow row; row.runId = "run"; row.type = LapSectionType::Lap; row.start = 1.5; row.end = 3.5;
+    auto reference = makeLapReference(row, "event", "source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    QVERIFY(validLapReference(reference)); reference.insert(field, value);
+    QVERIFY(!validLapReference(reference));
+}
+
+void TelemetryTests::lapReferencesSurviveReopenAndReordering()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("References", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_COMPARE(controller.outingLaps().size(), 5);
+    const auto reference = controller.outingLaps()[1].toMap().value("reference").toMap();
+    const auto portable = QJsonDocument::fromJson(QJsonDocument(QJsonObject::fromVariantMap(reference)).toJson()).object().toVariantMap();
+    QCOMPARE(portable, reference);
+    QVERIFY(!reference.contains("lapNumber"));
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("resolved"));
+    QVERIFY(controller.selectOutingLapReference(reference));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto before = controller.currentProjectObject();
+    auto invalid = reference; invalid.remove("version");
+    QCOMPARE(controller.resolveOutingLapReference(invalid).value("state").toString(), QString("invalid"));
+    QVERIFY(!controller.selectOutingLapReference(invalid));
+    QCOMPARE(controller.currentProjectObject(), before);
+    QVERIFY(QDir().mkpath(directory.filePath("moved-project")));
+    const auto savedPath = directory.filePath("moved-project/day.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+    const auto saved = QJsonDocument::fromJson(readBytes(savedPath)).object();
+    AppController reopened(nullptr, directory.filePath("reopened-recovery.json"));
+    QVERIFY(reopened.beginProjectLoad(savedPath, saved));
+    QCOMPARE(reopened.resolveOutingLapReference(portable).value("state").toString(), QString("loading"));
+    QTRY_COMPARE(reopened.outingLaps().size(), 5);
+    QCOMPARE(reopened.outingLaps()[1].toMap().value("reference").toMap(), portable);
+    // The reference remains valid after ordering and display numbering changes.
+    std::reverse(reopened.m_outingLapRows.begin(), reopened.m_outingLapRows.end());
+    auto row = reopened.m_outingLapRows[3].toMap(); row.insert("lapNumber", 99); reopened.m_outingLapRows[3] = row;
+    QCOMPARE(reopened.resolveOutingLapReference(portable).value("index").toInt(), 3);
+    QVERIFY(reopened.selectOutingLapReference(portable));
+    QTRY_COMPARE(reopened.outingLapDetailState(), QString("ready"));
+    QCOMPARE(reopened.selectedOutingLap().value("reference").toMap(), portable);
+    QCOMPARE(reopened.selectedOutingLap().value("lapNumber").toInt(), 99);
+    // Failed lookups never choose the nearest time, same number, or another run.
+    for (const auto *field : {"eventId", "runId", "sourceId", "algorithm", "derivationKey", "sourceRevision", "startTime", "type"}) {
+        auto stale = portable;
+        stale.insert(field, QString(field) == "startTime" ? QVariant(portable.value(field).toDouble() + .001)
+            : QString(field) == "type" ? QVariant("IN")
+            : QString(field).endsWith("Key") || QString(field) == "sourceRevision" ? QVariant(QString(64, '0')) : QVariant("changed"));
+        QCOMPARE(reopened.resolveOutingLapReference(stale).value("state").toString(), QString("stale"));
+        QVERIFY(!reopened.selectOutingLapReference(stale));
+        QCOMPARE(reopened.selectedOutingLap().value("reference").toMap(), portable);
+    }
+    // Two identical candidates are ambiguous, never selected arbitrarily.
+    reopened.m_outingLapRows.append(reopened.m_outingLapRows[3]);
+    QCOMPARE(reopened.resolveOutingLapReference(portable).value("state").toString(), QString("stale"));
+    QVERIFY(!reopened.selectOutingLapReference(portable));
+}
+
+void TelemetryTests::lapReferencesRejectSourceAndGateChanges()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("run.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Stale references", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+    const auto reference = controller.outingLaps()[1].toMap().value("reference").toMap();
+    const auto savedPath = directory.filePath("day.fetproject"); QVERIFY(controller.saveProject(QUrl::fromLocalFile(savedPath)));
+    const auto saved = QJsonDocument::fromJson(readBytes(savedPath)).object();
+    QVERIFY(controller.setRunTrackConfiguration(controller.activeRunId(), "layout", "clockwise"));
+    // Immediate rejection before the queued refresh clears the previous rows.
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    QVERIFY(!controller.selectOutingLapReference(reference)); QVERIFY(!controller.selectOutingLap(1));
+    QTRY_VERIFY(!controller.outingLapsLoading() && !controller.outingLaps().isEmpty()
+        && controller.m_outingLapRequestedKey == controller.outingLapKey());
+    auto project = controller.currentProjectObject(); auto runs = EventProjectFixture::runs(project); auto run = runs[0].toObject();
+    const auto configuredReference = controller.outingLaps()[1].toMap().value("reference").toMap();
+    auto config = EventProjectCodec::trackConfiguration(run); config.insert("gateRevision", "gates-v1:" + QString(64, '0'));
+    run.insert("trackConfiguration", config); runs[0] = run; EventProjectFixture::setRuns(project, runs);
+    controller.m_projectTemplate = project; controller.markPersistentChange();
+    QCOMPARE(controller.resolveOutingLapReference(configuredReference).value("state").toString(), QString("stale"));
+    QVERIFY(!controller.selectOutingLapReference(configuredReference));
+    // Ordinary reopening of the original derivation still resolves its original reference.
+    QVERIFY(controller.beginProjectLoad(savedPath, saved));
+    QTRY_COMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("resolved"));
+    QVERIFY(controller.selectOutingLapReference(reference)); QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    auto changedGates = EventProjectFixture::lapsVbo(); changedGates.replace("Start 21.0000", "Start 21.0001");
+    QVERIFY(writeBytes(path, changedGates));
+    QVERIFY(controller.selectOutingLapReference(reference)); QTRY_COMPARE(controller.outingLapDetailState(), QString("error"));
+    QVERIFY(controller.outingLapDetailError().contains("stale"));
+    QVERIFY(controller.outingLapSeries("latitude", 200).isEmpty());
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    controller.relinkVbo(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(controller.vboLoadState(), QString("mismatch"));
+    controller.resolveSourceMismatch(true);
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    QVERIFY(!controller.selectOutingLapReference(reference));
+    // Missing source data is unavailable, not reassigned to another section.
+    QVERIFY(QFile::remove(path)); QVERIFY(controller.beginProjectLoad(savedPath, saved));
+    QTRY_COMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("unavailable"));
+    QVERIFY(!controller.selectOutingLapReference(reference));
+}
+
+void TelemetryTests::lapReferencesDetectUnsampledContentChanges()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    auto bytes = EventProjectFixture::lapsVbo() + "[comments]\n";
+    for (int i = 0; i < 512; ++i) bytes += QByteArray(1023, 'a') + '\n';
+    const auto path = directory.filePath("large.vbo"); QVERIFY(writeBytes(path, bytes));
+    const auto sampled = ProjectSourceReferenceCodec::telemetryFingerprint(path, TelemetrySource::load(path));
+    const auto full = TelemetrySource::contentSha256(path, bytes.size());
+    QVERIFY_THROWS_EXCEPTION(OperationCancelled, static_cast<void>(TelemetrySource::contentSha256(path, bytes.size(), [] { return true; })));
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(TelemetrySource::contentSha256(path, 128LL * 1024 * 1024 + 1)));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, static_cast<void>(TelemetrySource::contentSha256(path, bytes.size() - 1)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Content identity", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready")); QTRY_COMPARE(controller.outingLaps().size(), 5);
+    const auto reference = controller.outingLaps()[1].toMap().value("reference").toMap();
+    QCOMPARE(reference.value("sourceRevision").toString().toLatin1(), full.toHex());
+    bytes[100000] = 'b'; QVERIFY(writeBytes(path, bytes));
+    QCOMPARE(ProjectSourceReferenceCodec::telemetryFingerprint(path, TelemetrySource::load(path)), sampled);
+    QVERIFY(TelemetrySource::contentSha256(path, bytes.size()) != full);
+    QVERIFY(controller.selectOutingLapReference(reference));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("error"));
+    QVERIFY(controller.outingLapDetailError().contains("stale"));
+    QVERIFY(controller.outingLapTrack().isEmpty());
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    QVERIFY(!controller.selectOutingLapReference(reference));
+    // Refreshing rows with an unchanged sampled fingerprint still yields new references.
+    controller.m_outingLapRequestedKey.clear(); controller.refreshOutingLaps();
+    QTRY_COMPARE(controller.outingLaps().size(), 5);
+    QCOMPARE(controller.resolveOutingLapReference(reference).value("state").toString(), QString("stale"));
+    QVERIFY(!controller.selectOutingLapReference(reference));
 }
 
 void TelemetryTests::recordsVboUtcChronology()
