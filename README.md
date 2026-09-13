@@ -29,6 +29,11 @@ event-wide performance analysis. See the [event implementation plan](docs/event-
 - Crash-safe export-output handling with state-bound overwrite consent, atomic project saving, and explicit unsaved-change recovery.
 - Resource-bounded external JSON documents and subprocess output, with visible recovery-protection warnings when automatic snapshots cannot be persisted.
 
+Lap analysis lets you add up to four recorded channels, change a channel using
+its row selector, and remove it with ×. Selections are remembered as analysis
+preferences. Longitudinal-G graphs show braking upward while retaining the
+original signed values.
+
 ## Keyboard controls
 
 Space plays or pauses. Left/Right seek five seconds; Shift+Left/Right seek thirty seconds; Home/End seek to the first/last actual video frame. These playback shortcuts are disabled while typing or operating a focused editor control. Ctrl/Cmd+E opens Export, Ctrl/Cmd+Shift+A toggles Telemetry Analysis, and F11/Escape enter and leave full screen. Full-screen preview provides the same visible transport and scrubber as the editor.

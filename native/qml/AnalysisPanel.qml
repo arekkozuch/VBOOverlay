@@ -20,6 +20,33 @@ Rectangle {
     readonly property real cursorTime: lapDetail ? appController.outingLapCursor : appController.playbackTime
     property var plotColors: ["#55e6a5", "#42a5ff", "#ffb84d", "#ff647c"]
 
+    readonly property var availableChannels: lapDetail ? appController.outingLapAvailableChannels : appController.channelNames
+
+    function setChannels(channels) {
+        if (lapDetail) appController.outingLapChannels = channels;
+        else appController.analysisChannels = channels;
+    }
+    function toggleChannel(channel) {
+        const channels = visibleChannels.slice();
+        const index = channels.indexOf(channel);
+        if (index >= 0) channels.splice(index, 1);
+        else if (channel && channels.length < 4) channels.push(channel);
+        setChannels(channels);
+    }
+    function replaceChannel(previous, next) {
+        const channels = visibleChannels.slice();
+        const index = channels.indexOf(previous);
+        if (index >= 0 && (previous === next || channels.indexOf(next) < 0)) {
+            channels[index] = next;
+            setChannels(channels);
+        }
+    }
+    // Negative longitudinal G is braking: draw it upward without negating data.
+    function graphY(value, low, high, height, brakingUp) {
+        const fraction = (value - low) / Math.max(0.000001, high - low);
+        return 3 + (brakingUp ? fraction : 1 - fraction) * Math.max(1, height - 6);
+    }
+
     function seekAt(ratio) {
         const bounded = Math.max(0, Math.min(1, ratio));
         if (lapDetail)
@@ -68,39 +95,52 @@ Rectangle {
             }
         }
 
-        RowLayout {
+        ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
-            Label {
-                text: qsTr("TELEMETRY ANALYSIS")
-                color: "#8d9aaa"
-                font.pixelSize: 9
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1.2
-            }
-            Label {
-                Layout.fillWidth: root.lapDetail
-                elide: Text.ElideRight
-                text: root.lapDetail ? qsTr("Move across a graph to inspect this lap") : qsTr("%1 synchronized channels").arg(appController.analysisChannels.length)
-                color: "#536172"
-                font.pixelSize: 9
-            }
-            Item {
+            spacing: 4
+            RowLayout {
                 Layout.fillWidth: true
+                Label {
+                    text: qsTr("TELEMETRY ANALYSIS")
+                    color: "#8d9aaa"
+                    font.pixelSize: 9
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignRight
+                    text: qsTr("%1/4 channels").arg(root.visibleChannels.length)
+                    color: "#687789"
+                    font.pixelSize: 9
+                }
             }
-            FeComboBox {
-                visible: !root.lapDetail
-                id: channelPicker
-                Layout.preferredWidth: 210
-                implicitHeight: 30
-                model: appController.channelNames.filter(channel => appController.analysisChannels.indexOf(channel) < 0)
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                FeComboBox {
+                    id: channelPicker
+                    objectName: "analysisChannelPicker"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 80
+                    implicitHeight: 30
+                    model: root.availableChannels.filter(channel => root.visibleChannels.indexOf(channel) < 0)
+                    enabled: count > 0 && root.visibleChannels.length < 4
+                }
+                FeButton {
+                    objectName: "analysisAddChannel"
+                    compact: true
+                    text: qsTr("Add channel")
+                    enabled: channelPicker.enabled
+                    onClicked: root.toggleChannel(channelPicker.currentText)
+                }
             }
-            FeButton {
-                compact: true
-                visible: !root.lapDetail
-                text: qsTr("Add channel")
-                enabled: channelPicker.count > 0 && appController.analysisChannels.length < 4
-                onClicked: appController.toggleAnalysisChannel(channelPicker.currentText)
+            Label {
+                Layout.fillWidth: true
+                visible: root.visibleChannels.length === 0
+                text: qsTr("Choose a recorded channel above to add a graph.")
+                wrapMode: Text.WordWrap
+                color: "#8d9aaa"
+                font.pixelSize: 10
             }
         }
 
@@ -164,13 +204,27 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: Math.min(112, parent.width * 0.18)
                                 spacing: 0
-                                Label {
+                                Row {
                                     width: channelInfo.width
-                                    text: chartRow.channelName
-                                    color: chartRow.lineColor
-                                    font.pixelSize: 9
-                                    font.weight: Font.DemiBold
-                                    elide: Text.ElideMiddle
+                                    spacing: 2
+                                    FeComboBox {
+                                        objectName: "analysisReplaceChannel-" + chartRow.channelName
+                                        width: channelInfo.width - 22
+                                        implicitHeight: 26
+                                        model: root.availableChannels.filter(channel => channel === chartRow.channelName || root.visibleChannels.indexOf(channel) < 0)
+                                        currentIndex: model.indexOf(chartRow.channelName)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: chartRow.series.brakingUp === true ? qsTr("Longitudinal G · braking upward") : chartRow.channelName
+                                        onActivated: index => root.replaceChannel(chartRow.channelName, model[index])
+                                    }
+                                    ToolButton {
+                                        objectName: "analysisRemoveChannel-" + chartRow.channelName
+                                        width: 20
+                                        height: 26
+                                        text: "×"
+                                        Accessible.name: qsTr("Remove %1").arg(chartRow.channelName)
+                                        onClicked: root.toggleChannel(chartRow.channelName)
+                                    }
                                 }
                                 Row {
                                     spacing: 5
@@ -193,23 +247,6 @@ Rectangle {
                                         color: "#687789"
                                         font.pixelSize: 8
                                     }
-                                }
-                            }
-                            Label {
-                                anchors.left: parent.left
-                                anchors.bottom: parent.bottom
-                                anchors.bottomMargin: 1
-                                visible: !root.lapDetail
-                                text: "×"
-                                color: removeMouse.containsMouse ? "#ff8090" : "#647386"
-                                font.pixelSize: 11
-                                MouseArea {
-                                    id: removeMouse
-                                    anchors.fill: parent
-                                    anchors.margins: -5
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: appController.toggleAnalysisChannel(chartRow.channelName)
                                 }
                             }
 
@@ -250,7 +287,6 @@ Rectangle {
                                         const padding = rawHigh === rawLow ? Math.max(0.5, Math.abs(rawLow) * 0.05) : 0;
                                         const low = rawLow - padding;
                                         const high = rawHigh + padding;
-                                        const span = Math.max(0.000001, high - low);
                                         context.strokeStyle = chartRow.lineColor;
                                         context.lineWidth = 1.6;
                                         context.lineJoin = "round";
@@ -261,7 +297,7 @@ Rectangle {
                                             context.beginPath();
                                             for (let pointIndex = 0; pointIndex < points.length; ++pointIndex) {
                                                 const x = Math.max(0, Math.min(width, Number(points[pointIndex].x) * width));
-                                                const y = height - 3 - (Number(points[pointIndex].y) - low) / span * Math.max(1, height - 6);
+                                                const y = root.graphY(Number(points[pointIndex].y), low, high, height, plotSeries.brakingUp === true);
                                                 if (pointIndex === 0)
                                                     context.moveTo(x, y);
                                                 else
@@ -272,7 +308,7 @@ Rectangle {
                                                 context.fillStyle = chartRow.lineColor;
                                                 context.beginPath();
                                                 context.arc(Math.max(0, Math.min(width, Number(points[0].x) * width)),
-                                                            height - 3 - (Number(points[0].y) - low) / span * Math.max(1, height - 6),
+                                                            root.graphY(Number(points[0].y), low, high, height, plotSeries.brakingUp === true),
                                                             2, 0, Math.PI * 2);
                                                 context.fill();
                                             }

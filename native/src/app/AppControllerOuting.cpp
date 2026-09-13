@@ -167,10 +167,19 @@ void AppController::initializeOutingLapDetail()
         m_outingLapDetailState = m_outingLapDetailSession ? "ready" : "error";
         m_outingLapChannels.clear();
         if (m_outingLapDetailSession) {
-            for (const auto *alias : {"speed", "lateralAcceleration", "longitudinalAcceleration"}) {
-                const auto name = m_outingLapDetailSession->aliases.value(alias, alias);
-                if (m_outingLapDetailSession->channels.contains(name) && !m_outingLapChannels.contains(name))
-                    m_outingLapChannels.append(name);
+            if (m_settings.contains("analysis/lapChannels")) {
+                const auto preferred = m_settings.value("analysis/lapChannels").toStringList();
+                for (const auto &name : preferred) {
+                    if (m_outingLapDetailSession->channels.contains(name) && !m_outingLapChannels.contains(name))
+                        m_outingLapChannels.append(name);
+                    if (m_outingLapChannels.size() == 4) break;
+                }
+            } else {
+                for (const auto *alias : {"speed", "lateralAcceleration", "longitudinalAcceleration"}) {
+                    const auto name = m_outingLapDetailSession->aliases.value(alias, alias);
+                    if (m_outingLapDetailSession->channels.contains(name) && !m_outingLapChannels.contains(name))
+                        m_outingLapChannels.append(name);
+                }
             }
         }
         emit outingLapDetailChanged();
@@ -290,6 +299,27 @@ void AppController::loadOutingLapDetail()
         }
         return result;
     }));
+}
+
+QStringList AppController::outingLapAvailableChannels() const
+{
+    return m_outingLapDetailSession ? m_outingLapDetailSession->channelNames() : QStringList{};
+}
+
+void AppController::setOutingLapChannels(const QStringList &channels)
+{
+    if (!m_outingLapDetailSession || m_outingLapDetailState != "ready") return;
+    QStringList selected;
+    for (const auto &name : channels) {
+        if (m_outingLapDetailSession->channels.contains(name) && !selected.contains(name))
+            selected.append(name);
+        if (selected.size() == 4) break;
+    }
+    // Analysis preferences do not alter the editor document or recording data.
+    m_settings.setValue("analysis/lapChannels", selected);
+    if (selected == m_outingLapChannels) return;
+    m_outingLapChannels = selected;
+    emit outingLapDetailChanged();
 }
 
 QVariantMap AppController::outingLapSeries(const QString &channel, int maximumPoints) const

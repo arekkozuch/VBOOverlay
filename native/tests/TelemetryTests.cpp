@@ -85,6 +85,8 @@ class TelemetryTests final : public QObject {
 private slots:
     void initTestCase();
     void preservesIdentityAcrossProductRename();
+    void preservesSignedSamplesWithBrakingUpPresentation();
+    void persistsEditableLapChannels();
     void reopensPreferencesProjectAndRecoveryAfterDisplayRename();
     void cleanupTestCase();
     void persistsEventSelectionAndRunLocalSync();
@@ -461,6 +463,68 @@ private:
 };
 
 } // namespace
+
+void TelemetryTests::preservesSignedSamplesWithBrakingUpPresentation()
+{
+    const auto session = VboParser::parse(
+        u"[column names]\ntime longacc-calc latacc-calc velocity\n[data]\n0 -0.8 0.2 90\n1 0.4 -0.3 92\n");
+    const auto longitudinal = AppController::sessionSeries(session, "longacc-calc", 0, 1, 100);
+    QVERIFY(longitudinal.value("brakingUp").toBool());
+    QCOMPARE(longitudinal.value("minimum").toDouble(), double(float(-0.8)));
+    QCOMPARE(longitudinal.value("maximum").toDouble(), double(float(0.4)));
+    QVERIFY(AppController::sessionSeries(session, "longitudinalAcceleration", 0, 1, 100).value("brakingUp").toBool());
+    QVERIFY(!AppController::sessionSeries(session, "latacc-calc", 0, 1, 100).value("brakingUp").toBool());
+    QVERIFY(!AppController::sessionSeries(session, "velocity", 0, 1, 100).value("brakingUp").toBool());
+    QCOMPARE(session.valueAt("longitudinalAcceleration", 0).value(), double(float(-0.8)));
+}
+
+void TelemetryTests::persistsEditableLapChannels()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto project = directory.filePath("channels.fetproject");
+    const auto recovery = directory.filePath("recovery.json");
+    {
+        AppController controller(nullptr, recovery);
+        QVERIFY(controller.importAnalysisRuns("Channels", {QUrl::fromLocalFile(QStringLiteral(TEST_FIXTURE_PATH))}));
+        QTRY_COMPARE(controller.outingLaps().size(), 1);
+        QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(project)));
+        QVERIFY(controller.selectOutingLap(0));
+        QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+        const auto document = controller.currentProjectObject();
+        const auto geometry = controller.outingLapTrack();
+        const auto activeRun = controller.activeRunId();
+        const auto cursor = controller.outingLapCursor();
+        QVERIFY(controller.outingLapAvailableChannels().contains("rpm"));
+        controller.setOutingLapChannels({"rpm", "rpm", "missing", "heart_rate", "brake", "velocity", "mystery"});
+        QCOMPARE(controller.outingLapChannels(), QStringList({"rpm", "heart_rate", "brake", "velocity"}));
+        controller.closeOutingLap();
+        QVERIFY(controller.outingLapAvailableChannels().isEmpty());
+        controller.setOutingLapChannels({"mystery"}); // No active detail cannot change preferences.
+        QVERIFY(controller.selectOutingLap(0));
+        QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+        QCOMPARE(controller.outingLapChannels(), QStringList({"rpm", "heart_rate", "brake", "velocity"}));
+        QCOMPARE(controller.currentProjectObject(), document);
+        QCOMPARE(controller.outingLapTrack(), geometry);
+        QCOMPARE(controller.activeRunId(), activeRun);
+        QCOMPARE(controller.outingLapCursor(), cursor);
+        QVERIFY(!controller.dirty());
+    }
+    {
+        AppController reopened(nullptr, recovery);
+        QTRY_VERIFY(!reopened.projectLoading());
+        QTRY_COMPARE(reopened.outingLaps().size(), 1);
+        QVERIFY(reopened.selectOutingLap(0));
+        QTRY_COMPARE(reopened.outingLapDetailState(), QStringLiteral("ready"));
+        QCOMPARE(reopened.outingLapChannels(), QStringList({"rpm", "heart_rate", "brake", "velocity"}));
+        reopened.setOutingLapChannels({});
+        reopened.closeOutingLap();
+        QVERIFY(reopened.selectOutingLap(0));
+        QTRY_COMPARE(reopened.outingLapDetailState(), QStringLiteral("ready"));
+        QVERIFY(reopened.outingLapChannels().isEmpty());
+    }
+}
 
 void TelemetryTests::preservesIdentityAcrossProductRename()
 {
@@ -1033,6 +1097,44 @@ void TelemetryTests::startsOutingThroughAnalysisQml()
         row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
     QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
     QVERIFY(window->property("showingLap").toBool());
+    auto *charts = quickWindow->findChild<QQuickItem *>("outingLapCharts");
+    QVERIFY(charts);
+    auto *picker = charts->findChild<QQuickItem *>("analysisChannelPicker");
+    auto *add = charts->findChild<QQuickItem *>("analysisAddChannel");
+    QVERIFY(picker); QVERIFY(add); QVERIFY(add->isVisible()); QVERIFY(add->isEnabled());
+    const auto geometry = controller.outingLapTrack();
+    const auto document = controller.currentProjectObject();
+    const auto added = picker->property("currentText").toString();
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        add->mapToScene(QPointF(add->width() / 2, add->height() / 2)).toPoint());
+    QTRY_VERIFY(controller.outingLapChannels().contains(added));
+    QCOMPARE(controller.outingLapChannels().size(), 4);
+    QVERIFY(!add->isEnabled());
+    auto *replace = charts->findChild<QQuickItem *>("analysisReplaceChannel-" + added);
+    QVERIFY(replace); QVERIFY(replace->isVisible());
+    // Operate the real ComboBox through keyboard selection.
+    replace->forceActiveFocus();
+    QTest::keyClick(quickWindow, Qt::Key_End);
+    QTest::keyClick(quickWindow, Qt::Key_Return);
+    QTRY_VERIFY(!controller.outingLapChannels().contains(added));
+    const auto replacement = controller.outingLapChannels().last();
+    auto *remove = charts->findChild<QQuickItem *>("analysisRemoveChannel-" + replacement);
+    QVERIFY(remove); QVERIFY(remove->isVisible());
+    QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
+        remove->mapToScene(QPointF(remove->width() / 2, remove->height() / 2)).toPoint());
+    QTRY_COMPARE(controller.outingLapChannels().size(), 3);
+    QVERIFY(add->isEnabled());
+    QCOMPARE(controller.outingLapTrack(), geometry);
+    QCOMPARE(controller.currentProjectObject(), document);
+    QVariant brakingY, accelerationY, lateralY;
+    QVERIFY(QMetaObject::invokeMethod(charts, "graphY", Q_RETURN_ARG(QVariant, brakingY),
+        Q_ARG(QVariant, -1.0), Q_ARG(QVariant, -1.0), Q_ARG(QVariant, 1.0), Q_ARG(QVariant, 100.0), Q_ARG(QVariant, true)));
+    QVERIFY(QMetaObject::invokeMethod(charts, "graphY", Q_RETURN_ARG(QVariant, accelerationY),
+        Q_ARG(QVariant, 1.0), Q_ARG(QVariant, -1.0), Q_ARG(QVariant, 1.0), Q_ARG(QVariant, 100.0), Q_ARG(QVariant, true)));
+    QVERIFY(QMetaObject::invokeMethod(charts, "graphY", Q_RETURN_ARG(QVariant, lateralY),
+        Q_ARG(QVariant, -1.0), Q_ARG(QVariant, -1.0), Q_ARG(QVariant, 1.0), Q_ARG(QVariant, 100.0), Q_ARG(QVariant, false)));
+    QVERIFY(brakingY.toDouble() < accelerationY.toDouble());
+    QCOMPARE(lateralY.toDouble(), accelerationY.toDouble());
     auto *back = quickWindow->findChild<QQuickItem *>("backToOutingLaps");
     QVERIFY(back); QVERIFY(back->isVisible());
     QTest::mouseClick(quickWindow, Qt::LeftButton, Qt::NoModifier,
