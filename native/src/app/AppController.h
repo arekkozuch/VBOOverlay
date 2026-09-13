@@ -1,5 +1,7 @@
 #pragma once
 
+#include "telemetry/TelemetrySessionCache.h"
+
 #include "telemetry/LapTiming.h"
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
@@ -487,7 +489,8 @@ private:
         QString error;
     };
     static OutingLapDetailResult readOutingLapDetail(const QJsonObject &source, const QString &projectPath,
-        const QVariantMap &row, quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation);
+        const QVariantMap &row, quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation,
+        const std::shared_ptr<TelemetrySessionCache> &cache);
     struct ComparisonSlot {
         QVariantMap row;
         QJsonObject source;
@@ -503,6 +506,7 @@ private:
     void loadComparisonLap();
     void invalidateComparisonLaps();
     void failComparisonLap(int slot, const QString &reason);
+    std::shared_ptr<TelemetrySessionCache> m_analysisSourceCache = std::make_shared<TelemetrySessionCache>();
     std::array<ComparisonSlot, 2> m_comparisonSlots;
     QFutureWatcher<OutingLapDetailResult> m_comparisonWatcher;
     QTimer m_comparisonTimer;

@@ -1,4 +1,5 @@
 #include "telemetry/VboParser.h"
+#include "telemetry/TelemetrySessionCache.h"
 #include "telemetry/TelemetryGeometry.h"
 
 #include <QFile>
@@ -411,7 +412,7 @@ VboParseError::VboParseError(const QString &message)
 {
 }
 
-TelemetrySession VboParser::parseFile(const QString &path, const CancellationCheck &cancelled)
+TelemetrySession VboParser::parseFile(const QString &path, const CancellationCheck &cancelled, const qint64 maximumDecodedBytes)
 {
     throwIfCancelled(cancelled);
     QFile file(path);
@@ -436,10 +437,10 @@ TelemetrySession VboParser::parseFile(const QString &path, const CancellationChe
         bytes.append(chunk);
     }
     throwIfCancelled(cancelled);
-    return parse(QString::fromUtf8(bytes), cancelled);
+    return parse(QString::fromUtf8(bytes), cancelled, maximumDecodedBytes);
 }
 
-TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &cancelled)
+TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &cancelled, const qint64 maximumDecodedBytes)
 {
     throwIfCancelled(cancelled);
     if (text.size() > kMaximumFileBytes) {
@@ -592,8 +593,23 @@ TelemetrySession VboParser::parse(QStringView text, const CancellationCheck &can
         }
     }
 
+    // The analysis cache reserves one shared allowance before decoding. Charge
+    // every channel's timestamp/value capacity conservatively, even though VBO
+    // timestamps share a buffer. Reject before the large sample vectors grow.
+    const bool boundedDecode = maximumDecodedBytes != std::numeric_limits<qint64>::max();
+    if (boundedDecode) {
+        qint64 overhead = telemetrySessionMemoryBytes(session) + 1024 * 1024;
+        for (const auto &name : names) overhead += 6 * name.capacity() + 1024;
+        const qint64 rowBytes = names.size() * (sizeof(double) + sizeof(float));
+        if (maximumDecodedBytes <= overhead || dataSection.size() > (maximumDecodedBytes - overhead) / rowBytes)
+            throw ResourceLimitError("Recording exceeds the remaining shared analysis memory budget. Clear an unused lap or close its inspector.");
+    }
     QVector<QVector<float>> rawValues(names.size());
     QVector<double> rawTimes;
+    if (boundedDecode) {
+        rawTimes.reserve(dataSection.size());
+        for (auto &values : rawValues) values.reserve(dataSection.size());
+    }
     std::optional<double> origin;
     bool originIsClock = false;
     std::optional<double> previousAbsoluteTime;

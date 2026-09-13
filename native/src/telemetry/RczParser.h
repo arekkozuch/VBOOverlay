@@ -11,6 +11,7 @@ public:
     static constexpr int maximumMembers = 1024;
     static constexpr qsizetype maximumSamples = 2'000'000;
     [[nodiscard]] static TelemetrySession parseFile(
-        const QString &path, const CancellationCheck &cancelled = {});
+        const QString &path, const CancellationCheck &cancelled = {},
+        qint64 maximumDecodedBytes = std::numeric_limits<qint64>::max());
 };
 }

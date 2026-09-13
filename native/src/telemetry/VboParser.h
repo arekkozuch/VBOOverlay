@@ -24,9 +24,11 @@ public:
     static constexpr qsizetype kMaximumFieldCharacters = 65'536;
 
     [[nodiscard]] static TelemetrySession parse(
-        QStringView text, const CancellationCheck &cancelled = {});
+        QStringView text, const CancellationCheck &cancelled = {},
+        qint64 maximumDecodedBytes = std::numeric_limits<qint64>::max());
     [[nodiscard]] static TelemetrySession parseFile(
-        const QString &path, const CancellationCheck &cancelled = {});
+        const QString &path, const CancellationCheck &cancelled = {},
+        qint64 maximumDecodedBytes = std::numeric_limits<qint64>::max());
 };
 
 } // namespace FlappedEar
