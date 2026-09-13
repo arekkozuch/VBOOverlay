@@ -12,11 +12,15 @@ QPointF toLocal(
     const double latitude,
     const double longitude,
     const double originLatitude,
-    const double originLongitude)
+    const double originLongitude,
+    const bool longitudeIsWestPositive)
 {
     const MetricPoint projected = projectCoordinate(
         {latitude, longitude}, {originLatitude, originLongitude});
-    return {projected.eastMeters, -projected.northMeters};
+    // RaceChrono VBO retains west-positive source longitudes. Convert only
+    // map presentation, keeping samples, timing gates and saved data intact.
+    return {longitudeIsWestPositive ? -projected.eastMeters : projected.eastMeters,
+            -projected.northMeters};
 }
 
 } // namespace
@@ -25,6 +29,7 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session, const Cancella
 {
     throwIfCancelled(cancelled);
     TrackGeometry geometry;
+    geometry.longitudeIsWestPositive = session.metadata.value("gpsLongitudeConvention") == "west-positive";
     const auto latitude = session.channels.constFind(session.aliases.value("latitude"));
     const auto longitude = session.channels.constFind(session.aliases.value("longitude"));
     if (latitude == session.channels.cend() || longitude == session.channels.cend()) {
@@ -47,7 +52,7 @@ TrackGeometry buildTrackGeometry(const TelemetrySession &session, const Cancella
             geometry.valid = true;
         }
         localPoints.append(
-            toLocal(lat, lon, geometry.originLatitude, geometry.originLongitude));
+            toLocal(lat, lon, geometry.originLatitude, geometry.originLongitude, geometry.longitudeIsWestPositive));
     }
     if (localPoints.isEmpty()) {
         geometry.valid = false;
@@ -93,7 +98,7 @@ std::optional<QPointF> currentTrackPoint(
         return std::nullopt;
     }
     const QPointF local = toLocal(
-        *latitude, *longitude, geometry.originLatitude, geometry.originLongitude);
+        *latitude, *longitude, geometry.originLatitude, geometry.originLongitude, geometry.longitudeIsWestPositive);
     if (!std::isfinite(local.x()) || !std::isfinite(local.y())
         || !std::isfinite(geometry.normalizationScale) || geometry.normalizationScale <= 0.0) {
         return std::nullopt;

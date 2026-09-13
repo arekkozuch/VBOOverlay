@@ -507,3 +507,24 @@ Add/Remove and operates the replacement selector with the keyboard.
 Validation evidence and final PR/main macOS CI links are recorded in
 [KAN-111](https://kozucharkadiusz.atlassian.net/browse/KAN-111). Windows execution
 remains paused. No GPS parser or track layout changes are included.
+
+## KAN-112: RaceChrono VBO map orientation
+
+Five data-driven cases compare an asymmetric track encoded as east-positive
+degrees and verified RaceChrono west-positive arc-minutes, across all hemispheres
+and across zero. Static geometry and interpolated markers must agree, with east
+right and north up. Source values remain intact; missing coordinates remain no
+data. The shared preview/export render context uses the corrected marker.
+
+A controller integration case imports the west-positive recording and opens lap
+detail, checking its track and cursor against the editor while retaining the
+project document, input file and static geometry. The lap geometry carries the
+source convention into its reduced map session. Layout and graph controls are
+unchanged; no parser or timing-gate changes are required.
+
+Read-only inspection of the owner's paired Jastrzab VBO/RCZ files confirms the
+opposite raw longitude signs. That inspection is separate from native execution
+with private recordings. The coordinator has no CMake/CTest/Qt toolchain; exact
+macOS arm64 Debug/Release PR and main CI evidence is recorded in
+[KAN-112](https://kozucharkadiusz.atlassian.net/browse/KAN-112). Windows execution
+remains paused.
