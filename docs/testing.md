@@ -26,6 +26,12 @@ This task restores macOS Debug/Release Cloud CI with owner authorization. No
 separate run is requested for task 016; task 017 runs include its committed base.
 Private recordings and GoPro hardware/interactive acceptance remain separate.
 
+The resumed Qt 6.8.3 gate exposed a test-only dependency on the newer
+`QtGuiTest::postFakeWindowActivation` helper. The window-shortcut regression now
+injects a focus-window event using `QWindowSystemInterface` from the matching
+GuiPrivate SDK and still asserts actual focus and Escape behavior. This retains
+the existing synthetic activation approach on the supported Qt 6.8 SDK.
+
 ## Product naming and compatibility (KAN-18)
 
 Two application regressions compare native settings/data/recovery locations before

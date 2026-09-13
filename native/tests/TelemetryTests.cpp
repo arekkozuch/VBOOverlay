@@ -66,6 +66,7 @@
 #include <QVideoFrame>
 #include <QtEndian>
 #include <QtTest>
+#include <qpa/qwindowsysteminterface.h>
 #include <cmath>
 #include <atomic>
 #include <array>
@@ -1380,7 +1381,7 @@ void TelemetryTests::startsOutingThroughAnalysisQml()
     // A shell-launched test cannot always take foreground focus on macOS.
     // Synthesize window activation as well as keyboard input so the production
     // WindowShortcut receives Escape, without calling its handler directly.
-    QtGuiTest::postFakeWindowActivation(quickWindow);
+    QWindowSystemInterface::handleFocusWindowChanged(quickWindow);
     QTRY_COMPARE(QGuiApplication::focusWindow(), quickWindow);
     QQuickItem *row = nullptr;
     QTRY_VERIFY(QMetaObject::invokeMethod(runs, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, 0)) && row);

@@ -632,6 +632,8 @@ void AppController::initializeOutingLaps()
             closeOutingLap();
         emit outingLapsChanged();
     });
+    // A fresh document has no source-load signal to settle its empty state.
+    m_outingLapTimer.start();
 }
 
 void AppController::refreshOutingLaps()
