@@ -135,6 +135,7 @@ private slots:
     void ordersWholeOutingAndReopensSources();
     void presentsDayResultStatesWithoutVideo();
     void selectsIndependentComparisonLapsThroughQml();
+    void restoresComparisonSelectionAfterReopen();
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
@@ -2863,12 +2864,71 @@ void TelemetryTests::selectsIndependentComparisonLapsThroughQml()
     QCOMPARE(controller.selectedOutingLap().value("reference"), b.value("reference"));
     QCOMPARE(controller.m_comparisonSlots[0].session, sessionB);
     QCOMPARE(controller.activeRunId(), active); QCOMPARE(controller.syncOffset(), 19.0); QCOMPARE(controller.timeScale(), 1.3);
-    QCOMPARE(controller.currentProjectObject(), before); QCOMPARE(controller.m_documentState.revision(), revision); QVERIFY(!controller.dirty());
+    // Selecting/swapping/inspecting comparison laps must not touch sync, active
+    // run or editor state, but the A/B pick itself is now a persisted analysis
+    // decision (KAN-41), so the document differs from `before` by exactly that
+    // and is dirty, unlike sync/playback edits which stay ephemeral.
+    auto afterEvent = before.value("event").toObject();
+    auto afterDecisions = afterEvent.value("analysisDecisions").toObject();
+    afterDecisions.insert("comparisonSlots", QJsonArray{
+        QJsonObject::fromVariantMap(controller.m_comparisonSlots[0].row).value("reference"),
+        QJsonObject::fromVariantMap(controller.m_comparisonSlots[1].row).value("reference")});
+    afterEvent.insert("analysisDecisions", afterDecisions);
+    auto after = before; after.insert("event", afterEvent);
+    QCOMPARE(controller.currentProjectObject(), after);
+    QVERIFY(controller.m_documentState.revision() != revision);
+    QVERIFY(controller.dirty());
     controller.closeOutingLap();
     QVERIFY(controller.setOutingLapExcluded(b.value("reference").toMap(), true, "Traffic"));
     QCOMPARE(controller.m_comparisonSlots[0].state, QString("error"));
     QVERIFY(!controller.comparisonPairReady());
     QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::restoresComparisonSelectionAfterReopen()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("morning.vbo"), second = directory.filePath("afternoon.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("RoundTrip", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    QVariantMap a, b;
+    for (const auto &value : candidates) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (b.isEmpty() && row.value("runId") != a.value("runId")
+            && row.value("compatibilityGroupId") == a.value("compatibilityGroupId")) b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    const auto referenceA = a.value("reference").toMap(), referenceB = b.value("reference").toMap();
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("day.fetproject"))));
+
+    AppController reopened(nullptr, directory.filePath("reopened-recovery.json"));
+    QTRY_VERIFY(!reopened.projectLoading());
+    QTRY_VERIFY(!reopened.outingLapsLoading());
+    QTRY_COMPARE(reopened.comparisonSlots()[0].toMap().value("state").toString(), QString("ready"));
+    QTRY_COMPARE(reopened.comparisonSlots()[1].toMap().value("state").toString(), QString("ready"));
+    QCOMPARE(reopened.comparisonSlots()[0].toMap().value("lap").toMap().value("reference").toMap(), referenceA);
+    QCOMPARE(reopened.comparisonSlots()[1].toMap().value("lap").toMap().value("reference").toMap(), referenceB);
+    QVERIFY(!reopened.dirty());
+
+    // A cleared slot's persisted reference must also survive reopen as empty,
+    // not silently resurrect the previous pick.
+    reopened.clearComparisonLap(0);
+    QVERIFY(reopened.saveCurrentProject());
+    AppController reopenedAgain(nullptr, directory.filePath("reopened-again-recovery.json"));
+    QTRY_VERIFY(!reopenedAgain.projectLoading());
+    QTRY_VERIFY(!reopenedAgain.outingLapsLoading());
+    QTRY_COMPARE(reopenedAgain.comparisonSlots()[1].toMap().value("state").toString(), QString("ready"));
+    QCOMPARE(reopenedAgain.comparisonSlots()[0].toMap().value("state").toString(), QString("empty"));
 }
 
 void TelemetryTests::preservesComparisonSlotAcrossFailuresAndReplacement()

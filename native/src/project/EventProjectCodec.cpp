@@ -117,6 +117,18 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         if (!group.isUndefined() && !group.isNull()
             && (!group.isString() || group.toString().size() != 81 || !groupPattern.match(group.toString()).hasMatch()))
             return fail(error, "Saved comparison group is malformed.");
+        const auto savedComparisonSlots = decisions.toObject().value("comparisonSlots");
+        if (!savedComparisonSlots.isUndefined()) {
+            if (!savedComparisonSlots.isArray() || savedComparisonSlots.toArray().size() != 2)
+                return fail(error, "Saved comparison slots must be a pair.");
+            for (const auto &item : savedComparisonSlots.toArray()) {
+                if (item.isNull()) continue;
+                if (!item.isObject() || !validLapReference(item.toObject())
+                    || item.toObject().value("type") != "LAP"
+                    || item.toObject().value("eventId") != event.value("id"))
+                    return fail(error, "Saved comparison slot reference is invalid.");
+            }
+        }
     }
     if (!validText(event.value(QStringLiteral("id")), ProjectLimits::maximumIdCharacters)
         || !validText(event.value(QStringLiteral("name")), ProjectLimits::maximumTemplateNameCharacters)

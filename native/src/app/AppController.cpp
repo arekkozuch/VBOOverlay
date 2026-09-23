@@ -875,9 +875,10 @@ quint64 AppController::beginSourceGeneration(const bool preserveOuting)
         m_outingInferredGroups = {};
         m_outingRunGenerations.clear();
         closeOutingLap();
-        clearComparisonLap(0);
-        clearComparisonLap(1);
+        resetComparisonSlot(0);
+        resetComparisonSlot(1);
         setComparisonViewOpen(false);
+        m_comparisonRestoreAttempted = false;
     }
     ++m_sourceGeneration;
     if (!m_sourceMismatchType.isEmpty()) {

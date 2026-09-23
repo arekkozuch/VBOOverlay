@@ -512,6 +512,10 @@ private:
     void loadComparisonLap();
     void invalidateComparisonLaps();
     void failComparisonLap(int slot, const QString &reason);
+    void resetComparisonSlot(int slot);
+    void persistComparisonSlot(int slot, const QJsonValue &reference);
+    void restorePersistedComparisonSlots();
+    bool m_comparisonRestoreAttempted = false;
     std::shared_ptr<TelemetrySessionCache> m_analysisSourceCache = std::make_shared<TelemetrySessionCache>();
     std::array<ComparisonSlot, 2> m_comparisonSlots;
     QFutureWatcher<OutingLapDetailResult> m_comparisonWatcher;

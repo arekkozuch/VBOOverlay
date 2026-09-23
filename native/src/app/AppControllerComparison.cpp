@@ -1,4 +1,6 @@
 #include "AppController.h"
+#include "project/EventProjectCodec.h"
+#include "project/ProjectLimits.h"
 
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrentRun>
@@ -59,7 +61,7 @@ bool AppController::selectComparisonLap(const int index, const QVariantMap &refe
     for (const auto &value : outingLapSources())
         if (value.toObject().value("runId") == row.value("runId").toString()) source = value.toObject();
     if (source.isEmpty()) return false;
-    clearComparisonLap(index);
+    resetComparisonSlot(index);
     auto &slot = m_comparisonSlots[index];
     slot.row = row;
     slot.source = source;
@@ -70,7 +72,7 @@ bool AppController::selectComparisonLap(const int index, const QVariantMap &refe
     return true;
 }
 
-void AppController::clearComparisonLap(const int index)
+void AppController::resetComparisonSlot(const int index)
 {
     if (index < 0 || index > 1) return;
     if (m_comparisonPending && m_comparisonLoadingSlot == index && m_comparisonCancellation)
@@ -78,6 +80,49 @@ void AppController::clearComparisonLap(const int index)
     m_comparisonSlots[index] = {};
     m_comparisonSlots[index].request = ++m_comparisonRequest;
     emit comparisonSlotsChanged();
+}
+
+void AppController::clearComparisonLap(const int index)
+{
+    if (index < 0 || index > 1) return;
+    resetComparisonSlot(index);
+    // Only an explicit user clear forgets the persisted selection; internal
+    // resets (replacing a selection, a new document generation) must not, or
+    // they would race the async load and wipe the reference before it is
+    // re-saved, dirtying a document that was just opened/restored.
+    persistComparisonSlot(index, QJsonValue(QJsonValue::Null));
+}
+
+void AppController::persistComparisonSlot(const int index, const QJsonValue &reference)
+{
+    if (index < 0 || index > 1 || !EventProjectCodec::isEvent(m_projectTemplate)) return;
+    auto project = currentProjectObject();
+    auto event = project.value("event").toObject();
+    auto decisions = event.value("analysisDecisions").toObject();
+    auto savedComparisonSlots = decisions.value("comparisonSlots").toArray();
+    while (savedComparisonSlots.size() < 2) savedComparisonSlots.append(QJsonValue(QJsonValue::Null));
+    if (savedComparisonSlots[index] == reference) return;
+    savedComparisonSlots[index] = reference;
+    decisions.insert("comparisonSlots", savedComparisonSlots);
+    event.insert("analysisDecisions", decisions);
+    project.insert("event", event);
+    if (!ProjectLimits::validateProject(project)) return;
+    m_projectTemplate = project;
+    markPersistentChange();
+}
+
+void AppController::restorePersistedComparisonSlots()
+{
+    if (m_comparisonRestoreAttempted || outingLapsLoading() || !EventProjectCodec::isEvent(m_projectTemplate)) return;
+    m_comparisonRestoreAttempted = true;
+    const auto savedComparisonSlots = currentProjectObject().value("event").toObject()
+        .value("analysisDecisions").toObject().value("comparisonSlots").toArray();
+    for (int i = 0; i < 2 && i < savedComparisonSlots.size(); ++i) {
+        if (!m_comparisonSlots[i].row.isEmpty() || !savedComparisonSlots[i].isObject()) continue;
+        // A stale/unresolvable reference (changed derivation, removed run, etc.)
+        // is left empty rather than silently reconnected by lap number.
+        selectComparisonLap(i, savedComparisonSlots[i].toObject().toVariantMap());
+    }
 }
 
 void AppController::failComparisonLap(const int index, const QString &reason)
@@ -93,6 +138,7 @@ void AppController::failComparisonLap(const int index, const QString &reason)
 
 void AppController::invalidateComparisonLaps()
 {
+    restorePersistedComparisonSlots();
     for (int i = 0; i < 2; ++i) {
         auto &slot = m_comparisonSlots[i];
         if (slot.row.isEmpty()) continue;
@@ -124,6 +170,8 @@ bool AppController::swapComparisonLaps()
     std::swap(m_comparisonSlots[0], m_comparisonSlots[1]);
     // In-flight results still carry their old slot address and must be rejected.
     for (auto &slot : m_comparisonSlots) slot.request = ++m_comparisonRequest;
+    for (int i = 0; i < 2; ++i)
+        persistComparisonSlot(i, QJsonObject::fromVariantMap(m_comparisonSlots[i].row).value("reference"));
     m_comparisonTimer.start();
     emit comparisonSlotsChanged();
     return true;
@@ -202,6 +250,8 @@ void AppController::initializeComparisonLaps()
                 slot.track = std::move(result.track);
                 slot.error = result.error;
                 slot.state = slot.session ? "ready" : "error";
+                if (slot.state == "ready")
+                    persistComparisonSlot(index, QJsonObject::fromVariantMap(slot.row).value("reference"));
                 if (result.staleReference) {
                     m_outingStaleRunIds.insert(slot.row.value("runId").toString());
                     refreshOutingCompatibility();
