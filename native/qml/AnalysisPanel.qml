@@ -377,14 +377,28 @@ Rectangle {
                                     opacity: 0.8
                                 }
                                 Rectangle {
+                                    id: zoomSelection
                                     // Live drag-to-zoom selection; committed to root.zoomStart/zoomEnd on release.
                                     visible: pointer.dragging
                                     readonly property real otherX: Math.max(0, Math.min(width, pointer.mouseX))
+                                    readonly property real selectedSeconds: Math.abs(otherX - pointer.pressRatio * width)
+                                        / Math.max(1, width) * (root.zoomEnd - root.zoomStart)
                                     x: Math.min(pointer.pressRatio * width, otherX)
                                     width: Math.abs(otherX - pointer.pressRatio * width)
                                     height: parent.height
                                     color: "#55e6a52a"
                                     border.color: "#55e6a5"
+                                    Label {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.top: parent.top
+                                        anchors.topMargin: 4
+                                        text: qsTr("%1 s").arg(zoomSelection.selectedSeconds.toFixed(3))
+                                        color: "#0c150f"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        padding: 2
+                                        background: Rectangle { color: "#55e6a5"; radius: 3 }
+                                    }
                                 }
                                 MouseArea {
                                     id: pointer
