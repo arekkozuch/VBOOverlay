@@ -137,6 +137,7 @@ private slots:
     void selectsIndependentComparisonLapsThroughQml();
     void restoresComparisonSelectionAfterReopen();
     void preservesComparisonSlotAcrossFailuresAndReplacement();
+    void comparesTwoLapsFromTheSameRun();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
     void cancelsSupersededComparisonWaitingForCache();
@@ -2839,6 +2840,18 @@ void TelemetryTests::selectsIndependentComparisonLapsThroughQml()
     const auto sessionA = controller.m_comparisonSlots[0].session;
     const auto sessionB = controller.m_comparisonSlots[1].session;
     QVERIFY(sessionA && sessionB && sessionA != sessionB);
+    QVERIFY2(!controller.comparisonLapTrack(0).isEmpty(), "comparison slot 0 track should not be empty");
+    QVERIFY2(!controller.comparisonLapTrack(1).isEmpty(), "comparison slot 1 track should not be empty");
+    {
+        QQmlComponent mapComponent(&engine);
+        mapComponent.setData("import QtQuick\nTrackMapPanel { comparisonSlot: 0; width: 200; height: 200 }",
+            QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+        QVERIFY2(mapComponent.isReady(), qPrintable(mapComponent.errorString()));
+        std::unique_ptr<QObject> mapObject(mapComponent.create());
+        QVERIFY2(mapObject, qPrintable(mapComponent.errorString()));
+        QVERIFY2(!mapObject->property("pathSegments").toList().isEmpty(),
+            "TrackMapPanel.pathSegments should not be empty for a ready comparison slot");
+    }
     QVERIFY(!controller.selectComparisonLap(1, incompatible.value("reference").toMap()));
     QCOMPARE(controller.m_comparisonSlots[1].session, sessionB);
     auto *swap = window->findChild<QQuickItem *>("swapComparisonLaps"); QVERIFY(swap);
@@ -3010,6 +3023,65 @@ void TelemetryTests::preservesComparisonSlotAcrossFailuresAndReplacement()
     QCOMPARE(controller.m_comparisonSlots[0].state, QString("empty"));
     QCOMPARE(controller.m_comparisonSlots[1].state, QString("empty"));
     QVERIFY(!controller.m_comparisonSlots[0].session && !controller.m_comparisonSlots[1].session);
+}
+
+void TelemetryTests::comparesTwoLapsFromTheSameRun()
+{
+    // The owner's real-world scenario: A and B are two different laps from the
+    // SAME recording, not two different files. selectsIndependentComparisonLapsThroughQml
+    // only exercises two different runs; this isolates the same-run case.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("SameRun", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    QVariantMap a, b;
+    for (const auto &value : candidates) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (b.isEmpty() && row.value("runId") == a.value("runId")
+            && row.value("lapNumber") != a.value("lapNumber")) b = row;
+    }
+    QVERIFY2(!a.isEmpty() && !b.isEmpty(), "fixture must produce at least two laps in one run");
+    QCOMPARE(a.value("runId").toString(), b.value("runId").toString());
+
+    // Production instantiates ComparisonDetailPanel's TrackMapPanel once, directly
+    // in AnalysisWindow's tree (not behind a Loader), when the window is first
+    // created -- long before any lap is selected. Reproduce that ordering: create
+    // the panel while both slots are still empty, then select laps afterward, to
+    // test the live-update reactivity path, not just a fresh evaluation with data
+    // already present.
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QQmlComponent mapComponentA(&engine), mapComponentB(&engine);
+    mapComponentA.setData("import QtQuick\nTrackMapPanel { comparisonSlot: 0; width: 200; height: 200 }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    mapComponentB.setData("import QtQuick\nTrackMapPanel { comparisonSlot: 1; width: 200; height: 200 }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(mapComponentA.isReady(), qPrintable(mapComponentA.errorString()));
+    QVERIFY2(mapComponentB.isReady(), qPrintable(mapComponentB.errorString()));
+    std::unique_ptr<QObject> mapObjectA(mapComponentA.create()), mapObjectB(mapComponentB.create());
+    QVERIFY2(mapObjectA, qPrintable(mapComponentA.errorString()));
+    QVERIFY2(mapObjectB, qPrintable(mapComponentB.errorString()));
+    QVERIFY(mapObjectA->property("pathSegments").toList().isEmpty());
+    QVERIFY(mapObjectB->property("pathSegments").toList().isEmpty());
+
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    QVERIFY2(!controller.comparisonLapTrack(0).isEmpty(), "comparison slot 0 track should not be empty");
+    QVERIFY2(!controller.comparisonLapTrack(1).isEmpty(), "comparison slot 1 track should not be empty");
+    QTRY_VERIFY2(!mapObjectA->property("pathSegments").toList().isEmpty(),
+        "TrackMapPanel comparisonSlot 0 should update once its lap becomes ready");
+    QTRY_VERIFY2(!mapObjectB->property("pathSegments").toList().isEmpty(),
+        "TrackMapPanel comparisonSlot 1 should update once its lap becomes ready");
+    QVERIFY(!controller.comparisonLapSeries(0, "latitude", a.value("startTime").toDouble(),
+        a.value("endTime").toDouble(), 200).isEmpty());
+    QVERIFY(!controller.comparisonLapSeries(1, "latitude", b.value("startTime").toDouble(),
+        b.value("endTime").toDouble(), 200).isEmpty());
 }
 
 void TelemetryTests::sharesComparisonCacheAndRevalidatesSources()
