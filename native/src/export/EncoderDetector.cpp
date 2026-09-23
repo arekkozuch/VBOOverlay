@@ -40,7 +40,7 @@ bool waitForFinished(QProcess &process, ExportProcessSupervisor &supervisor,
         if (stderrOutput) stderrOutput->append(process.readAllStandardError());
         if (cancelled && cancelled()) {
             static_cast<void>(supervisor.stopAndWait());
-            throw std::runtime_error("Encoder discovery cancelled.");
+            throw OperationCancelled("Encoder discovery cancelled.");
         }
         process.waitForFinished(100);
     }

@@ -1546,6 +1546,9 @@ ExportResult ExportEngine::exportVideo(
                 probeObservations(settings, QStringLiteral("validatingOutput"),
                                   QStringLiteral("probeFinalOutput")),
                 [&settings] { return isCancelled(settings); }, true);
+        } catch (const OperationCancelled &) {
+            result.cancelled = true;
+            return result;
         } catch (const std::exception &error) {
             result.error = QStringLiteral("Automatic media validation failed; the staged output was not committed.");
             result.diagnostics = QString::fromUtf8(error.what());
@@ -1717,6 +1720,8 @@ ExportResult ExportEngine::exportVideo(
                 QStringLiteral("validationComplete"), QStringLiteral("Final validation passed"),
                 QStringLiteral("validation"));
         result.success = true;
+    } catch (const OperationCancelled &) {
+        result.cancelled = true;
     } catch (const std::exception &error) {
         result.error = QString::fromUtf8(error.what());
     }
