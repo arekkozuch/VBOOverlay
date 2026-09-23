@@ -102,10 +102,25 @@ QJsonObject ProjectSourceReferenceCodec::toJson(
 QString ProjectSourceReferenceCodec::resolve(
     const ProjectSourceReference &reference, const QString &projectPath)
 {
-    if (!reference.relativePath.isEmpty() && !projectPath.isEmpty()) {
+    if (!reference.relativePath.isEmpty() && !projectPath.isEmpty()
+        && !QDir::isAbsolutePath(reference.relativePath)) {
+        const QString projectDirectory = projectDirectoryPath(projectPath);
         const QString candidate = QDir::cleanPath(
-            QDir(projectDirectoryPath(projectPath)).absoluteFilePath(reference.relativePath));
-        if (QFileInfo(candidate).isFile()) return cleanAbsolutePath(candidate);
+            QDir(projectDirectory).absoluteFilePath(reference.relativePath));
+        // Mirror toJson()'s traversal bound: an untrusted/shared project must not be
+        // able to reference an arbitrary file outside the project directory via a
+        // deep "../" relative path. Beyond this bound, fall through to absolutePath.
+        const QString relativeToProject = QDir::cleanPath(
+            QDir(projectDirectory).relativeFilePath(candidate));
+        QString remaining = relativeToProject;
+        int parentSegments = 0;
+        while (remaining.startsWith(QStringLiteral("../"))) {
+            ++parentSegments;
+            remaining.remove(0, 3);
+        }
+        const bool withinBound = !QDir::isAbsolutePath(relativeToProject)
+            && relativeToProject != QStringLiteral("..") && parentSegments <= 2;
+        if (withinBound && QFileInfo(candidate).isFile()) return cleanAbsolutePath(candidate);
     }
     if (!reference.absolutePath.isEmpty() && QFileInfo(reference.absolutePath).isFile()) {
         return cleanAbsolutePath(reference.absolutePath);

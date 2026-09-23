@@ -39,6 +39,7 @@ private slots:
     void boundsRunsAndSources();
     void rebasesInactiveAlternativeAndMissingReferences();
     void prefersMovedRelativeSourceToStaleAbsoluteFallback();
+    void rejectsDeepTraversalOnSourceResolve();
     void retainsEventRecoveryIdentity();
     void protectsInactiveSourcesFromExportOverwrite();
     void keepsMissingReferencesPortableThroughDirectorySymlinks();
@@ -466,6 +467,36 @@ void EventProjectTests::prefersMovedRelativeSourceToStaleAbsoluteFallback()
         directory.filePath("event.fetproject"), directory.filePath("new/event.fetproject"));
     QCOMPARE(json.value("relativePath").toString(), QStringLiteral("../a.vbo"));
     QCOMPARE(json.value("fingerprint").toObject().value("digest").toString(), QStringLiteral("retained"));
+}
+
+void EventProjectTests::rejectsDeepTraversalOnSourceResolve()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString farPath = directory.filePath("secret.vbo");
+    QFile farFile(farPath);
+    QVERIFY(farFile.open(QIODevice::WriteOnly));
+    farFile.close();
+
+    // A relative reference reaching more than two parent segments above the
+    // project directory must not resolve, even though the save path would
+    // never write one this deep and the target file genuinely exists there.
+    const QString deepProjectPath = directory.filePath("layout/day/event.fetproject");
+    QVERIFY(QDir().mkpath(QFileInfo(deepProjectPath).absolutePath()));
+    const ProjectSourceReference deep{"../../../secret.vbo", {}, {}};
+    QVERIFY(ProjectSourceReferenceCodec::resolve(deep, deepProjectPath).isEmpty());
+
+    // Exactly two parent segments matches the save-side bound and must still resolve.
+    const QString shallowProjectPath = directory.filePath("a/b/event.fetproject");
+    QVERIFY(QDir().mkpath(QFileInfo(shallowProjectPath).absolutePath()));
+    const ProjectSourceReference within{"../../secret.vbo", {}, {}};
+    QCOMPARE(ProjectSourceReferenceCodec::resolve(within, shallowProjectPath),
+             QFileInfo(farPath).canonicalFilePath());
+
+    // An absolute path smuggled into the relativePath field must not bypass
+    // project-directory confinement either.
+    const ProjectSourceReference smuggled{farPath, {}, {}};
+    QVERIFY(ProjectSourceReferenceCodec::resolve(smuggled, deepProjectPath).isEmpty());
 }
 
 void EventProjectTests::retainsEventRecoveryIdentity()
