@@ -189,6 +189,7 @@ qt_add_qml_module(flappedear_native
         qml/RunDetailsDialog.qml
         qml/OutingLapPanel.qml
         qml/OutingLapDetailPanel.qml
+        qml/ComparisonDetailPanel.qml
         qml/ComparisonLapDialog.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml

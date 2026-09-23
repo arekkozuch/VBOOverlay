@@ -97,6 +97,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList comparisonSlots READ comparisonSlots NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(QVariantList comparisonLaps READ comparisonLaps NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(bool comparisonPairReady READ comparisonPairReady NOTIFY comparisonSlotsChanged)
+    Q_PROPERTY(bool comparisonViewOpen READ comparisonViewOpen WRITE setComparisonViewOpen NOTIFY comparisonViewOpenChanged)
     Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailError READ outingLapDetailError NOTIFY outingLapDetailChanged)
@@ -232,6 +233,10 @@ public:
     Q_INVOKABLE bool swapComparisonLaps();
     Q_INVOKABLE bool useBestComparisonLap(bool wholeDay);
     Q_INVOKABLE bool inspectComparisonLap(int slot);
+    [[nodiscard]] bool comparisonViewOpen() const { return m_comparisonViewOpen; }
+    void setComparisonViewOpen(bool open);
+    Q_INVOKABLE QVariantMap comparisonLapSeries(int slot, const QString &channel, int maximumPoints) const;
+    Q_INVOKABLE QVariantList comparisonLapTrack(int slot) const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
@@ -340,6 +345,7 @@ signals:
     void outingLapsChanged();
     void outingLapDetailChanged();
     void comparisonSlotsChanged();
+    void comparisonViewOpenChanged();
     void outingLapCursorChanged();
     void videoSourceChanged();
     void telemetryChanged();
@@ -514,6 +520,7 @@ private:
     quint64 m_comparisonRequest = 0;
     int m_comparisonLoadingSlot = -1;
     bool m_comparisonPending = false;
+    bool m_comparisonViewOpen = false;
     void initializeOutingLapDetail();
     void loadOutingLapDetail();
     static QVariantMap sessionSeries(const TelemetrySession &session, const QString &channel,

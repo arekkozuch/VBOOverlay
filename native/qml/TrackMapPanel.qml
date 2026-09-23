@@ -6,7 +6,17 @@ import QtQuick.Controls
 Rectangle {
     id: root
     property bool lapDetail: false
-    readonly property var pathSegments: lapDetail ? appController.outingLapTrack : [appController.trackPoints]
+    // Set to 0 or 1 to show one side of an A/B comparison pair instead of the
+    // single-lap/playback session. No marker yet: a shared scrubbing cursor
+    // across both traces lands with the shared-progress axis.
+    property int comparisonSlot: -1
+    readonly property var pathSegments: {
+        if (root.comparisonSlot >= 0) {
+            appController.comparisonSlots;
+            return appController.comparisonLapTrack(root.comparisonSlot);
+        }
+        return root.lapDetail ? appController.outingLapTrack : [appController.trackPoints];
+    }
     color: "#070b10"
     border.color: "#1c2631"
     radius: 8
@@ -28,6 +38,7 @@ Rectangle {
         width: Math.max(0, Math.min(parent.width - 48, parent.height - 64))
         height: width
         property var currentPoint: {
+            if (root.comparisonSlot >= 0) return {};
             if (root.lapDetail) return appController.outingLapTrackPoint;
             appController.playbackTime;
             return appController.currentTrackPoint;
@@ -67,7 +78,7 @@ Rectangle {
         }
         Label {
             anchors.centerIn: parent
-            visible: root.lapDetail && root.pathSegments.length === 0
+            visible: (root.lapDetail || root.comparisonSlot >= 0) && root.pathSegments.length === 0
             text: qsTr("No GPS data in this section")
             color: "#657386"
         }

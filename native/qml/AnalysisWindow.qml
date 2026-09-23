@@ -29,6 +29,7 @@ Window {
     property bool wasShown: false
     readonly property bool hasWorkspace: appController.eventRuns.length > 0 || appController.sampleCount > 0
     readonly property bool showingLap: Object.keys(appController.selectedOutingLap).length > 0
+    readonly property bool showingComparison: !root.showingLap && appController.comparisonViewOpen
     readonly property bool importing: ["preparing", "validating", "cancelling"].indexOf(appController.batchImportState) >= 0
     readonly property bool canImport: !importing && !appController.projectLoading && !appController.exporting
         && !appController.recoveryPending && appController.pendingDestructiveAction === ""
@@ -231,10 +232,16 @@ Window {
             visible: root.showingLap
         }
 
+        ComparisonDetailPanel {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.showingComparison
+        }
+
         OutingLapPanel {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: appController.eventRuns.length > 0 && !root.showingLap
+            visible: appController.eventRuns.length > 0 && !root.showingLap && !root.showingComparison
         }
 
         SplitView {

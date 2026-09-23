@@ -103,6 +103,12 @@ Dialog {
             RowLayout {
                 Layout.fillWidth: true
                 FeButton {
+                    objectName: "openComparisonView"
+                    text: qsTr("Compare A / B")
+                    enabled: appController.comparisonPairReady
+                    onClicked: { appController.comparisonViewOpen = true; root.close(); }
+                }
+                FeButton {
                     objectName: "swapComparisonLaps"
                     text: qsTr("Swap A / B")
                     compact: true

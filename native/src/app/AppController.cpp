@@ -877,6 +877,7 @@ quint64 AppController::beginSourceGeneration(const bool preserveOuting)
         closeOutingLap();
         clearComparisonLap(0);
         clearComparisonLap(1);
+        setComparisonViewOpen(false);
     }
     ++m_sourceGeneration;
     if (!m_sourceMismatchType.isEmpty()) {

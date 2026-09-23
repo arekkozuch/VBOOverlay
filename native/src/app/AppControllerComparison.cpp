@@ -155,6 +155,30 @@ bool AppController::inspectComparisonLap(const int index)
         && selectOutingLapReference(m_comparisonSlots[index].row.value("reference").toMap());
 }
 
+void AppController::setComparisonViewOpen(const bool open)
+{
+    if (m_comparisonViewOpen == open) return;
+    m_comparisonViewOpen = open;
+    emit comparisonViewOpenChanged();
+}
+
+QVariantMap AppController::comparisonLapSeries(
+    const int slot, const QString &channel, const int maximumPoints) const
+{
+    if (slot < 0 || slot > 1 || maximumPoints < 2) return {};
+    const auto &comparisonSlot = m_comparisonSlots[slot];
+    if (!comparisonSlot.session || comparisonSlot.state != "ready") return {};
+    return sessionSeries(*comparisonSlot.session, channel,
+        comparisonSlot.row.value("startTime").toDouble(),
+        comparisonSlot.row.value("endTime").toDouble(), maximumPoints);
+}
+
+QVariantList AppController::comparisonLapTrack(const int slot) const
+{
+    if (slot < 0 || slot > 1) return {};
+    return m_comparisonSlots[slot].track;
+}
+
 void AppController::initializeComparisonLaps()
 {
     m_comparisonTimer.setSingleShot(true);

@@ -7,20 +7,31 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     property bool lapDetail: false
+    // Set to 0 or 1 to show one side of an A/B comparison pair instead of the
+    // single-lap/playback session. Static view only for now: no shared cursor
+    // or full channel selection yet (that lands with the shared-progress axis).
+    property int comparisonSlot: -1
     required property real mediaDuration
     signal seekRequested(real milliseconds)
 
     color: "#090e14"
     border.color: "#202a36"
 
+    readonly property var comparisonLap: comparisonSlot >= 0
+        ? (appController.comparisonSlots[comparisonSlot] || {}).lap || {} : ({})
     property real durationSeconds: Math.max(0.001, mediaDuration > 0 ? mediaDuration / 1000 : appController.telemetryDuration)
-    readonly property var visibleChannels: lapDetail ? appController.outingLapChannels : appController.analysisChannels
-    readonly property real rangeStart: lapDetail ? Number(appController.selectedOutingLap.startTime || 0) : 0
-    readonly property real rangeEnd: lapDetail ? Number(appController.selectedOutingLap.endTime || 1) : durationSeconds
-    readonly property real cursorTime: lapDetail ? appController.outingLapCursor : appController.playbackTime
+    readonly property var visibleChannels: comparisonSlot >= 0 ? ["speed"]
+        : lapDetail ? appController.outingLapChannels : appController.analysisChannels
+    readonly property real rangeStart: comparisonSlot >= 0 ? Number(comparisonLap.startTime || 0)
+        : lapDetail ? Number(appController.selectedOutingLap.startTime || 0) : 0
+    readonly property real rangeEnd: comparisonSlot >= 0 ? Number(comparisonLap.endTime || 1)
+        : lapDetail ? Number(appController.selectedOutingLap.endTime || 1) : durationSeconds
+    readonly property real cursorTime: comparisonSlot >= 0 ? rangeStart
+        : lapDetail ? appController.outingLapCursor : appController.playbackTime
     property var plotColors: ["#55e6a5", "#42a5ff", "#ffb84d", "#ff647c"]
 
-    readonly property var availableChannels: lapDetail ? appController.outingLapAvailableChannels : appController.channelNames
+    readonly property var availableChannels: comparisonSlot >= 0 ? ["speed"]
+        : lapDetail ? appController.outingLapAvailableChannels : appController.channelNames
 
     function setChannels(channels) {
         if (lapDetail) appController.outingLapChannels = channels;
@@ -185,6 +196,11 @@ Rectangle {
                         property string channelName: String(modelData)
                         property color lineColor: root.plotColors[index % root.plotColors.length]
                         property var series: {
+                            if (root.comparisonSlot >= 0) {
+                                appController.comparisonSlots;
+                                return appController.comparisonLapSeries(root.comparisonSlot, channelName,
+                                    Math.max(100, Math.round(width * 1.5)));
+                            }
                             if (root.lapDetail) {
                                 appController.outingLapDetailState;
                                 appController.selectedOutingLap;
