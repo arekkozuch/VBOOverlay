@@ -238,6 +238,10 @@ TelemetryImportPlan prepareTelemetryImport(const QStringList &paths,
                 run.sourcePath = sourcePath;
                 run.format = info.suffix().toLower();
                 run.contentSha256 = digest;
+                // Freeze lazy per-channel cadence statistics before this session is
+                // shared as a const object; otherwise concurrent readers (GUI vs. a
+                // background geometry/comparison worker) can race on first access.
+                freezeCachedStatistics(session, cancelled);
                 run.telemetry = std::make_shared<const TelemetrySession>(std::move(session));
                 run.laps = std::move(laps);
                 retainedSamples += samples;

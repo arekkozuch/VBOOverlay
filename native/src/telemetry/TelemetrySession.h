@@ -1,5 +1,6 @@
 #pragma once
 
+#include "telemetry/SourceOperation.h"
 #include "telemetry/TimingGate.h"
 
 #include <QHash>
@@ -67,5 +68,12 @@ public:
     double telemetryTime, const SyncTransform &transform);
 [[nodiscard]] double telemetryGapThreshold(
     const TelemetryChannel &channel, double minimumSeconds = 0.0);
+
+// Every channel's lazily-computed cadence statistics are non-atomic mutable
+// state. Call this once, single-threaded, before a TelemetrySession is
+// published as a shared const object; otherwise concurrent const readers
+// (GUI render vs. a background worker) race on the first access to any
+// not-yet-warmed channel.
+void freezeCachedStatistics(const TelemetrySession &session, const CancellationCheck &cancelled = {});
 
 } // namespace FlappedEar

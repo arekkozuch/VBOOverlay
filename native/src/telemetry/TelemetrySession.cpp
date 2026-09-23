@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace FlappedEar {
 
@@ -25,6 +26,14 @@ double telemetryGapThreshold(const TelemetryChannel &channel, const double minim
         ++channel.cadenceStatisticComputationCount;
     }
     return std::max(std::max(0.0, minimumSeconds), channel.cachedBaseIntervalSeconds * 3.0);
+}
+
+void freezeCachedStatistics(const TelemetrySession &session, const CancellationCheck &cancelled)
+{
+    for (const auto &channel : std::as_const(session.channels)) {
+        throwIfCancelled(cancelled);
+        (void)telemetryGapThreshold(channel);
+    }
 }
 
 std::optional<double> TelemetrySession::valueAt(

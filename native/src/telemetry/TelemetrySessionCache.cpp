@@ -61,10 +61,7 @@ std::shared_ptr<const TelemetrySession> TelemetrySessionCache::load(const QByteA
     if (cost > available) throw ResourceLimitError("Recording exceeds the remaining shared analysis memory budget. Clear an unused lap or close its inspector.");
     // Freeze lazy cadence statistics before the session can be shared by the
     // GUI and another geometry worker. Subsequent presentation reads are const.
-    for (const auto &channel : std::as_const(decoded.channels)) {
-        throwIfCancelled(cancelled);
-        (void)telemetryGapThreshold(channel);
-    }
+    freezeCachedStatistics(decoded, cancelled);
     validate(decoded); // Never cache a parse that failed the post-read identity check.
     throwIfCancelled(cancelled);
     m_budget->used.fetch_sub(available - cost); reservation->bytes = cost;
