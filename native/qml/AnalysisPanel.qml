@@ -196,6 +196,15 @@ Rectangle {
                             return appController.telemetrySeries(channelName, 0, root.durationSeconds, Math.max(100, Math.round(width * 1.5)));
                         }
                         property bool hasData: (series.segments || []).length > 0
+                        property string problemReason: String(series.reason || "")
+                        property string problemMessage: {
+                            switch (problemReason) {
+                            case "invalidRange": return qsTr("Selected range is invalid");
+                            case "channelMissing": return qsTr("Channel is not available in this recording");
+                            case "channelMalformed": return qsTr("Channel data could not be read");
+                            default: return qsTr("No data in selected range");
+                            }
+                        }
 
                         Item {
                             anchors.fill: parent
@@ -322,8 +331,8 @@ Rectangle {
                                 Label {
                                     anchors.centerIn: parent
                                     visible: !chartRow.hasData
-                                    text: qsTr("No data in selected range")
-                                    color: "#657386"
+                                    text: chartRow.problemMessage
+                                    color: chartRow.problemReason ? "#ffb84d" : "#657386"
                                     font.pixelSize: 10
                                 }
                                 Rectangle {

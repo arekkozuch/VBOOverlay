@@ -102,9 +102,12 @@ QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
     const QString &channelName,
     double rangeStart,
     double rangeEnd,
-    const int maximumPoints) const
+    const int maximumPoints,
+    SampledSegmentsStatus *status) const
 {
+    if (status) *status = SampledSegmentsStatus::Ok;
     if (!std::isfinite(rangeStart) || !std::isfinite(rangeEnd) || maximumPoints < 2) {
+        if (status) *status = SampledSegmentsStatus::InvalidRange;
         return {};
     }
     if (rangeStart > rangeEnd) {
@@ -113,14 +116,19 @@ QVector<QVector<QPointF>> TelemetrySession::sampledSegments(
     const double span = rangeEnd - rangeStart;
     // Finite endpoints can still subtract to infinity. Reject before bucket
     // arithmetic can produce NaN and reach a floating-to-integer conversion.
-    if (!std::isfinite(span)) return {};
+    if (!std::isfinite(span)) {
+        if (status) *status = SampledSegmentsStatus::InvalidRange;
+        return {};
+    }
     const QString resolved = aliases.value(channelName, channelName);
     const auto channelIterator = channels.constFind(resolved);
     if (channelIterator == channels.cend()) {
+        if (status) *status = SampledSegmentsStatus::ChannelMissing;
         return {};
     }
     const TelemetryChannel &channel = channelIterator.value();
     if (channel.timestamps.size() != channel.values.size() || channel.timestamps.isEmpty()) {
+        if (status) *status = SampledSegmentsStatus::ChannelMalformed;
         return {};
     }
 

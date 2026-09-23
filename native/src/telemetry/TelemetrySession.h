@@ -14,6 +14,11 @@ namespace FlappedEar {
 
 enum class InterpolationMode { Nearest, Previous, Linear };
 
+// sampledSegments() used to return the same empty result for an invalid range,
+// a missing channel, a malformed channel, and a genuinely empty overlap,
+// making a real problem indistinguishable from an ordinary telemetry gap.
+enum class SampledSegmentsStatus { Ok, InvalidRange, ChannelMissing, ChannelMalformed };
+
 struct TelemetryChannel {
     QString name;
     QString unit;
@@ -60,7 +65,8 @@ public:
         const QString &channelName,
         double startTime,
         double endTime,
-        int maximumPoints) const;
+        int maximumPoints,
+        SampledSegmentsStatus *status = nullptr) const;
 };
 
 [[nodiscard]] std::optional<double> videoToTelemetryTime(double videoTime, const SyncTransform &transform);

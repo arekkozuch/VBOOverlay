@@ -3969,6 +3969,25 @@ void TelemetryTests::samplesTelemetryRanges()
     QVERIFY(session.sampledSegments("missing", 0.0, 1.0, 10).isEmpty());
     QVERIFY(session.sampledSegments("speed", 0.0, 1.0, 1).isEmpty());
 
+    // A real range/channel problem must be distinguishable from a genuinely
+    // empty overlap, so the UI can tell "no data here" from "something is wrong".
+    SampledSegmentsStatus status = SampledSegmentsStatus::Ok;
+    QVERIFY(session.sampledSegments("speed", 10.0, 20.0, 5, &status).isEmpty());
+    QCOMPARE(status, SampledSegmentsStatus::Ok);
+    QVERIFY(session.sampledSegments("missing", 0.0, 1.0, 10, &status).isEmpty());
+    QCOMPARE(status, SampledSegmentsStatus::ChannelMissing);
+    QVERIFY(session.sampledSegments("speed", 0.0, 1.0, 1, &status).isEmpty());
+    QCOMPARE(status, SampledSegmentsStatus::InvalidRange);
+    QVERIFY(session.sampledSegments("speed", std::numeric_limits<double>::quiet_NaN(), 1.0, 5, &status).isEmpty());
+    QCOMPARE(status, SampledSegmentsStatus::InvalidRange);
+    TelemetrySession malformed;
+    TelemetryChannel malformedChannel;
+    malformedChannel.name = QStringLiteral("bad");
+    malformedChannel.timestamps = {0.0, 1.0};
+    malformed.channels.insert(QStringLiteral("bad"), malformedChannel);
+    QVERIFY(malformed.sampledSegments("bad", 0.0, 1.0, 5, &status).isEmpty());
+    QCOMPARE(status, SampledSegmentsStatus::ChannelMalformed);
+
     TelemetrySession extrema;
     TelemetryChannel signal;
     signal.name = QStringLiteral("rpm");

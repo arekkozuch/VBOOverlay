@@ -1269,10 +1269,22 @@ QVariantMap AppController::telemetrySeries(
 QVariantMap AppController::sessionSeries(const TelemetrySession &session, const QString &channelName,
     double telemetryStart, double telemetryEnd, int maximumPoints)
 {
+    SampledSegmentsStatus status = SampledSegmentsStatus::Ok;
     const QVector<QVector<QPointF>> sampledSegments = session.sampledSegments(
-        channelName, telemetryStart, telemetryEnd, qBound(2, maximumPoints, 2000));
+        channelName, telemetryStart, telemetryEnd, qBound(2, maximumPoints, 2000), &status);
     if (sampledSegments.isEmpty()) {
-        return {};
+        // A genuinely empty overlap (status Ok) stays the plain "no data" shape
+        // callers already expect; only a real range/channel problem gets a reason
+        // so QML can tell "no data" apart from a rendering/data-shape failure.
+        if (status == SampledSegmentsStatus::Ok) return {};
+        QString reason;
+        switch (status) {
+        case SampledSegmentsStatus::InvalidRange: reason = QStringLiteral("invalidRange"); break;
+        case SampledSegmentsStatus::ChannelMissing: reason = QStringLiteral("channelMissing"); break;
+        case SampledSegmentsStatus::ChannelMalformed: reason = QStringLiteral("channelMalformed"); break;
+        case SampledSegmentsStatus::Ok: break;
+        }
+        return {{"reason", reason}};
     }
     double minimum = sampledSegments.front().front().y();
     double maximum = minimum;
