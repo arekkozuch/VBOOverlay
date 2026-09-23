@@ -1506,6 +1506,14 @@ void TelemetryTests::opensOutingLapWithoutChangingEditor()
     const auto series = controller.outingLapSeries("velocity", 200);
     QVERIFY(series.value("minimum").toDouble() >= 200 + start);
     QVERIFY(series.value("maximum").toDouble() <= 200 + end);
+    // Zoom window: re-fetches at the same point budget over less time, so it
+    // must reflect only the narrower range, not the full lap.
+    const auto zoomStart = start + (end - start) * 0.25, zoomEnd = start + (end - start) * 0.75;
+    const auto zoomed = controller.outingLapSeries("velocity", zoomStart, zoomEnd, 200);
+    QVERIFY(zoomed.value("minimum").toDouble() >= 200 + zoomStart);
+    QVERIFY(zoomed.value("maximum").toDouble() <= 200 + zoomEnd);
+    QVERIFY(zoomed.value("minimum").toDouble() > series.value("minimum").toDouble());
+    QVERIFY(zoomed.value("maximum").toDouble() < series.value("maximum").toDouble());
     const auto track = controller.outingLapTrack();
     controller.setOutingLapCursor(-100); QCOMPARE(controller.outingLapCursor(), start);
     controller.setOutingLapCursor(1000); QCOMPARE(controller.outingLapCursor(), end);

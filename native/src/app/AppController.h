@@ -235,7 +235,8 @@ public:
     Q_INVOKABLE bool inspectComparisonLap(int slot);
     [[nodiscard]] bool comparisonViewOpen() const { return m_comparisonViewOpen; }
     void setComparisonViewOpen(bool open);
-    Q_INVOKABLE QVariantMap comparisonLapSeries(int slot, const QString &channel, int maximumPoints) const;
+    Q_INVOKABLE QVariantMap comparisonLapSeries(
+        int slot, const QString &channel, double startTime, double endTime, int maximumPoints) const;
     Q_INVOKABLE QVariantList comparisonLapTrack(int slot) const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
@@ -244,6 +245,8 @@ public:
     Q_INVOKABLE bool setOutingLapExcluded(const QVariantMap &reference, bool excluded, const QString &reason = {});
     Q_INVOKABLE void closeOutingLap();
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
+    Q_INVOKABLE QVariantMap outingLapSeries(
+        const QString &channel, double startTime, double endTime, int maximumPoints) const;
     Q_INVOKABLE QString outingLapValueText(const QString &channel) const;
     [[nodiscard]] QVariantMap selectedOutingLap() const { return m_selectedOutingLap; }
     [[nodiscard]] QString outingLapDetailState() const { return m_outingLapDetailState; }

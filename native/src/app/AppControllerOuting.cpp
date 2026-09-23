@@ -1069,11 +1069,17 @@ void AppController::setOutingLapChannels(const QStringList &channels)
     emit outingLapDetailChanged();
 }
 
-QVariantMap AppController::outingLapSeries(const QString &channel, int maximumPoints) const
+QVariantMap AppController::outingLapSeries(const QString &channel, const int maximumPoints) const
+{
+    return outingLapSeries(channel, m_selectedOutingLap.value("startTime").toDouble(),
+        m_selectedOutingLap.value("endTime").toDouble(), maximumPoints);
+}
+
+QVariantMap AppController::outingLapSeries(
+    const QString &channel, const double startTime, const double endTime, const int maximumPoints) const
 {
     if (!m_outingLapDetailSession || maximumPoints < 2) return {};
-    return sessionSeries(*m_outingLapDetailSession, channel,
-        m_selectedOutingLap.value("startTime").toDouble(), m_selectedOutingLap.value("endTime").toDouble(), maximumPoints);
+    return sessionSeries(*m_outingLapDetailSession, channel, startTime, endTime, maximumPoints);
 }
 
 QString AppController::outingLapValueText(const QString &channel) const

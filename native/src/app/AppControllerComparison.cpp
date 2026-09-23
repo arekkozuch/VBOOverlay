@@ -211,14 +211,13 @@ void AppController::setComparisonViewOpen(const bool open)
 }
 
 QVariantMap AppController::comparisonLapSeries(
-    const int slot, const QString &channel, const int maximumPoints) const
+    const int slot, const QString &channel, const double startTime, const double endTime,
+    const int maximumPoints) const
 {
     if (slot < 0 || slot > 1 || maximumPoints < 2) return {};
     const auto &comparisonSlot = m_comparisonSlots[slot];
     if (!comparisonSlot.session || comparisonSlot.state != "ready") return {};
-    return sessionSeries(*comparisonSlot.session, channel,
-        comparisonSlot.row.value("startTime").toDouble(),
-        comparisonSlot.row.value("endTime").toDouble(), maximumPoints);
+    return sessionSeries(*comparisonSlot.session, channel, startTime, endTime, maximumPoints);
 }
 
 QVariantList AppController::comparisonLapTrack(const int slot) const

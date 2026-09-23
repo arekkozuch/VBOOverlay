@@ -30,6 +30,18 @@ Rectangle {
         : lapDetail ? appController.outingLapCursor : appController.playbackTime
     property var plotColors: ["#55e6a5", "#42a5ff", "#ffb84d", "#ff647c"]
 
+    // Zoom window for corner-level detail (e.g. trail-braking) on lap/comparison
+    // charts: a sub-range of [rangeStart, rangeEnd] that all chart rows share.
+    // Re-fetches series at the same point budget over less time, so zooming in
+    // gives genuinely finer temporal resolution, not just a stretched view.
+    readonly property bool zoomable: lapDetail || comparisonSlot >= 0
+    property real zoomStart: rangeStart
+    property real zoomEnd: rangeEnd
+    readonly property bool zoomed: zoomable && (zoomStart > rangeStart + 1e-6 || zoomEnd < rangeEnd - 1e-6)
+    function resetZoom() { zoomStart = rangeStart; zoomEnd = rangeEnd; }
+    onRangeStartChanged: resetZoom()
+    onRangeEndChanged: resetZoom()
+
     readonly property var availableChannels: comparisonSlot >= 0 ? ["speed"]
         : lapDetail ? appController.outingLapAvailableChannels : appController.channelNames
 
@@ -59,6 +71,7 @@ Rectangle {
     }
 
     function seekAt(ratio) {
+        if (comparisonSlot >= 0) return; // No per-slot cursor yet; never touch global playback.
         const bounded = Math.max(0, Math.min(1, ratio));
         if (lapDetail)
             appController.outingLapCursor = rangeStart + bounded * (rangeEnd - rangeStart);
@@ -75,7 +88,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: !root.lapDetail && appController.eventRuns.length > 0
+            visible: !root.lapDetail && root.comparisonSlot < 0 && appController.eventRuns.length > 0
             spacing: 8
             Label {
                 text: appController.eventName
@@ -109,6 +122,9 @@ Rectangle {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 4
+            // Comparison mode has a fixed single channel for now; full multi-channel
+            // selection is deferred until the shared-progress axis (KAN-35/36).
+            visible: root.comparisonSlot < 0
             RowLayout {
                 Layout.fillWidth: true
                 Label {
@@ -158,7 +174,7 @@ Rectangle {
         }
 
         LapTimingPanel {
-            visible: !root.lapDetail
+            visible: !root.lapDetail && root.comparisonSlot < 0
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
             Layout.minimumHeight: 118
@@ -199,12 +215,13 @@ Rectangle {
                             if (root.comparisonSlot >= 0) {
                                 appController.comparisonSlots;
                                 return appController.comparisonLapSeries(root.comparisonSlot, channelName,
-                                    Math.max(100, Math.round(width * 1.5)));
+                                    root.zoomStart, root.zoomEnd, Math.max(100, Math.round(width * 1.5)));
                             }
                             if (root.lapDetail) {
                                 appController.outingLapDetailState;
                                 appController.selectedOutingLap;
-                                return appController.outingLapSeries(channelName, Math.max(100, Math.round(width * 1.5)));
+                                return appController.outingLapSeries(channelName, root.zoomStart, root.zoomEnd,
+                                    Math.max(100, Math.round(width * 1.5)));
                             }
                             appController.syncOffset;
                             appController.timeScale;
@@ -352,22 +369,65 @@ Rectangle {
                                     font.pixelSize: 10
                                 }
                                 Rectangle {
-                                    x: Math.max(0, Math.min(parent.width - width, (root.cursorTime - root.rangeStart) / Math.max(0.001, root.rangeEnd - root.rangeStart) * parent.width))
+                                    visible: root.cursorTime >= root.zoomStart && root.cursorTime <= root.zoomEnd
+                                    x: Math.max(0, Math.min(parent.width - width, (root.cursorTime - root.zoomStart) / Math.max(0.001, root.zoomEnd - root.zoomStart) * parent.width))
                                     width: 1
                                     height: parent.height
                                     color: "#f3f6fa"
                                     opacity: 0.8
                                 }
+                                Rectangle {
+                                    // Live drag-to-zoom selection; committed to root.zoomStart/zoomEnd on release.
+                                    visible: pointer.dragging
+                                    readonly property real otherX: Math.max(0, Math.min(width, pointer.mouseX))
+                                    x: Math.min(pointer.pressRatio * width, otherX)
+                                    width: Math.abs(otherX - pointer.pressRatio * width)
+                                    height: parent.height
+                                    color: "#55e6a52a"
+                                    border.color: "#55e6a5"
+                                }
                                 MouseArea {
+                                    id: pointer
                                     objectName: "analysisPlotPointer"
                                     anchors.fill: parent
                                     hoverEnabled: root.lapDetail
                                     cursorShape: Qt.CrossCursor
-                                    onPressed: mouse => root.seekAt(mouse.x / width)
-                                    onPositionChanged: mouse => {
-                                        if (pressed || root.lapDetail)
-                                            root.seekAt(mouse.x / width);
+                                    property real pressRatio: 0
+                                    property bool dragging: false
+                                    onPressed: mouse => {
+                                        pointer.pressRatio = Math.max(0, Math.min(1, mouse.x / width));
+                                        pointer.dragging = false;
+                                        if (!root.zoomable) root.seekAt(mouse.x / width);
                                     }
+                                    onPositionChanged: mouse => {
+                                        if (pressed) {
+                                            if (root.zoomable) {
+                                                if (!pointer.dragging && Math.abs(mouse.x - pointer.pressRatio * width) > 4)
+                                                    pointer.dragging = true;
+                                            } else {
+                                                root.seekAt(mouse.x / width);
+                                            }
+                                        } else if (root.lapDetail) {
+                                            root.seekAt(mouse.x / width);
+                                        }
+                                    }
+                                    onReleased: mouse => {
+                                        if (root.zoomable) {
+                                            const releaseRatio = Math.max(0, Math.min(1, mouse.x / width));
+                                            if (pointer.dragging) {
+                                                const span = root.zoomEnd - root.zoomStart;
+                                                const a = root.zoomStart + Math.min(pointer.pressRatio, releaseRatio) * span;
+                                                const b = root.zoomStart + Math.max(pointer.pressRatio, releaseRatio) * span;
+                                                if (b - a > Math.max(0.02, (root.rangeEnd - root.rangeStart) * 0.005)) {
+                                                    root.zoomStart = a; root.zoomEnd = b;
+                                                }
+                                            } else {
+                                                root.seekAt(releaseRatio);
+                                            }
+                                        }
+                                        pointer.dragging = false;
+                                    }
+                                    onDoubleClicked: if (root.zoomable) root.resetZoom()
                                 }
                             }
                         }
@@ -381,6 +441,17 @@ Rectangle {
                 text: root.lapDetail ? qsTr("No speed or G channels recorded in this source") : appController.channelNames.length ? qsTr("Add a telemetry channel to begin analysis") : qsTr("Open a VBO file to inspect telemetry")
                 color: "#657386"
                 font.pixelSize: 11
+            }
+
+            FeButton {
+                objectName: "analysisResetZoom"
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 6
+                visible: root.zoomed
+                compact: true
+                text: qsTr("Reset zoom (%1s)").arg((root.zoomEnd - root.zoomStart).toFixed(1))
+                onClicked: root.resetZoom()
             }
         }
     }
