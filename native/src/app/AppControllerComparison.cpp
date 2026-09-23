@@ -1,10 +1,12 @@
 #include "AppController.h"
 #include "project/EventProjectCodec.h"
 #include "project/ProjectLimits.h"
+#include "telemetry/LapDistance.h"
 
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <cmath>
 #include <utility>
 
 using namespace FlappedEar;
@@ -38,6 +40,18 @@ QVariantList AppController::comparisonLaps() const
         result.append(row);
     }
     return result;
+}
+
+QStringList AppController::comparisonAvailableChannels() const
+{
+    if (m_comparisonSlots[0].state != "ready" || m_comparisonSlots[1].state != "ready"
+        || !m_comparisonSlots[0].session || !m_comparisonSlots[1].session) return {};
+    const auto a = m_comparisonSlots[0].session->channelNames();
+    const auto b = m_comparisonSlots[1].session->channelNames();
+    QStringList shared;
+    for (const auto &channel : a)
+        if (b.contains(channel)) shared.append(channel);
+    return shared;
 }
 
 bool AppController::comparisonPairReady() const
@@ -132,7 +146,7 @@ void AppController::failComparisonLap(const int index, const QString &reason)
     if (m_comparisonPending && m_comparisonLoadingSlot == index && m_comparisonCancellation)
         m_comparisonCancellation->store(true);
     slot.request = ++m_comparisonRequest;
-    slot.session.reset(); slot.geometry = {}; slot.track.clear();
+    slot.session.reset(); slot.geometry = {}; slot.track.clear(); slot.distanceProfile = {};
     slot.state = "error"; slot.error = reason;
 }
 
@@ -226,6 +240,105 @@ QVariantList AppController::comparisonLapTrack(const int slot) const
     return m_comparisonSlots[slot].track;
 }
 
+void AppController::ensureComparisonSharedGeometry() const
+{
+    const auto &a = m_comparisonSlots[0];
+    const auto &b = m_comparisonSlots[1];
+    if (a.state != "ready" || b.state != "ready" || !a.session || !b.session) {
+        if (m_comparisonSharedGeometryRequestA != 0 || m_comparisonSharedGeometryRequestB != 0) {
+            m_comparisonSharedGeometry = {};
+            m_comparisonSharedGeometryRequestA = 0;
+            m_comparisonSharedGeometryRequestB = 0;
+            m_comparisonOverlayTrackCache = {};
+        }
+        return;
+    }
+    if (m_comparisonSharedGeometryRequestA == a.request && m_comparisonSharedGeometryRequestB == b.request) return;
+    m_comparisonSharedGeometry = buildSharedTrackGeometry(
+        *a.session, a.row.value("startTime").toDouble(), a.row.value("endTime").toDouble(),
+        *b.session, b.row.value("startTime").toDouble(), b.row.value("endTime").toDouble());
+    m_comparisonOverlayTrackCache[0] = m_comparisonSharedGeometry.valid
+        ? buildTrackSegments(*a.session, a.row.value("startTime").toDouble(), a.row.value("endTime").toDouble(),
+              m_comparisonSharedGeometry)
+        : QVariantList{};
+    m_comparisonOverlayTrackCache[1] = m_comparisonSharedGeometry.valid
+        ? buildTrackSegments(*b.session, b.row.value("startTime").toDouble(), b.row.value("endTime").toDouble(),
+              m_comparisonSharedGeometry)
+        : QVariantList{};
+    m_comparisonSharedGeometryRequestA = a.request;
+    m_comparisonSharedGeometryRequestB = b.request;
+}
+
+QVariantList AppController::comparisonOverlayTrack(const int slot) const
+{
+    if (slot < 0 || slot > 1) return {};
+    ensureComparisonSharedGeometry();
+    return m_comparisonOverlayTrackCache[slot];
+}
+
+QVariantMap AppController::comparisonPositionAtDistance(const int slot, const double distanceMeters) const
+{
+    if (slot < 0 || slot > 1) return {};
+    const auto &comparisonSlot = m_comparisonSlots[slot];
+    if (!comparisonSlot.session || comparisonSlot.state != "ready" || !comparisonSlot.distanceProfile.valid)
+        return {};
+    ensureComparisonSharedGeometry();
+    if (!m_comparisonSharedGeometry.valid) return {};
+    const auto time = timeAtDistance(comparisonSlot.distanceProfile, distanceMeters);
+    if (!time) return {};
+    const auto point = FlappedEar::currentTrackPoint(*comparisonSlot.session, *time, m_comparisonSharedGeometry);
+    if (!point) return {};
+    return {{"x", point->x()}, {"y", point->y()}};
+}
+
+double AppController::comparisonLapDistanceTotal(const int slot) const
+{
+    if (slot < 0 || slot > 1) return 0.0;
+    return m_comparisonSlots[slot].distanceProfile.totalMeters;
+}
+
+QVariantMap AppController::comparisonLapSeriesByDistance(const int slot, const QString &channel,
+    const double startMeters, const double endMeters, const int maximumPoints) const
+{
+    if (slot < 0 || slot > 1 || maximumPoints < 2) return {};
+    const auto &comparisonSlot = m_comparisonSlots[slot];
+    if (!comparisonSlot.session || comparisonSlot.state != "ready") return {};
+    if (!comparisonSlot.distanceProfile.valid) return {{"reason", QStringLiteral("channelMissing")}};
+    if (!std::isfinite(startMeters) || !std::isfinite(endMeters) || endMeters <= startMeters)
+        return {{"reason", QStringLiteral("invalidRange")}};
+    const auto &session = *comparisonSlot.session;
+    const QString resolved = session.aliases.value(channel, channel);
+    const auto channelIterator = session.channels.constFind(resolved);
+    if (channelIterator == session.channels.cend()) return {{"reason", QStringLiteral("channelMissing")}};
+
+    const double span = endMeters - startMeters;
+    QVariantList segments;
+    QVariantList current;
+    double minimum = 0.0, maximum = 0.0;
+    bool haveExtent = false;
+    for (int index = 0; index < maximumPoints; ++index) {
+        const double targetMeters = startMeters + span * index / (maximumPoints - 1);
+        const auto time = timeAtDistance(comparisonSlot.distanceProfile, targetMeters);
+        const auto value = time ? session.valueAt(channel, *time) : std::nullopt;
+        if (!time || !value) {
+            if (!current.isEmpty()) { segments.append(QVariant::fromValue(current)); current.clear(); }
+            continue;
+        }
+        if (!haveExtent) { minimum = maximum = *value; haveExtent = true; }
+        else { minimum = std::min(minimum, *value); maximum = std::max(maximum, *value); }
+        current.append(QVariantMap{{"x", (targetMeters - startMeters) / span}, {"y", *value}});
+    }
+    if (!current.isEmpty()) segments.append(QVariant::fromValue(current));
+    if (segments.isEmpty()) return {};
+    return {
+        {"segments", segments},
+        {"brakingUp", resolved == session.aliases.value("longitudinalAcceleration")},
+        {"minimum", minimum},
+        {"maximum", maximum},
+        {"unit", channelIterator->unit},
+    };
+}
+
 void AppController::initializeComparisonLaps()
 {
     m_comparisonTimer.setSingleShot(true);
@@ -247,6 +360,7 @@ void AppController::initializeComparisonLaps()
                 slot.session = std::move(result.session);
                 slot.geometry = std::move(result.geometry);
                 slot.track = std::move(result.track);
+                slot.distanceProfile = std::move(result.distanceProfile);
                 slot.error = result.error;
                 slot.state = slot.session ? "ready" : "error";
                 if (slot.state == "ready")

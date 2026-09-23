@@ -3,16 +3,27 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Side-by-side A/B lap inspection. Each side reuses the single-lap TrackMapPanel
-// and AnalysisPanel components via their comparisonSlot property; there is no
-// shared track-progress axis, delta, or synced cursor yet (each side scrubs
-// independently once that lands).
+// F1-debrief-style A/B lap comparison: both laps overlaid on one chart
+// (distance into lap, not raw time, so a corner lines up for both) and one
+// track map (shared scale). Drag to zoom into a corner; hover shows both
+// laps' values and where each car was on track at that point.
 Rectangle {
     id: root
     color: "#090e14"
     readonly property var slots: appController.comparisonSlots
+    readonly property var availableChannels: appController.comparisonAvailableChannels
+    property string selectedChannel: "speed"
+    onAvailableChannelsChanged: {
+        if (availableChannels.length > 0 && availableChannels.indexOf(selectedChannel) < 0)
+            selectedChannel = availableChannels.indexOf("speed") >= 0 ? "speed" : availableChannels[0];
+    }
     function duration(seconds) {
         return Math.floor(seconds / 60) + ":" + (seconds % 60).toFixed(3).padStart(6, "0");
+    }
+    function lapLabel(index) {
+        const lap = root.slots[index] ? root.slots[index].lap : ({});
+        return (index === 0 ? qsTr("Lap A · ") : qsTr("Lap B · ")) + (lap.runName || "")
+            + " · LAP " + (lap.lapNumber || "") + " · " + root.duration(Number(lap.durationSeconds || 0));
     }
     Shortcut { sequence: "Escape"; enabled: root.visible; onActivated: appController.comparisonViewOpen = false }
     ColumnLayout {
@@ -41,47 +52,60 @@ Rectangle {
             color: "#91a0b2"
             wrapMode: Text.WordWrap
         }
-        RowLayout {
+        ColumnLayout {
             visible: appController.comparisonPairReady
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 14
-            Repeater {
-                objectName: "comparisonDetailColumns"
-                model: 2
-                delegate: ColumnLayout {
-                    id: column
-                    required property int index
-                    readonly property var lap: root.slots[index] ? root.slots[index].lap : ({})
+            spacing: 8
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 20
+                Label {
+                    objectName: "comparisonLapLabelA"
+                    text: root.lapLabel(0)
+                    color: "#55e6a5"
+                    font.pixelSize: 13
+                    elide: Text.ElideMiddle
+                }
+                Label {
+                    objectName: "comparisonLapLabelB"
+                    text: root.lapLabel(1)
+                    color: "#58bfff"
+                    font.pixelSize: 13
+                    elide: Text.ElideMiddle
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: qsTr("Channel")
+                    color: "#8d9aaa"
+                    font.pixelSize: 11
+                }
+                FeComboBox {
+                    id: channelPicker
+                    objectName: "comparisonChannelPicker"
+                    implicitHeight: 28
+                    implicitWidth: 160
+                    model: root.availableChannels
+                    currentIndex: model.indexOf(root.selectedChannel)
+                    onActivated: index => root.selectedChannel = model[index]
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 8
+                ComparisonOverlayMap {
+                    id: overlayMap
+                    Layout.preferredWidth: Math.max(160, root.width * 0.28)
+                    Layout.fillHeight: true
+                    hoverDistanceMeters: overlayChart.hoverDistanceMeters
+                }
+                ComparisonOverlayChart {
+                    id: overlayChart
+                    objectName: "comparisonOverlayChart"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: 8
-                    Label {
-                        Layout.fillWidth: true
-                        elide: Text.ElideMiddle
-                        text: (column.index === 0 ? qsTr("Lap A · ") : qsTr("Lap B · "))
-                            + (column.lap.runName || "") + " · LAP " + (column.lap.lapNumber || "")
-                            + " · " + root.duration(Number(column.lap.durationSeconds || 0))
-                        color: column.index === 0 ? "#55e6a5" : "#58bfff"
-                        font.pixelSize: 13
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 8
-                        TrackMapPanel {
-                            comparisonSlot: column.index
-                            Layout.preferredWidth: Math.max(150, column.width * 0.34)
-                            Layout.fillHeight: true
-                        }
-                        AnalysisPanel {
-                            objectName: "comparisonCharts" + column.index
-                            comparisonSlot: column.index
-                            mediaDuration: 0
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                        }
-                    }
+                    channel: root.selectedChannel
                 }
             }
         }

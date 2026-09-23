@@ -110,4 +110,64 @@ std::optional<QPointF> currentTrackPoint(
         ? std::optional<QPointF>(normalized) : std::nullopt;
 }
 
+namespace {
+
+void appendLatLon(const TelemetrySession &session, const double startTime, const double endTime,
+    TelemetryChannel &latitude, TelemetryChannel &longitude, const CancellationCheck &cancelled)
+{
+    const auto latitudeSegments = session.sampledSegments("latitude", startTime, endTime, 2000);
+    for (const auto &segment : latitudeSegments) {
+        for (const auto &sample : segment) {
+            throwIfCancelled(cancelled);
+            const auto lon = session.valueAt("longitude", sample.x());
+            if (!lon) continue;
+            latitude.values.append(static_cast<float>(sample.y()));
+            longitude.values.append(static_cast<float>(*lon));
+        }
+    }
+}
+
+} // namespace
+
+TrackGeometry buildSharedTrackGeometry(
+    const TelemetrySession &sessionA, const double startA, const double endA,
+    const TelemetrySession &sessionB, const double startB, const double endB,
+    const CancellationCheck &cancelled)
+{
+    throwIfCancelled(cancelled);
+    TelemetrySession combined;
+    // Both laps are expected on the same physical track; either convention
+    // is fine as long as it is applied consistently to both traces.
+    combined.metadata.insert("gpsLongitudeConvention", sessionA.metadata.value("gpsLongitudeConvention"));
+    combined.aliases = {{"latitude", "lat"}, {"longitude", "lon"}};
+    combined.channels.insert("lat", {});
+    combined.channels.insert("lon", {});
+    appendLatLon(sessionA, startA, endA, combined.channels["lat"], combined.channels["lon"], cancelled);
+    appendLatLon(sessionB, startB, endB, combined.channels["lat"], combined.channels["lon"], cancelled);
+    return buildTrackGeometry(combined, cancelled);
+}
+
+QVariantList buildTrackSegments(const TelemetrySession &session, const double startTime, const double endTime,
+    const TrackGeometry &geometry, const CancellationCheck &cancelled)
+{
+    QVariantList track;
+    if (!geometry.valid) return track;
+    const auto latitudeSegments = session.sampledSegments("latitude", startTime, endTime, 2000);
+    for (const auto &segment : latitudeSegments) {
+        QVariantList points;
+        for (const auto &sample : segment) {
+            throwIfCancelled(cancelled);
+            const auto longitude = session.valueAt("longitude", sample.x());
+            if (!longitude) {
+                if (!points.isEmpty()) { track.append(QVariant::fromValue(points)); points.clear(); }
+                continue;
+            }
+            const auto point = currentTrackPoint(session, sample.x(), geometry);
+            if (point) points.append(QVariantMap{{"x", point->x()}, {"y", point->y()}});
+        }
+        if (!points.isEmpty()) track.append(QVariant::fromValue(points));
+    }
+    return track;
+}
+
 } // namespace FlappedEar

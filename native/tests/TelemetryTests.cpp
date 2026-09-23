@@ -138,6 +138,7 @@ private slots:
     void restoresComparisonSelectionAfterReopen();
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void comparesTwoLapsFromTheSameRun();
+    void overlaysComparisonLapsOnASharedDistanceAxis();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
     void cancelsSupersededComparisonWaitingForCache();
@@ -3082,6 +3083,78 @@ void TelemetryTests::comparesTwoLapsFromTheSameRun()
         a.value("endTime").toDouble(), 200).isEmpty());
     QVERIFY(!controller.comparisonLapSeries(1, "latitude", b.value("startTime").toDouble(),
         b.value("endTime").toDouble(), 200).isEmpty());
+}
+
+void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
+{
+    // The A/B comparison screen overlays both laps on one chart/map instead of
+    // two independent, unaligned side-by-side panels. Cover the invokables
+    // that make that possible: a shared-geometry track pair, a distance-into-
+    // lap channel series, and the available-channel intersection.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Overlay", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    const auto a = candidates[0].toMap(), b = candidates[1].toMap();
+
+    QVERIFY(controller.comparisonAvailableChannels().isEmpty());
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QQmlComponent chartComponent(&engine), mapComponent(&engine);
+    chartComponent.setData("import QtQuick\nComparisonOverlayChart { channel: \"latitude\"; width: 300; height: 200 }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    mapComponent.setData("import QtQuick\nComparisonOverlayMap { width: 200; height: 200 }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(chartComponent.isReady(), qPrintable(chartComponent.errorString()));
+    QVERIFY2(mapComponent.isReady(), qPrintable(mapComponent.errorString()));
+    std::unique_ptr<QObject> chartObject(chartComponent.create());
+    std::unique_ptr<QObject> mapObject(mapComponent.create());
+    QVERIFY2(chartObject, qPrintable(chartComponent.errorString()));
+    QVERIFY2(mapObject, qPrintable(mapComponent.errorString()));
+    QVERIFY(!chartObject->property("hasData").toBool());
+
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    QCOMPARE(controller.comparisonAvailableChannels(), controller.m_comparisonSlots[0].session->channelNames());
+    QVERIFY(controller.comparisonLapDistanceTotal(0) > 0.0);
+    QVERIFY(controller.comparisonLapDistanceTotal(1) > 0.0);
+
+    QVERIFY2(!controller.comparisonOverlayTrack(0).isEmpty(), "overlay track 0 should not be empty");
+    QVERIFY2(!controller.comparisonOverlayTrack(1).isEmpty(), "overlay track 1 should not be empty");
+    for (const int slot : {0, 1}) {
+        for (const auto &segmentValue : controller.comparisonOverlayTrack(slot)) {
+            for (const auto &pointValue : segmentValue.toList()) {
+                const auto point = pointValue.toMap();
+                QVERIFY(std::isfinite(point.value("x").toDouble()));
+                QVERIFY(std::isfinite(point.value("y").toDouble()));
+            }
+        }
+    }
+
+    const auto seriesA = controller.comparisonLapSeriesByDistance(
+        0, "latitude", 0, controller.comparisonLapDistanceTotal(0), 100);
+    const auto seriesB = controller.comparisonLapSeriesByDistance(
+        1, "latitude", 0, controller.comparisonLapDistanceTotal(1), 100);
+    QVERIFY2(!seriesA.value("segments").toList().isEmpty(), "distance series 0 should not be empty");
+    QVERIFY2(!seriesB.value("segments").toList().isEmpty(), "distance series 1 should not be empty");
+
+    // A midpoint distance should resolve to a real position on the shared map
+    // for both laps -- this is what drives the hover position markers.
+    const auto midpointA = controller.comparisonPositionAtDistance(0, controller.comparisonLapDistanceTotal(0) / 2);
+    const auto midpointB = controller.comparisonPositionAtDistance(1, controller.comparisonLapDistanceTotal(1) / 2);
+    QVERIFY(midpointA.contains("x") && midpointA.contains("y"));
+    QVERIFY(midpointB.contains("x") && midpointB.contains("y"));
+
+    QTRY_VERIFY2(chartObject->property("hasData").toBool(), "overlay chart should show data once both laps are ready");
+    QTRY_VERIFY2(!mapObject->property("trackA").toList().isEmpty(), "overlay map track A should populate");
+    QTRY_VERIFY2(!mapObject->property("trackB").toList().isEmpty(), "overlay map track B should populate");
 }
 
 void TelemetryTests::sharesComparisonCacheAndRevalidatesSources()

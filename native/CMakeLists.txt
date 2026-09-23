@@ -112,6 +112,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TrackInference.cpp
     src/telemetry/TrackInference.h
     src/telemetry/TrackGeometry.h
+    src/telemetry/LapDistance.cpp
+    src/telemetry/LapDistance.h
     src/telemetry/RczParser.cpp
     src/telemetry/RczParser.h
     src/telemetry/TelemetrySessionCache.cpp
@@ -190,6 +192,8 @@ qt_add_qml_module(flappedear_native
         qml/OutingLapPanel.qml
         qml/OutingLapDetailPanel.qml
         qml/ComparisonDetailPanel.qml
+        qml/ComparisonOverlayChart.qml
+        qml/ComparisonOverlayMap.qml
         qml/ComparisonLapDialog.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml

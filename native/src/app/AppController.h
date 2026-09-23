@@ -6,6 +6,7 @@
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
+#include "telemetry/LapDistance.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -97,6 +98,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList comparisonSlots READ comparisonSlots NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(QVariantList comparisonLaps READ comparisonLaps NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(bool comparisonPairReady READ comparisonPairReady NOTIFY comparisonSlotsChanged)
+    Q_PROPERTY(QStringList comparisonAvailableChannels READ comparisonAvailableChannels NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(bool comparisonViewOpen READ comparisonViewOpen WRITE setComparisonViewOpen NOTIFY comparisonViewOpenChanged)
     Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
@@ -238,6 +240,16 @@ public:
     Q_INVOKABLE QVariantMap comparisonLapSeries(
         int slot, const QString &channel, double startTime, double endTime, int maximumPoints) const;
     Q_INVOKABLE QVariantList comparisonLapTrack(int slot) const;
+    // Overlay comparison: both slots' GPS traces sharing one normalization
+    // (so they draw to scale on one map), and a channel series parameterized
+    // by distance into the lap (so a corner lines up at roughly the same x
+    // position for both laps) rather than by raw time or lap-time fraction.
+    Q_INVOKABLE QVariantList comparisonOverlayTrack(int slot) const;
+    Q_INVOKABLE QVariantMap comparisonPositionAtDistance(int slot, double distanceMeters) const;
+    Q_INVOKABLE QVariantMap comparisonLapSeriesByDistance(
+        int slot, const QString &channel, double startMeters, double endMeters, int maximumPoints) const;
+    Q_INVOKABLE double comparisonLapDistanceTotal(int slot) const;
+    [[nodiscard]] QStringList comparisonAvailableChannels() const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
@@ -495,6 +507,7 @@ private:
         std::shared_ptr<const TelemetrySession> session;
         TrackGeometry geometry;
         QVariantList track;
+        FlappedEar::LapDistanceProfile distanceProfile;
         QString error;
     };
     static OutingLapDetailResult readOutingLapDetail(const QJsonObject &source, const QString &projectPath,
@@ -510,6 +523,7 @@ private:
         std::shared_ptr<const TelemetrySession> session;
         TrackGeometry geometry;
         QVariantList track;
+        FlappedEar::LapDistanceProfile distanceProfile;
     };
     void initializeComparisonLaps();
     void loadComparisonLap();
@@ -518,6 +532,13 @@ private:
     void resetComparisonSlot(int slot);
     void persistComparisonSlot(int slot, const QJsonValue &reference);
     void restorePersistedComparisonSlots();
+    // Lazily rebuilt only when either slot's request id changes; both slots'
+    // overlay tracks are recomputed together since they share one normalization.
+    void ensureComparisonSharedGeometry() const;
+    mutable TrackGeometry m_comparisonSharedGeometry;
+    mutable quint64 m_comparisonSharedGeometryRequestA = 0;
+    mutable quint64 m_comparisonSharedGeometryRequestB = 0;
+    mutable std::array<QVariantList, 2> m_comparisonOverlayTrackCache;
     bool m_comparisonRestoreAttempted = false;
     std::shared_ptr<TelemetrySessionCache> m_analysisSourceCache = std::make_shared<TelemetrySessionCache>();
     std::array<ComparisonSlot, 2> m_comparisonSlots;

@@ -1014,32 +1014,18 @@ AppController::OutingLapDetailResult AppController::readOutingLapDetail(const QJ
         mapSession.aliases = {{"latitude", "lat"}, {"longitude", "lon"}};
         mapSession.channels.insert("lat", {}); mapSession.channels.insert("lon", {});
         auto &lat = mapSession.channels["lat"]; auto &lon = mapSession.channels["lon"];
-        QVector<QVector<double>> times;
         for (const auto &segment : latitude) {
-            QVector<double> current;
             for (const auto &point : segment) {
                 throwIfCancelled(cancelled);
                 const auto longitude = session->valueAt("longitude", point.x());
-                if (!longitude) {
-                    if (!current.isEmpty()) times.append(std::exchange(current, {}));
-                    continue;
-                }
+                if (!longitude) continue;
                 lat.values.append(static_cast<float>(point.y()));
                 lon.values.append(static_cast<float>(*longitude));
-                current.append(point.x());
             }
-            if (!current.isEmpty()) times.append(std::move(current));
         }
         result.geometry = buildTrackGeometry(mapSession, cancelled);
-        for (const auto &segment : times) {
-            QVariantList points;
-            for (const auto time : segment) {
-                throwIfCancelled(cancelled);
-                const auto point = FlappedEar::currentTrackPoint(*session, time, result.geometry);
-                if (point) points.append(QVariantMap{{"x", point->x()}, {"y", point->y()}});
-            }
-            if (!points.isEmpty()) result.track.append(QVariant::fromValue(points));
-        }
+        result.track = buildTrackSegments(*session, start, end, result.geometry, cancelled);
+        result.distanceProfile = buildLapDistanceProfile(*session, start, end, cancelled);
         throwIfCancelled(cancelled);
         result.session = std::move(session);
     } catch (const std::exception &error) {

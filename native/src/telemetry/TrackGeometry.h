@@ -5,6 +5,7 @@
 
 #include <QPointF>
 #include <QRectF>
+#include <QVariant>
 #include <QVector>
 #include <optional>
 
@@ -26,5 +27,20 @@ struct TrackGeometry {
     const TelemetrySession &session, const CancellationCheck &cancelled = {});
 [[nodiscard]] std::optional<QPointF> currentTrackPoint(
     const TelemetrySession &session, double time, const TrackGeometry &geometry);
+
+// One normalization shared by two laps' GPS traces, so both can be drawn
+// overlaid on the same map to scale instead of each filling the frame on
+// its own independent bounding box.
+[[nodiscard]] TrackGeometry buildSharedTrackGeometry(
+    const TelemetrySession &sessionA, double startA, double endA,
+    const TelemetrySession &sessionB, double startB, double endB,
+    const CancellationCheck &cancelled = {});
+
+// Gap-preserving polyline segments for one lap's GPS trace, normalized
+// against an externally supplied geometry (e.g. buildSharedTrackGeometry's
+// result) rather than one computed from this lap alone.
+[[nodiscard]] QVariantList buildTrackSegments(
+    const TelemetrySession &session, double startTime, double endTime,
+    const TrackGeometry &geometry, const CancellationCheck &cancelled = {});
 
 } // namespace FlappedEar
