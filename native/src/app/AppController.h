@@ -99,6 +99,12 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList comparisonLaps READ comparisonLaps NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(bool comparisonPairReady READ comparisonPairReady NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(QStringList comparisonAvailableChannels READ comparisonAvailableChannels NOTIFY comparisonSlotsChanged)
+    // A genuine property (not a Q_INVOKABLE read via a comma-operator forced
+    // dependency): that hack is a known-fragile QML pattern that a layout
+    // change elsewhere in ComparisonDetailPanel.qml tripped into a spurious
+    // "Binding loop detected" warning (KAN-40 investigation). A real NOTIFY
+    // gives QML's normal dependency tracking something to attach to.
+    Q_PROPERTY(double comparisonProgressAxisLength READ comparisonProgressAxisLength NOTIFY comparisonSlotsChanged)
     Q_PROPERTY(bool comparisonViewOpen READ comparisonViewOpen WRITE setComparisonViewOpen NOTIFY comparisonViewOpenChanged)
     Q_PROPERTY(QVariantMap selectedOutingLap READ selectedOutingLap NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QString outingLapDetailState READ outingLapDetailState NOTIFY outingLapDetailChanged)
@@ -250,7 +256,7 @@ public:
     Q_INVOKABLE QVariantMap comparisonPositionAtProgress(int slot, double progressMeters) const;
     Q_INVOKABLE QVariantMap comparisonChannelSeriesByProgress(
         int slot, const QString &channel, double startProgress, double endProgress, int maximumPoints) const;
-    Q_INVOKABLE double comparisonProgressAxisLength() const;
+    [[nodiscard]] double comparisonProgressAxisLength() const;
     // Cumulative time gap between the two laps at the same shared progress
     // (A minus B; positive means A took longer to reach that point, i.e. A is
     // behind there) -- the classic lap-delta trace, not a per-sample

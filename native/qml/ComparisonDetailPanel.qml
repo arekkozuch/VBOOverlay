@@ -21,10 +21,7 @@ Rectangle {
     readonly property var availableChannels: appController.comparisonAvailableChannels.length > 0
         ? ["Δ time"].concat(appController.comparisonAvailableChannels) : []
     property var visibleChannels: []
-    // comparisonProgressAxisLength is a Q_INVOKABLE, not a property: QML's
-    // automatic dependency tracking only follows real property reads, so
-    // force one on comparisonSlots or this never updates once a lap loads.
-    readonly property real totalMeters: Math.max(1, (appController.comparisonSlots, appController.comparisonProgressAxisLength()))
+    readonly property real totalMeters: Math.max(1, appController.comparisonProgressAxisLength)
     property real zoomStart: 0
     property real zoomEnd: totalMeters
     property real hoverDistanceMeters: -1
@@ -56,8 +53,15 @@ Rectangle {
             root.zoomEnd = root.totalMeters;
         }
     }
-    onZoomStartChanged: if (!root.pendingRangeRestore) appController.persistComparisonRange(root.zoomStart, root.zoomEnd)
-    onZoomEndChanged: if (!root.pendingRangeRestore) appController.persistComparisonRange(root.zoomStart, root.zoomEnd)
+    // Deferred, not a direct call: persisting synchronously here would call
+    // back into markPersistentChange -> documentStateChanged ->
+    // invalidateComparisonLaps -> comparisonSlotsChanged while this property's
+    // own binding (which depends on comparisonSlotsChanged) is still on the
+    // call stack -- a genuine re-entrant evaluation, not just a cosmetic
+    // warning. Qt.callLater also coalesces a zoom-drag's many change events
+    // into one write instead of one per frame.
+    onZoomStartChanged: if (!root.pendingRangeRestore) Qt.callLater(() => appController.persistComparisonRange(root.zoomStart, root.zoomEnd))
+    onZoomEndChanged: if (!root.pendingRangeRestore) Qt.callLater(() => appController.persistComparisonRange(root.zoomStart, root.zoomEnd))
     Connections {
         target: appController
         function onComparisonViewOpenChanged() {
@@ -86,7 +90,7 @@ Rectangle {
             root.visibleChannels = stillValid.length > 0 ? stillValid : root.defaultChannels(root.availableChannels);
         }
     }
-    onVisibleChannelsChanged: if (!root.pendingChannelsRestore) appController.persistComparisonChannels(root.visibleChannels)
+    onVisibleChannelsChanged: if (!root.pendingChannelsRestore) Qt.callLater(() => appController.persistComparisonChannels(root.visibleChannels))
     function toggleChannel(channel) {
         const channels = root.visibleChannels.slice();
         const index = channels.indexOf(channel);
@@ -111,6 +115,21 @@ Rectangle {
         return (index === 0 ? qsTr("Lap A · ") : qsTr("Lap B · ")) + (lap.runName || "")
             + " · LAP " + (lap.lapNumber || "") + " · " + root.duration(Number(lap.durationSeconds || 0));
     }
+    // KAN-40: compatibility group, exclusions, GPS coverage and the reason a
+    // slot isn't usable, in plain always-visible text -- never behind a
+    // mouse-only hover/tooltip, so nothing here needs a keyboard interaction
+    // to reach. Per-channel unavailability ("Channel is not available in both
+    // laps") is already shown by ComparisonOverlayChart; this covers the
+    // slot-level context that view doesn't have. Computed in C++
+    // (comparisonSlots' statusText/statusIsWarning fields), not here, so QML
+    // only ever does a plain property-path read off comparisonSlots.
+    function pairStatusText() {
+        const a = root.slots[0], b = root.slots[1];
+        if (a && b && a.state === "ready" && b.state === "ready"
+                && a.lap.compatibilityGroupId !== b.lap.compatibilityGroupId)
+            return qsTr("Lap A and Lap B are from different, incompatible track configurations.");
+        return qsTr("Select two ready, compatible laps to compare.");
+    }
     Shortcut { sequence: "Escape"; enabled: root.visible; onActivated: appController.comparisonViewOpen = false }
     ColumnLayout {
         anchors.fill: parent
@@ -131,10 +150,35 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
         }
+        ColumnLayout {
+            objectName: "comparisonSlotStatusList"
+            Layout.fillWidth: true
+            spacing: 2
+            visible: root.slots.length === 2 && (root.slots[0].state !== "empty" || root.slots[1].state !== "empty")
+            Repeater {
+                objectName: "comparisonSlotStatusRepeater"
+                model: 2
+                delegate: Label {
+                    required property int index
+                    objectName: "comparisonSlotStatus" + index
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 11
+                    // Plain fields off comparisonSlots (computed in C++,
+                    // KAN-40) -- the same shape of read as lapLabel() above,
+                    // not a new reactive function call back into root.slots.
+                    text: root.slots[index] ? root.slots[index].statusText : ""
+                    color: root.slots[index] && root.slots[index].statusIsWarning ? "#ffb84d" : "#657386"
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
+            }
+        }
         Label {
+            objectName: "comparisonPairStatus"
             Layout.fillWidth: true
             visible: !appController.comparisonPairReady
-            text: qsTr("Select two ready, compatible laps to compare.")
+            text: root.pairStatusText()
             color: "#91a0b2"
             wrapMode: Text.WordWrap
         }

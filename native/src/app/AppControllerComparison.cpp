@@ -21,11 +21,49 @@ bool eligible(const QVariantMap &row)
 }
 }
 
+namespace {
+// KAN-40: compatibility group, exclusions, GPS coverage and the reason a slot
+// isn't usable, computed once here so QML need only read plain fields off
+// comparisonSlots -- the same shape of read as the pre-existing lap-label
+// binding, not a new JS function reactively re-entering comparisonSlots.
+QString comparisonSlotStatusText(const int index, const QString &state, const QString &error, const QVariantMap &row)
+{
+    const QString prefix = index == 0 ? QStringLiteral("Lap A: ") : QStringLiteral("Lap B: ");
+    if (state == "empty") return prefix + QObject::tr("No lap selected.");
+    if (state == "loading") return prefix + QObject::tr("Loading recording…");
+    if (state == "error")
+        return prefix + (error.isEmpty() ? QObject::tr("This lap is unavailable.") : error);
+    QStringList parts;
+    const auto groupLabel = row.value("compatibilityGroupLabel").toString();
+    parts << (groupLabel.isEmpty() ? QObject::tr("Unresolved track configuration") : groupLabel);
+    const auto issue = row.value("referenceIssue").toString();
+    if (!issue.isEmpty()) parts << issue;
+    if (row.value("excluded").toBool()) {
+        const auto reason = row.value("exclusionReason").toString();
+        parts << QObject::tr("Excluded: %1").arg(reason.isEmpty() ? QObject::tr("no reason recorded") : reason);
+    }
+    parts += row.value("compatibilityReasonLabels").toStringList();
+    return prefix + parts.join(QStringLiteral(" · "));
+}
+
+bool comparisonSlotStatusIsWarning(const QString &state, const QVariantMap &row)
+{
+    if (state == "error") return true;
+    if (state != "ready") return false;
+    return !row.value("referenceIssue").toString().isEmpty() || row.value("excluded").toBool()
+        || !row.value("compatibilityReasonLabels").toStringList().isEmpty();
+}
+}
+
 QVariantList AppController::comparisonSlots() const
 {
     QVariantList result;
-    for (const auto &slot : m_comparisonSlots)
-        result.append(QVariantMap{{"lap", slot.row}, {"state", slot.state}, {"error", slot.error}});
+    for (int i = 0; i < 2; ++i) {
+        const auto &slot = m_comparisonSlots[i];
+        result.append(QVariantMap{{"lap", slot.row}, {"state", slot.state}, {"error", slot.error},
+            {"statusText", comparisonSlotStatusText(i, slot.state, slot.error, slot.row)},
+            {"statusIsWarning", comparisonSlotStatusIsWarning(slot.state, slot.row)}});
+    }
     return result;
 }
 
