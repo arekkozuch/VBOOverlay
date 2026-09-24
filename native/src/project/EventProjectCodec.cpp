@@ -129,6 +129,30 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
                     return fail(error, "Saved comparison slot reference is invalid.");
             }
         }
+        const auto savedComparisonRange = decisions.toObject().value("comparisonRange");
+        if (!savedComparisonRange.isUndefined() && !savedComparisonRange.isNull()) {
+            if (!savedComparisonRange.isObject()) return fail(error, "Saved comparison range must be an object.");
+            const auto range = savedComparisonRange.toObject();
+            const auto start = range.value("startMeters");
+            const auto end = range.value("endMeters");
+            if (!start.isDouble() || !end.isDouble()
+                || !std::isfinite(start.toDouble()) || !std::isfinite(end.toDouble())
+                || start.toDouble() < 0.0 || end.toDouble() <= start.toDouble()
+                || end.toDouble() > ProjectLimits::maximumComparisonRangeMeters)
+                return fail(error, "Saved comparison range is malformed.");
+        }
+        const auto savedComparisonChannels = decisions.toObject().value("comparisonChannels");
+        if (!savedComparisonChannels.isUndefined() && !savedComparisonChannels.isNull()) {
+            if (!savedComparisonChannels.isArray()
+                || savedComparisonChannels.toArray().size() > ProjectLimits::maximumComparisonChannels)
+                return fail(error, "Saved comparison channels must be a bounded array.");
+            QSet<QString> seenChannels;
+            for (const auto &item : savedComparisonChannels.toArray()) {
+                if (!validText(item, ProjectLimits::maximumIdCharacters) || seenChannels.contains(item.toString()))
+                    return fail(error, "Saved comparison channel entry is invalid or duplicated.");
+                seenChannels.insert(item.toString());
+            }
+        }
     }
     if (!validText(event.value(QStringLiteral("id")), ProjectLimits::maximumIdCharacters)
         || !validText(event.value(QStringLiteral("name")), ProjectLimits::maximumTemplateNameCharacters)

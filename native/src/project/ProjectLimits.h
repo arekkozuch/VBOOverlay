@@ -21,6 +21,12 @@ inline constexpr qsizetype maximumTemplateCount = 128;
 inline constexpr qsizetype maximumJsonDepth = 32;
 inline constexpr qsizetype maximumStringCharacters = 4096;
 inline constexpr qsizetype maximumIdCharacters = 128;
+// Comparison-view persisted range/channel selection (KAN-41): a shared-progress
+// window in meters and up to 4 channel names. The distance bound is far beyond
+// any real track length -- it exists only to keep an imported/edited document
+// from carrying an unbounded or non-finite value, not to constrain real tracks.
+inline constexpr double maximumComparisonRangeMeters = 1'000'000.0;
+inline constexpr qsizetype maximumComparisonChannels = 4;
 inline constexpr qsizetype maximumTemplateNameCharacters = 160;
 inline constexpr qsizetype maximumTemplateDescriptionCharacters = 2048;
 

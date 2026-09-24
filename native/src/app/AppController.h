@@ -257,6 +257,15 @@ public:
     // channel-value difference.
     Q_INVOKABLE QVariantMap comparisonDeltaSeriesByProgress(double startProgress, double endProgress, int maximumPoints) const;
     [[nodiscard]] QStringList comparisonAvailableChannels() const;
+    // Persisted comparison-view range (shared-progress meters) and visible
+    // channel selection (KAN-41). Read once by QML when a pair's axis/channels
+    // first become valid after a document (re)opens; written on every change.
+    // Not part of ComparisonSlot: this is pair-level view state, not per-slot
+    // load state, and survives independently of which laps are selected.
+    Q_INVOKABLE QVariantMap comparisonPersistedRangeMeters() const;
+    Q_INVOKABLE QStringList comparisonPersistedChannels() const;
+    Q_INVOKABLE void persistComparisonRange(double startMeters, double endMeters);
+    Q_INVOKABLE void persistComparisonChannels(const QStringList &channels);
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;

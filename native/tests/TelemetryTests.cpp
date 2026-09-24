@@ -136,6 +136,7 @@ private slots:
     void presentsDayResultStatesWithoutVideo();
     void selectsIndependentComparisonLapsThroughQml();
     void restoresComparisonSelectionAfterReopen();
+    void restoresComparisonRangeAndChannelsAfterReopen();
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void comparesTwoLapsFromTheSameRun();
     void overlaysComparisonLapsOnASharedProgressAxis();
@@ -2951,6 +2952,59 @@ void TelemetryTests::restoresComparisonSelectionAfterReopen()
     QTRY_VERIFY(!reopenedAgain.outingLapsLoading());
     QTRY_COMPARE(reopenedAgain.comparisonSlots()[1].toMap().value("state").toString(), QString("ready"));
     QCOMPARE(reopenedAgain.comparisonSlots()[0].toMap().value("state").toString(), QString("empty"));
+}
+
+void TelemetryTests::restoresComparisonRangeAndChannelsAfterReopen()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("morning.vbo"), second = directory.filePath("afternoon.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("RoundTrip", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    QVariantMap a, b;
+    for (const auto &value : candidates) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (b.isEmpty() && row.value("runId") != a.value("runId")
+            && row.value("compatibilityGroupId") == a.value("compatibilityGroupId")) b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    // Nothing persisted yet: reading back gives an empty/default result, not a
+    // fabricated range or channel list.
+    QVERIFY(controller.comparisonPersistedRangeMeters().isEmpty());
+    QVERIFY(controller.comparisonPersistedChannels().isEmpty());
+
+    controller.persistComparisonRange(12.5, 87.25);
+    controller.persistComparisonChannels({"speed", "throttle"});
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(directory.filePath("day.fetproject"))));
+
+    AppController reopened(nullptr, directory.filePath("reopened-recovery.json"));
+    QTRY_VERIFY(!reopened.projectLoading());
+    QTRY_VERIFY(!reopened.outingLapsLoading());
+    const auto restoredRange = reopened.comparisonPersistedRangeMeters();
+    QCOMPARE(restoredRange.value("startMeters").toDouble(), 12.5);
+    QCOMPARE(restoredRange.value("endMeters").toDouble(), 87.25);
+    QCOMPARE(reopened.comparisonPersistedChannels(), QStringList({"speed", "throttle"}));
+    QVERIFY(!reopened.dirty());
+
+    // Malformed writes must not corrupt the document: an inverted/non-finite
+    // range or an over-budget channel list is rejected rather than silently
+    // clamped or truncated into something that looks plausible.
+    reopened.persistComparisonRange(50.0, 10.0);
+    QCOMPARE(reopened.comparisonPersistedRangeMeters().value("startMeters").toDouble(), 12.5);
+    reopened.persistComparisonRange(std::numeric_limits<double>::infinity(), 10.0);
+    QCOMPARE(reopened.comparisonPersistedRangeMeters().value("startMeters").toDouble(), 12.5);
+    reopened.persistComparisonChannels({"a", "b", "c", "d", "e"});
+    QCOMPARE(reopened.comparisonPersistedChannels(), QStringList({"speed", "throttle"}));
 }
 
 void TelemetryTests::preservesComparisonSlotAcrossFailuresAndReplacement()
