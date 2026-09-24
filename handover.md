@@ -65,8 +65,10 @@ baked in).
 
 ## Immediate next step
 
-**Uncommitted change, working tree, `main`, in sync with `origin/main`
-otherwise:**
+**Nothing uncommitted.** The marker-size tweak below was committed directly
+to `main` (not a feature branch/PR — the owner explicitly asked to "commit
+everything" for a clean handover) as `080d4ea` and pushed to `origin/main`.
+Working tree is clean; `main` is even with `origin/main`.
 
 ```diff
 --- a/native/qml/ComparisonOverlayMap.qml
@@ -91,25 +93,22 @@ otherwise:**
 
 Track-position marker dots in the shared A/B map, bumped 10px→16px
 (radius 5→8) with a heavier border, per the owner's direct request while
-interactively testing the merged build. Verified: `cmake --build
-build-native --parallel` + `ctest --test-dir build-native
+interactively testing the merged build. Verified before commit: `cmake
+--build build-native --parallel` + `ctest --test-dir build-native
 --output-on-failure`, 9/9 suites green (cosmetic QML-only change, no test
-asserts marker size specifically). **The owner had not yet relaunched the
-app to visually confirm this** when the session ended — their running
-instance (PID 16797 at handover time) was still on the pre-change binary,
-since QML changes need a relaunch, not just a rebuild.
+asserts marker size specifically). **Not yet visually confirmed by the
+owner** — their running instance (PID 16797 at handover time) was still on
+the pre-change binary when this was committed, since QML changes need an
+app relaunch, not just a rebuild, to take effect. If the very first thing
+you hear from the owner is that the dots still look small, check they
+relaunched from the freshly built `build-native/native/Flapped Ear
+Telemetry.app` before assuming the fix didn't take.
 
 **This was a "find bugs interactively" pass, not a Jira-tracked task** — no
-ticket was opened for it, and the owner said they'd batch small fixes like
-this into one commit rather than commit-per-tweak. **Do not commit this
-alone without checking with the owner first** — they may have more
-interactive-testing tweaks queued up, or may want to verify visually
-before it's committed. If they confirm it looks right and have no more
-small fixes queued, a plain local commit (no branch/PR ceremony needed for
-something this trivial, though the established convention this session
-has been branch+PR — ask if unsure) with a message like `fix: enlarge A/B
-comparison map position markers` is enough; run the build/test gate first
-regardless.
+ticket exists for it. If the owner reports more small cosmetic/interactive
+issues found this way, the established pattern from this session is: fix,
+rebuild, run the full test gate, then ask whether to commit immediately or
+batch with other small fixes — don't assume either way.
 
 ## Working conventions established this session (mostly carried over from
 the prior handover, still in force)
