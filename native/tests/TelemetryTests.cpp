@@ -3163,7 +3163,7 @@ void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
     QVERIFY(!firstDeltaSegment.isEmpty());
     // Both laps start their own elapsed-time reference at distance 0, so the
     // gap right at the start of the lap should be close to zero.
-    QVERIFY(std::abs(firstDeltaSegment.first().toMap().value("y").toDouble()) < 1.0);
+    QVERIFY(std::abs(firstDeltaSegment.first().toPointF().y()) < 1.0);
     QVERIFY(controller.comparisonTimeDeltaSeries(10, 5, 50).contains("reason"));
 
     QTRY_VERIFY2(chartObject->property("hasData").toBool(), "overlay chart should show data once both laps are ready");

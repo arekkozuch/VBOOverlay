@@ -26,13 +26,17 @@ Item {
     signal zoomRequested(real start, real end)
     signal hovered(real meters)
 
-    // Drawn at the current zoom resolution.
+    // Drawn at the current zoom resolution. One point per pixel is already
+    // more than a stroked line needs -- the earlier 1.5x oversampling only
+    // added avoidable work to the hottest path (recomputed on every zoom/pan
+    // step, times up to 4 visible rows).
+    readonly property int pointBudget: Math.max(100, Math.min(1200, Math.round(plotArea.width)))
     readonly property var seriesA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
-        0, root.channel, root.zoomStart, root.zoomEnd, Math.max(100, Math.round(plotArea.width * 1.5))))
+        0, root.channel, root.zoomStart, root.zoomEnd, root.pointBudget))
     readonly property var seriesB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
-        1, root.channel, root.zoomStart, root.zoomEnd, Math.max(100, Math.round(plotArea.width * 1.5))))
+        1, root.channel, root.zoomStart, root.zoomEnd, root.pointBudget))
     readonly property var deltaSeries: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonTimeDeltaSeries(
-        root.zoomStart, root.zoomEnd, Math.max(100, Math.round(plotArea.width * 1.5))))
+        root.zoomStart, root.zoomEnd, root.pointBudget))
 
     // Fetched once over the whole lap (depends on comparisonSlots/totalMeters,
     // NOT zoomStart/zoomEnd), used only to fix the value axis. Rescaling the
