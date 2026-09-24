@@ -1,0 +1,393 @@
+#include "telemetry/TrackProgress.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+namespace FlappedEar {
+namespace {
+
+double pointDistance(const QPointF &a, const QPointF &b) { return std::hypot(a.x() - b.x(), a.y() - b.y()); }
+
+// Resamples an ordered point sequence into `count` points evenly spaced by
+// arc length (points[0] included, points[count] implicitly wrapping back to
+// points[0] -- callers close the loop first if that is what they want).
+// Mirrors TrackInference::shape()'s resampling loop; kept as its own small
+// copy here rather than shared, so this module never risks perturbing that
+// separately-tested route-matching code.
+QVector<QPointF> resampleByArcLength(const QVector<QPointF> &points, const int count)
+{
+    if (points.size() < 2 || count < 1) return {};
+    QVector<double> cumulative{0};
+    cumulative.reserve(points.size());
+    for (qsizetype i = 1; i < points.size(); ++i)
+        cumulative.append(cumulative.last() + pointDistance(points[i - 1], points[i]));
+    const double length = cumulative.last();
+    if (!(length > 0)) return {};
+    QVector<QPointF> result;
+    result.reserve(count);
+    qsizetype segment = 1;
+    for (int i = 0; i < count; ++i) {
+        const double target = length * i / count;
+        while (segment + 1 < cumulative.size() && cumulative[segment] < target) ++segment;
+        const double span = cumulative[segment] - cumulative[segment - 1];
+        if (!(span > 0)) return {};
+        result.append(points[segment - 1]
+            + (points[segment] - points[segment - 1]) * ((target - cumulative[segment - 1]) / span));
+    }
+    return result;
+}
+
+struct SegmentProjection {
+    double fraction = 0.0;
+    double distance = 0.0;
+};
+
+SegmentProjection projectOntoSegment(const QPointF &point, const QPointF &a, const QPointF &b)
+{
+    const QPointF ab = b - a;
+    const double lengthSquared = ab.x() * ab.x() + ab.y() * ab.y();
+    if (!(lengthSquared > 1e-9)) return {0.0, pointDistance(point, a)};
+    const QPointF ap = point - a;
+    const double t = std::clamp((ap.x() * ab.x() + ap.y() * ab.y()) / lengthSquared, 0.0, 1.0);
+    return {t, pointDistance(point, QPointF(a.x() + ab.x() * t, a.y() + ab.y() * t))};
+}
+
+double progressAtSegment(const ProgressAxis &axis, const int segmentIndex, const double fraction)
+{
+    const int n = axis.points.size();
+    const int next = (segmentIndex + 1) % n;
+    const double segmentLength = next == 0
+        ? axis.lengthMeters - axis.cumulative[segmentIndex]
+        : axis.cumulative[next] - axis.cumulative[segmentIndex];
+    return axis.cumulative[segmentIndex] + segmentLength * fraction;
+}
+
+struct Candidate {
+    int index = -1;
+    double progressMeters = 0.0;
+    double distance = std::numeric_limits<double>::infinity();
+};
+
+// Best match within `count` axis segments starting at `startIndex` (ring
+// topology: indices wrap via modulo, count may exceed axis size).
+Candidate bestCandidateInRange(const ProgressAxis &axis, const QPointF &point, const int startIndex, const int count)
+{
+    Candidate best;
+    const int n = axis.points.size();
+    const int bounded = std::min(count, n);
+    for (int step = 0; step < bounded; ++step) {
+        const int index = ((startIndex + step) % n + n) % n;
+        const auto projection = projectOntoSegment(point, axis.points[index], axis.points[(index + 1) % n]);
+        if (projection.distance < best.distance) {
+            best.index = index;
+            best.distance = projection.distance;
+            best.progressMeters = progressAtSegment(axis, index, projection.fraction);
+        }
+    }
+    return best;
+}
+
+// Best match within the same window, excluding anything within
+// `minimumSeparation` axis points of `excludeIndex` -- a genuinely different
+// candidate crossing, not just a neighboring segment of the same one.
+Candidate secondBestCandidate(const ProgressAxis &axis, const QPointF &point, const int startIndex, const int count,
+    const int excludeIndex, const int minimumSeparation)
+{
+    Candidate best;
+    const int n = axis.points.size();
+    const int bounded = std::min(count, n);
+    for (int step = 0; step < bounded; ++step) {
+        const int index = ((startIndex + step) % n + n) % n;
+        int separation = std::abs(index - excludeIndex);
+        separation = std::min(separation, n - separation);
+        if (separation < minimumSeparation) continue;
+        const auto projection = projectOntoSegment(point, axis.points[index], axis.points[(index + 1) % n]);
+        if (projection.distance < best.distance) {
+            best.index = index;
+            best.distance = projection.distance;
+            best.progressMeters = progressAtSegment(axis, index, projection.fraction);
+        }
+    }
+    return best;
+}
+
+// Unit tangent of the axis at `index`, pointing toward index+1 (the
+// direction of travel around the track). Returns a zero vector for a
+// degenerate (repeated-point) segment, which the caller treats as "no
+// heading opinion" rather than a rejection.
+QPointF axisTangent(const ProgressAxis &axis, const int index)
+{
+    const int n = axis.points.size();
+    const QPointF edge = axis.points[(index + 1) % n] - axis.points[index];
+    const double length = std::hypot(edge.x(), edge.y());
+    return length > 1e-6 ? edge / length : QPointF(0, 0);
+}
+
+// A candidate match is rejected when the car's actual direction of travel
+// disagrees with the axis's direction there -- nearest-point distance alone
+// cannot distinguish the correct branch from a nearby parallel section
+// running the opposite way, or a hairpin's other side.
+bool headingAgrees(const ProgressAxis &axis, const int index, const QPointF &movementDirection, const double minimumCosine)
+{
+    const double movementLength = std::hypot(movementDirection.x(), movementDirection.y());
+    if (!(movementLength > 1e-6)) return true; // no heading evidence available: don't reject on it
+    const QPointF tangent = axisTangent(axis, index);
+    if (tangent.x() == 0 && tangent.y() == 0) return true; // degenerate axis segment: no opinion
+    const double cosine = (movementDirection.x() * tangent.x() + movementDirection.y() * tangent.y()) / movementLength;
+    return cosine >= minimumCosine;
+}
+
+} // namespace
+
+ProgressAxis buildProgressAxis(
+    const LapTrace &referenceTrace, const GeoCoordinate &origin, const TimingGate &gate,
+    const CancellationCheck &cancelled)
+{
+    throwIfCancelled(cancelled);
+    ProgressAxis axis;
+    if (referenceTrace.points.size() < 12) return axis;
+
+    QVector<QPointF> points;
+    points.reserve(referenceTrace.points.size());
+    for (const auto &sample : referenceTrace.points) {
+        const QPointF point(sample.eastMeters, sample.northMeters);
+        if (!std::isfinite(point.x()) || !std::isfinite(point.y())) return axis;
+        // Drop sub-0.5m GPS jitter: fine enough to preserve ~2m target
+        // spacing, coarse enough that exact-duplicate fixes don't produce a
+        // degenerate zero-length resampling segment.
+        if (points.isEmpty() || pointDistance(points.last(), point) >= 0.5) points.append(point);
+    }
+    if (points.size() < 12) return axis;
+    points.append(points.first()); // close the loop
+
+    double length = 0;
+    for (qsizetype i = 1; i < points.size(); ++i) length += pointDistance(points[i - 1], points[i]);
+    if (!(length >= 50 && length <= 30'000)) return axis;
+
+    const int pointCount = std::clamp(static_cast<int>(std::lround(length / 2.0)), 32, 15'000);
+    const QVector<QPointF> resampled = resampleByArcLength(points, pointCount);
+    if (resampled.size() != pointCount) return axis;
+
+    // Rotate so index 0 sits at the timing-gate crossing.
+    const GeoCoordinate gateMidpoint{
+        (gate.endpointA.latitudeDegrees + gate.endpointB.latitudeDegrees) / 2,
+        (gate.endpointA.longitudeDegrees + gate.endpointB.longitudeDegrees) / 2};
+    const MetricPoint gateLocal = projectCoordinate(gateMidpoint, origin);
+    int gateIndex = 0;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    for (int i = 0; i < resampled.size(); ++i) {
+        const double d = pointDistance(resampled[i], QPointF(gateLocal.eastMeters, gateLocal.northMeters));
+        if (d < bestDistance) { bestDistance = d; gateIndex = i; }
+    }
+    QVector<QPointF> rotated;
+    rotated.reserve(resampled.size());
+    for (int i = 0; i < resampled.size(); ++i) rotated.append(resampled[(gateIndex + i) % resampled.size()]);
+
+    axis.points = std::move(rotated);
+    QVector<double> cumulative{0};
+    cumulative.reserve(axis.points.size());
+    for (qsizetype i = 1; i < axis.points.size(); ++i)
+        cumulative.append(cumulative.last() + pointDistance(axis.points[i - 1], axis.points[i]));
+    axis.cumulative = std::move(cumulative);
+    axis.lengthMeters = length;
+    axis.spacingMeters = length / axis.points.size();
+    axis.origin = origin;
+    axis.valid = true;
+    return axis;
+}
+
+ProjectedSample projectSample(const ProgressAxis &axis, const QPointF &localPoint, const double telemetryTime,
+    const double speedMetersPerSecond, const QPointF &movementDirection, ProjectionContext &context)
+{
+    ProjectedSample result;
+    result.telemetryTime = telemetryTime;
+    if (!axis.valid || axis.points.size() < 8 || !(axis.spacingMeters > 0)) return result;
+    if (!std::isfinite(localPoint.x()) || !std::isfinite(localPoint.y()) || !std::isfinite(telemetryTime)) return result;
+
+    constexpr double coldStartProximityMeters = 20.0;
+    constexpr double lockProximityMeters = 20.0;
+    constexpr double ambiguityRatio = 0.7; // reject when the runner-up is within 70% of the best distance
+    constexpr double backwardToleranceMeters = 3.0;
+    constexpr double maximumGapSeconds = 5.0;
+    constexpr double coldStartSeparationMeters = 30.0;
+    constexpr double windowedSeparationMeters = 10.0;
+    // Direction must not disagree outright (>90 degrees off): this is what
+    // rejects a nearby parallel section running the opposite way. Cornering
+    // can still dip well below a "mostly agrees" bar, so this stays loose.
+    constexpr double minimumHeadingCosine = 0.0;
+
+    const double dt = context.hasLock ? telemetryTime - context.lastTelemetryTime : 0.0;
+    const bool coldStart = !context.hasLock || !(dt > 0) || dt > maximumGapSeconds;
+
+    if (coldStart) {
+        // No usable window yet (or too much time has passed to trust one):
+        // an unambiguous global match is required before locking on at all.
+        const auto best = bestCandidateInRange(axis, localPoint, 0, axis.points.size());
+        if (best.index < 0 || best.distance > coldStartProximityMeters) return result;
+        const int minimumSeparation = std::max(4, static_cast<int>(std::lround(coldStartSeparationMeters / axis.spacingMeters)));
+        const auto second = secondBestCandidate(axis, localPoint, 0, axis.points.size(), best.index, minimumSeparation);
+        if (second.index >= 0 && best.distance > second.distance * ambiguityRatio) return result;
+        if (!headingAgrees(axis, best.index, movementDirection, minimumHeadingCosine)) return result;
+        result.progressMeters = best.progressMeters;
+        result.valid = true;
+        context.hasLock = true;
+        context.lastProgressMeters = best.progressMeters;
+        context.lastTelemetryTime = telemetryTime;
+        return result;
+    }
+
+    // Adaptive, forward-biased local window: this bounded search is what
+    // keeps a hairpin apex or a nearby parallel straight from being confused
+    // with the correct branch -- the rest of the track is never considered.
+    const double expectedTravel = dt * std::max(0.0, speedMetersPerSecond);
+    const double forwardWindow = std::clamp(expectedTravel * 1.6, 15.0, 150.0);
+    const double backwardWindow = std::min(15.0, forwardWindow * 0.3);
+    const int forwardCount = std::max(1, static_cast<int>(std::lround(forwardWindow / axis.spacingMeters)));
+    const int backwardCount = std::max(1, static_cast<int>(std::lround(backwardWindow / axis.spacingMeters)));
+    const int n = axis.points.size();
+    const int centerIndex = ((static_cast<int>(std::lround(context.lastProgressMeters / axis.spacingMeters)) % n) + n) % n;
+    const int startIndex = centerIndex - backwardCount;
+    const int count = forwardCount + backwardCount + 1;
+
+    const auto best = bestCandidateInRange(axis, localPoint, startIndex, count);
+    if (best.index < 0 || best.distance > lockProximityMeters) return result; // lost lock; caller ends the segment
+    const int minimumSeparation = std::max(3, static_cast<int>(std::lround(windowedSeparationMeters / axis.spacingMeters)));
+    const auto second = secondBestCandidate(axis, localPoint, startIndex, count, best.index, minimumSeparation);
+    if (second.index >= 0 && best.distance > second.distance * ambiguityRatio) return result;
+    if (!headingAgrees(axis, best.index, movementDirection, minimumHeadingCosine)) return result;
+
+    double delta = best.progressMeters - context.lastProgressMeters;
+    if (delta < -axis.lengthMeters / 2) delta += axis.lengthMeters; // wrapped past the start/finish line
+    else if (delta > axis.lengthMeters / 2) delta -= axis.lengthMeters;
+    if (delta < -backwardToleranceMeters) return result; // meaningful backward jump: not trustworthy
+
+    result.progressMeters = best.progressMeters;
+    result.valid = true;
+    context.hasLock = true;
+    context.lastProgressMeters = best.progressMeters;
+    context.lastTelemetryTime = telemetryTime;
+    return result;
+}
+
+QVector<ProgressSegment> projectLapTrace(const ProgressAxis &axis, const TelemetrySession &session,
+    const double startTime, const double endTime, const CancellationCheck &cancelled)
+{
+    QVector<ProgressSegment> result;
+    if (!axis.valid) return result;
+    const auto latitudeSegments = session.sampledSegments("latitude", startTime, endTime, 4000);
+
+    ProgressSegment current;
+    ProjectionContext context;
+    std::optional<QPointF> previousLocal;
+    std::optional<double> previousTime;
+    const auto flush = [&] {
+        if (!current.samples.isEmpty()) { result.append(std::move(current)); current = {}; }
+        context = ProjectionContext{};
+        previousLocal.reset();
+        previousTime.reset();
+    };
+
+    for (const auto &segment : latitudeSegments) {
+        flush(); // a raw GPS gap between sampledSegments runs is never bridged
+        for (const auto &sample : segment) {
+            throwIfCancelled(cancelled);
+            const double time = sample.x();
+            const double latitude = sample.y();
+            const auto longitude = session.valueAt("longitude", time);
+            if (!longitude || !isValidCoordinate({latitude, *longitude})) { flush(); continue; }
+
+            const MetricPoint projected = projectCoordinate({latitude, *longitude}, axis.origin);
+            const QPointF local(projected.eastMeters, projected.northMeters);
+            double speed = 0.0;
+            QPointF movement(0, 0);
+            if (previousLocal && previousTime && time > *previousTime) {
+                movement = local - *previousLocal;
+                speed = std::hypot(movement.x(), movement.y()) / (time - *previousTime);
+            }
+            previousLocal = local;
+            previousTime = time;
+
+            const auto projectedSample = projectSample(axis, local, time, speed, movement, context);
+            if (!projectedSample.valid) { flush(); continue; }
+            current.samples.append(projectedSample);
+        }
+    }
+    if (!current.samples.isEmpty()) result.append(std::move(current));
+    return result;
+}
+
+namespace {
+
+std::optional<double> timeAtProgressInSegment(const ProgressSegment &segment, const double progress)
+{
+    const auto &samples = segment.samples;
+    if (samples.isEmpty() || progress < samples.first().progressMeters || progress > samples.last().progressMeters)
+        return std::nullopt;
+    const auto next = std::lower_bound(samples.cbegin(), samples.cend(), progress,
+        [](const ProjectedSample &sample, const double value) { return sample.progressMeters < value; });
+    if (next == samples.cbegin()) return next->telemetryTime;
+    if (next == samples.cend()) return std::prev(next)->telemetryTime;
+    const auto &previous = *std::prev(next);
+    const double span = next->progressMeters - previous.progressMeters;
+    if (!(span > 0)) return previous.telemetryTime;
+    const double ratio = (progress - previous.progressMeters) / span;
+    return previous.telemetryTime + (next->telemetryTime - previous.telemetryTime) * ratio;
+}
+
+std::optional<double> timeAtProgress(const QVector<ProgressSegment> &lap, const double progress)
+{
+    for (const auto &segment : lap) {
+        if (const auto time = timeAtProgressInSegment(segment, progress)) return time;
+    }
+    return std::nullopt;
+}
+
+// Reference "lap start" time: the exact progress=0 crossing when a segment's
+// coverage reaches it, otherwise the earliest projected sample as the
+// closest available approximation.
+double referenceTime(const QVector<ProgressSegment> &lap)
+{
+    if (const auto time = timeAtProgress(lap, 0.0)) return *time;
+    for (const auto &segment : lap)
+        if (!segment.samples.isEmpty()) return segment.samples.first().telemetryTime;
+    return 0.0;
+}
+
+} // namespace
+
+QVector<QVector<DeltaPoint>> computeDeltaSeries(const QVector<ProgressSegment> &lapA,
+    const QVector<ProgressSegment> &lapB, const double progressStepMeters, const CancellationCheck &cancelled)
+{
+    QVector<QVector<DeltaPoint>> result;
+    if (lapA.isEmpty() || lapB.isEmpty() || !(progressStepMeters > 0)) return result;
+
+    double maxProgress = 0;
+    bool haveCoverage = false;
+    for (const auto &segment : lapA)
+        if (!segment.samples.isEmpty()) { maxProgress = std::max(maxProgress, segment.samples.last().progressMeters); haveCoverage = true; }
+    for (const auto &segment : lapB)
+        if (!segment.samples.isEmpty()) { maxProgress = std::max(maxProgress, segment.samples.last().progressMeters); haveCoverage = true; }
+    if (!haveCoverage || !(maxProgress > 0)) return result;
+
+    const double referenceA = referenceTime(lapA);
+    const double referenceB = referenceTime(lapB);
+    const int steps = static_cast<int>(std::floor(maxProgress / progressStepMeters));
+
+    QVector<DeltaPoint> current;
+    for (int i = 0; i <= steps; ++i) {
+        throwIfCancelled(cancelled);
+        const double progress = std::min(maxProgress, i * progressStepMeters);
+        const auto timeA = timeAtProgress(lapA, progress);
+        const auto timeB = timeAtProgress(lapB, progress);
+        if (!timeA || !timeB) {
+            if (!current.isEmpty()) { result.append(std::move(current)); current = {}; }
+            continue;
+        }
+        current.append({progress, (*timeA - referenceA) - (*timeB - referenceB)});
+    }
+    if (!current.isEmpty()) result.append(std::move(current));
+    return result;
+}
+
+} // namespace FlappedEar
