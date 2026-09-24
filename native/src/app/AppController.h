@@ -6,7 +6,7 @@
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
-#include "telemetry/LapDistance.h"
+#include "telemetry/TrackProgress.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -241,19 +241,21 @@ public:
         int slot, const QString &channel, double startTime, double endTime, int maximumPoints) const;
     Q_INVOKABLE QVariantList comparisonLapTrack(int slot) const;
     // Overlay comparison: both slots' GPS traces sharing one normalization
-    // (so they draw to scale on one map), and a channel series parameterized
-    // by distance into the lap (so a corner lines up at roughly the same x
-    // position for both laps) rather than by raw time or lap-time fraction.
+    // (so they draw to scale on one map), and channel/delta series
+    // parameterized by the shared cross-lap track-progress axis (KAN-31/32/33)
+    // so a corner lines up at the same position for both laps even when they
+    // take different racing lines -- not just "meters since each lap's own
+    // start" (see the now-removed LapDistance-based methods this replaced).
     Q_INVOKABLE QVariantList comparisonOverlayTrack(int slot) const;
-    Q_INVOKABLE QVariantMap comparisonPositionAtDistance(int slot, double distanceMeters) const;
-    Q_INVOKABLE QVariantMap comparisonLapSeriesByDistance(
-        int slot, const QString &channel, double startMeters, double endMeters, int maximumPoints) const;
-    Q_INVOKABLE double comparisonLapDistanceTotal(int slot) const;
-    // Cumulative time gap between the two laps at the same distance into the
-    // lap (A minus B; positive means A took longer to reach that point, i.e.
-    // A is behind there) -- the classic lap-delta trace, not a per-sample
+    Q_INVOKABLE QVariantMap comparisonPositionAtProgress(int slot, double progressMeters) const;
+    Q_INVOKABLE QVariantMap comparisonChannelSeriesByProgress(
+        int slot, const QString &channel, double startProgress, double endProgress, int maximumPoints) const;
+    Q_INVOKABLE double comparisonProgressAxisLength() const;
+    // Cumulative time gap between the two laps at the same shared progress
+    // (A minus B; positive means A took longer to reach that point, i.e. A is
+    // behind there) -- the classic lap-delta trace, not a per-sample
     // channel-value difference.
-    Q_INVOKABLE QVariantMap comparisonTimeDeltaSeries(double startMeters, double endMeters, int maximumPoints) const;
+    Q_INVOKABLE QVariantMap comparisonDeltaSeriesByProgress(double startProgress, double endProgress, int maximumPoints) const;
     [[nodiscard]] QStringList comparisonAvailableChannels() const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
@@ -512,12 +514,21 @@ private:
         std::shared_ptr<const TelemetrySession> session;
         TrackGeometry geometry;
         QVariantList track;
-        FlappedEar::LapDistanceProfile distanceProfile;
+        // Only populated when readOutingLapDetail's deriveReferenceGate is
+        // true (the comparison path): the ingredients buildProgressAxis needs
+        // to build the shared cross-lap alignment axis. Deriving the full
+        // LapSession (a whole-file GPS scan) is not cheap enough to redo on
+        // every comparison-slot load synchronously on the UI thread, so it
+        // happens once here, in the same background worker that already
+        // loads/verifies the source.
+        FlappedEar::LapTrace referenceTrace;
+        FlappedEar::TimingGate referenceGate;
+        bool hasReferenceGate = false;
         QString error;
     };
     static OutingLapDetailResult readOutingLapDetail(const QJsonObject &source, const QString &projectPath,
         const QVariantMap &row, quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation,
-        const std::shared_ptr<TelemetrySessionCache> &cache);
+        const std::shared_ptr<TelemetrySessionCache> &cache, bool deriveReferenceGate = false);
     struct ComparisonSlot {
         QVariantMap row;
         QJsonObject source;
@@ -528,7 +539,9 @@ private:
         std::shared_ptr<const TelemetrySession> session;
         TrackGeometry geometry;
         QVariantList track;
-        FlappedEar::LapDistanceProfile distanceProfile;
+        FlappedEar::LapTrace referenceTrace;
+        FlappedEar::TimingGate referenceGate;
+        bool hasReferenceGate = false;
     };
     void initializeComparisonLaps();
     void loadComparisonLap();
@@ -544,6 +557,18 @@ private:
     mutable quint64 m_comparisonSharedGeometryRequestA = 0;
     mutable quint64 m_comparisonSharedGeometryRequestB = 0;
     mutable std::array<QVariantList, 2> m_comparisonOverlayTrackCache;
+    // Same lazy-rebuild pattern: the shared progress axis is built once from
+    // slot 0's reference trace/gate (both slots are already verified
+    // compatible, i.e. the same physical gate), and both slots' telemetry are
+    // projected onto it. Building the axis and projecting one lap's telemetry
+    // are both cheap (resampling + a bounded per-lap scan); only the earlier,
+    // whole-file gate/lap derivation that produced referenceTrace/referenceGate
+    // was expensive enough to need the background worker.
+    void ensureComparisonProgressAxis() const;
+    mutable FlappedEar::ProgressAxis m_comparisonProgressAxis;
+    mutable quint64 m_comparisonProgressAxisRequestA = 0;
+    mutable quint64 m_comparisonProgressAxisRequestB = 0;
+    mutable std::array<QVector<FlappedEar::ProgressSegment>, 2> m_comparisonProgressTraceCache;
     bool m_comparisonRestoreAttempted = false;
     std::shared_ptr<TelemetrySessionCache> m_analysisSourceCache = std::make_shared<TelemetrySessionCache>();
     std::array<ComparisonSlot, 2> m_comparisonSlots;

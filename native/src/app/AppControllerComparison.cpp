@@ -1,11 +1,12 @@
 #include "AppController.h"
 #include "project/EventProjectCodec.h"
 #include "project/ProjectLimits.h"
-#include "telemetry/LapDistance.h"
+#include "telemetry/TrackProgress.h"
 
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -146,7 +147,8 @@ void AppController::failComparisonLap(const int index, const QString &reason)
     if (m_comparisonPending && m_comparisonLoadingSlot == index && m_comparisonCancellation)
         m_comparisonCancellation->store(true);
     slot.request = ++m_comparisonRequest;
-    slot.session.reset(); slot.geometry = {}; slot.track.clear(); slot.distanceProfile = {};
+    slot.session.reset(); slot.geometry = {}; slot.track.clear();
+    slot.referenceTrace = {}; slot.referenceGate = {}; slot.hasReferenceGate = false;
     slot.state = "error"; slot.error = reason;
 }
 
@@ -276,89 +278,134 @@ QVariantList AppController::comparisonOverlayTrack(const int slot) const
     return m_comparisonOverlayTrackCache[slot];
 }
 
-QVariantMap AppController::comparisonPositionAtDistance(const int slot, const double distanceMeters) const
+namespace {
+// Discrete/categorical channels (a gear number, a flag) must never be
+// linearly interpolated -- halfway between gear 2 and gear 3 is not gear 2.5.
+// Analog channels (speed, throttle %, RPM, G, temperature, HR) are fine to
+// interpolate. Name-based, not a full provenance system: there is no
+// existing "measured vs calculated" field on TelemetryChannel to draw on,
+// so this is deliberately the minimal safety behavior the acceptance
+// criterion actually requires (never fabricate/misrepresent a value),
+// not a claim that full channel provenance metadata exists.
+bool isDiscreteChannel(const QString &channel)
+{
+    return channel.compare("gear", Qt::CaseInsensitive) == 0;
+}
+}
+
+void AppController::ensureComparisonProgressAxis() const
+{
+    const auto &a = m_comparisonSlots[0];
+    const auto &b = m_comparisonSlots[1];
+    if (a.state != "ready" || b.state != "ready" || !a.session || !b.session) {
+        if (m_comparisonProgressAxisRequestA != 0 || m_comparisonProgressAxisRequestB != 0) {
+            m_comparisonProgressAxis = {};
+            m_comparisonProgressAxisRequestA = 0;
+            m_comparisonProgressAxisRequestB = 0;
+            m_comparisonProgressTraceCache = {};
+        }
+        return;
+    }
+    if (m_comparisonProgressAxisRequestA == a.request && m_comparisonProgressAxisRequestB == b.request) return;
+
+    m_comparisonProgressAxis = {};
+    m_comparisonProgressTraceCache = {};
+    if (a.hasReferenceGate) {
+        const GeoCoordinate origin{
+            (a.referenceGate.endpointA.latitudeDegrees + a.referenceGate.endpointB.latitudeDegrees) / 2.0,
+            (a.referenceGate.endpointA.longitudeDegrees + a.referenceGate.endpointB.longitudeDegrees) / 2.0};
+        m_comparisonProgressAxis = buildProgressAxis(a.referenceTrace, origin, a.referenceGate);
+    }
+    if (m_comparisonProgressAxis.valid) {
+        m_comparisonProgressTraceCache[0] = projectLapTrace(
+            m_comparisonProgressAxis, *a.session, a.row.value("startTime").toDouble(), a.row.value("endTime").toDouble());
+        m_comparisonProgressTraceCache[1] = projectLapTrace(
+            m_comparisonProgressAxis, *b.session, b.row.value("startTime").toDouble(), b.row.value("endTime").toDouble());
+    }
+    m_comparisonProgressAxisRequestA = a.request;
+    m_comparisonProgressAxisRequestB = b.request;
+}
+
+QVariantMap AppController::comparisonPositionAtProgress(const int slot, const double progressMeters) const
 {
     if (slot < 0 || slot > 1) return {};
     const auto &comparisonSlot = m_comparisonSlots[slot];
-    if (!comparisonSlot.session || comparisonSlot.state != "ready" || !comparisonSlot.distanceProfile.valid)
-        return {};
+    if (!comparisonSlot.session || comparisonSlot.state != "ready") return {};
+    ensureComparisonProgressAxis();
+    if (!m_comparisonProgressAxis.valid) return {};
+    const auto time = timeAtProgress(m_comparisonProgressTraceCache[slot], progressMeters);
+    if (!time) return {};
     ensureComparisonSharedGeometry();
     if (!m_comparisonSharedGeometry.valid) return {};
-    const auto time = timeAtDistance(comparisonSlot.distanceProfile, distanceMeters);
-    if (!time) return {};
     const auto point = FlappedEar::currentTrackPoint(*comparisonSlot.session, *time, m_comparisonSharedGeometry);
     if (!point) return {};
     return {{"x", point->x()}, {"y", point->y()}};
 }
 
-double AppController::comparisonLapDistanceTotal(const int slot) const
+double AppController::comparisonProgressAxisLength() const
 {
-    if (slot < 0 || slot > 1) return 0.0;
-    return m_comparisonSlots[slot].distanceProfile.totalMeters;
+    ensureComparisonProgressAxis();
+    return m_comparisonProgressAxis.valid ? m_comparisonProgressAxis.lengthMeters : 0.0;
 }
 
-QVariantMap AppController::comparisonTimeDeltaSeries(
-    const double startMeters, const double endMeters, const int maximumPoints) const
+QVariantMap AppController::comparisonDeltaSeriesByProgress(
+    const double startProgress, const double endProgress, const int maximumPoints) const
 {
     if (maximumPoints < 2) return {};
-    const auto &a = m_comparisonSlots[0];
-    const auto &b = m_comparisonSlots[1];
-    if (a.state != "ready" || b.state != "ready" || !a.distanceProfile.valid || !b.distanceProfile.valid) return {};
-    if (!std::isfinite(startMeters) || !std::isfinite(endMeters) || endMeters <= startMeters)
+    ensureComparisonProgressAxis();
+    if (!m_comparisonProgressAxis.valid) return {};
+    if (!std::isfinite(startProgress) || !std::isfinite(endProgress) || endProgress <= startProgress)
         return {{"reason", QStringLiteral("invalidRange")}};
 
-    const double startTimeA = a.row.value("startTime").toDouble();
-    const double startTimeB = b.row.value("startTime").toDouble();
-    const double span = endMeters - startMeters;
-    QVariantList points;
+    const auto deltaSegments = computeDeltaSeries(
+        m_comparisonProgressTraceCache[0], m_comparisonProgressTraceCache[1], (endProgress - startProgress) / maximumPoints);
+    QVariantList segments;
     double minimum = 0.0, maximum = 0.0;
     bool haveExtent = false;
-    for (int index = 0; index < maximumPoints; ++index) {
-        const double targetMeters = startMeters + span * index / (maximumPoints - 1);
-        const auto timeA = timeAtDistance(a.distanceProfile, targetMeters);
-        const auto timeB = timeAtDistance(b.distanceProfile, targetMeters);
-        if (!timeA || !timeB) continue;
-        const double delta = (*timeA - startTimeA) - (*timeB - startTimeB);
-        if (!haveExtent) { minimum = maximum = delta; haveExtent = true; }
-        else { minimum = std::min(minimum, delta); maximum = std::max(maximum, delta); }
-        // QPointF, not {"x":..,"y":..}: this runs for every point of every
-        // visible row on every zoom/pan step, and a QVariantMap's QString-keyed
-        // QMap is dramatically more expensive to build per point than a plain
-        // value type. QML reads point.x/point.y the same way either way.
-        points.append(QPointF((targetMeters - startMeters) / span, delta));
+    for (const auto &deltaSegment : deltaSegments) {
+        QVariantList points;
+        for (const auto &point : deltaSegment) {
+            if (point.progressMeters < startProgress || point.progressMeters > endProgress) continue;
+            if (!haveExtent) { minimum = maximum = point.deltaSeconds; haveExtent = true; }
+            else { minimum = std::min(minimum, point.deltaSeconds); maximum = std::max(maximum, point.deltaSeconds); }
+            points.append(QPointF((point.progressMeters - startProgress) / (endProgress - startProgress), point.deltaSeconds));
+        }
+        if (!points.isEmpty()) segments.append(QVariant::fromValue(points));
     }
-    if (points.isEmpty()) return {};
+    if (segments.isEmpty()) return {};
     return {
-        {"segments", QVariantList{QVariant::fromValue(points)}},
+        {"segments", segments},
         {"minimum", minimum},
         {"maximum", maximum},
         {"unit", QStringLiteral("s")},
     };
 }
 
-QVariantMap AppController::comparisonLapSeriesByDistance(const int slot, const QString &channel,
-    const double startMeters, const double endMeters, const int maximumPoints) const
+QVariantMap AppController::comparisonChannelSeriesByProgress(const int slot, const QString &channel,
+    const double startProgress, const double endProgress, const int maximumPoints) const
 {
     if (slot < 0 || slot > 1 || maximumPoints < 2) return {};
     const auto &comparisonSlot = m_comparisonSlots[slot];
     if (!comparisonSlot.session || comparisonSlot.state != "ready") return {};
-    if (!comparisonSlot.distanceProfile.valid) return {{"reason", QStringLiteral("channelMissing")}};
-    if (!std::isfinite(startMeters) || !std::isfinite(endMeters) || endMeters <= startMeters)
-        return {{"reason", QStringLiteral("invalidRange")}};
     const auto &session = *comparisonSlot.session;
     const QString resolved = session.aliases.value(channel, channel);
     const auto channelIterator = session.channels.constFind(resolved);
     if (channelIterator == session.channels.cend()) return {{"reason", QStringLiteral("channelMissing")}};
+    if (!std::isfinite(startProgress) || !std::isfinite(endProgress) || endProgress <= startProgress)
+        return {{"reason", QStringLiteral("invalidRange")}};
+    ensureComparisonProgressAxis();
+    if (!m_comparisonProgressAxis.valid) return {{"reason", QStringLiteral("channelMissing")}};
 
-    const double span = endMeters - startMeters;
+    const auto interpolation = isDiscreteChannel(channel) ? InterpolationMode::Previous : InterpolationMode::Linear;
+    const double span = endProgress - startProgress;
     QVariantList segments;
     QVariantList current;
     double minimum = 0.0, maximum = 0.0;
     bool haveExtent = false;
     for (int index = 0; index < maximumPoints; ++index) {
-        const double targetMeters = startMeters + span * index / (maximumPoints - 1);
-        const auto time = timeAtDistance(comparisonSlot.distanceProfile, targetMeters);
-        const auto value = time ? session.valueAt(channel, *time) : std::nullopt;
+        const double targetProgress = startProgress + span * index / (maximumPoints - 1);
+        const auto time = timeAtProgress(m_comparisonProgressTraceCache[slot], targetProgress);
+        const auto value = time ? session.valueAt(channel, *time, interpolation) : std::nullopt;
         if (!time || !value) {
             if (!current.isEmpty()) { segments.append(QVariant::fromValue(current)); current.clear(); }
             continue;
@@ -369,7 +416,7 @@ QVariantMap AppController::comparisonLapSeriesByDistance(const int slot, const Q
         // visible row on every zoom/pan step, and a QVariantMap's QString-keyed
         // QMap is dramatically more expensive to build per point than a plain
         // value type. QML reads point.x/point.y the same way either way.
-        current.append(QPointF((targetMeters - startMeters) / span, *value));
+        current.append(QPointF((targetProgress - startProgress) / span, *value));
     }
     if (!current.isEmpty()) segments.append(QVariant::fromValue(current));
     if (segments.isEmpty()) return {};
@@ -403,7 +450,9 @@ void AppController::initializeComparisonLaps()
                 slot.session = std::move(result.session);
                 slot.geometry = std::move(result.geometry);
                 slot.track = std::move(result.track);
-                slot.distanceProfile = std::move(result.distanceProfile);
+                slot.referenceTrace = std::move(result.referenceTrace);
+                slot.referenceGate = std::move(result.referenceGate);
+                slot.hasReferenceGate = result.hasReferenceGate;
                 slot.error = result.error;
                 slot.state = slot.session ? "ready" : "error";
                 if (slot.state == "ready")
@@ -437,7 +486,7 @@ void AppController::loadComparisonLap()
         m_comparisonPending = true;
         m_comparisonLoadingSlot = i;
         m_comparisonWatcher.setFuture(QtConcurrent::run([source, projectPath, row, request, cancellation, cache = m_analysisSourceCache] {
-            return readOutingLapDetail(source, projectPath, row, request, cancellation, cache);
+            return readOutingLapDetail(source, projectPath, row, request, cancellation, cache, /*deriveReferenceGate=*/true);
         }));
         return;
     }

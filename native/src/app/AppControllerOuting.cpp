@@ -965,7 +965,8 @@ void AppController::loadOutingLapDetail()
 
 AppController::OutingLapDetailResult AppController::readOutingLapDetail(const QJsonObject &source,
     const QString &projectPath, const QVariantMap &row, const quint64 request,
-    const std::shared_ptr<std::atomic_bool> &cancellation, const std::shared_ptr<TelemetrySessionCache> &cache)
+    const std::shared_ptr<std::atomic_bool> &cancellation, const std::shared_ptr<TelemetrySessionCache> &cache,
+    const bool deriveReferenceGate)
 {
     const auto start = row.value("startTime").toDouble();
     const auto end = row.value("endTime").toDouble();
@@ -1025,7 +1026,23 @@ AppController::OutingLapDetailResult AppController::readOutingLapDetail(const QJ
         }
         result.geometry = buildTrackGeometry(mapSession, cancelled);
         result.track = buildTrackSegments(*session, start, end, result.geometry, cancelled);
-        result.distanceProfile = buildLapDistanceProfile(*session, start, end, cancelled);
+        if (deriveReferenceGate) {
+            // Only the comparison path needs this: a whole-file gate/lap scan
+            // to source buildProgressAxis's ingredients, not cheap enough to
+            // redo synchronously per slot, so it happens here alongside the
+            // source load/verification this worker already does.
+            const auto laps = deriveSourceLapSession(*session, {}, cancelled);
+            if (laps.selectedStartGate) {
+                const int lapNumber = row.value("lapNumber").toInt();
+                const auto traceIt = std::find_if(laps.lapTraces.cbegin(), laps.lapTraces.cend(),
+                    [lapNumber](const LapTrace &trace) { return trace.lapNumber == lapNumber; });
+                if (traceIt != laps.lapTraces.cend()) {
+                    result.referenceTrace = *traceIt;
+                    result.referenceGate = *laps.selectedStartGate;
+                    result.hasReferenceGate = true;
+                }
+            }
+        }
         throwIfCancelled(cancelled);
         result.session = std::move(session);
     } catch (const std::exception &error) {

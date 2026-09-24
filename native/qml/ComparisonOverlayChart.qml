@@ -9,9 +9,12 @@ import QtQuick.Layouts
 // state is owned by the parent (not this row) so multiple channel rows and
 // the track map all move together: this row only requests changes via
 // signals and renders whatever zoomStart/zoomEnd/hoverDistanceMeters it is
-// given. channel === "Δ time" is a synthetic pseudo-channel: the cumulative
-// time gap between the laps (comparisonTimeDeltaSeries) rather than a
-// per-lap telemetry channel, drawn as one line instead of an A/B overlay.
+// given. Meters here means shared track progress (KAN-31/32/33), not each
+// lap's own distance-into-lap: a corner sits at the same x for both laps
+// even on different racing lines. channel === "Δ time" is a synthetic
+// pseudo-channel: the cumulative time gap between the laps
+// (comparisonDeltaSeriesByProgress) rather than a per-lap telemetry channel,
+// drawn as one line instead of an A/B overlay.
 Item {
     id: root
     required property string channel
@@ -31,11 +34,11 @@ Item {
     // added avoidable work to the hottest path (recomputed on every zoom/pan
     // step, times up to 4 visible rows).
     readonly property int pointBudget: Math.max(100, Math.min(1200, Math.round(plotArea.width)))
-    readonly property var seriesA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+    readonly property var seriesA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonChannelSeriesByProgress(
         0, root.channel, root.zoomStart, root.zoomEnd, root.pointBudget))
-    readonly property var seriesB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+    readonly property var seriesB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonChannelSeriesByProgress(
         1, root.channel, root.zoomStart, root.zoomEnd, root.pointBudget))
-    readonly property var deltaSeries: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonTimeDeltaSeries(
+    readonly property var deltaSeries: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonDeltaSeriesByProgress(
         root.zoomStart, root.zoomEnd, root.pointBudget))
 
     // Fetched once over the whole lap (depends on comparisonSlots/totalMeters,
@@ -43,11 +46,11 @@ Item {
     // axis to whatever sliver of data is visible while zooming/panning makes
     // an actually-tiny wobble look like a huge spike, and refitting it on
     // every wheel tick was also needless recompute on top of the zoom refetch.
-    readonly property var fullRangeA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+    readonly property var fullRangeA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonChannelSeriesByProgress(
         0, root.channel, 0, root.totalMeters, 300))
-    readonly property var fullRangeB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+    readonly property var fullRangeB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonChannelSeriesByProgress(
         1, root.channel, 0, root.totalMeters, 300))
-    readonly property var fullRangeDelta: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonTimeDeltaSeries(
+    readonly property var fullRangeDelta: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonDeltaSeriesByProgress(
         0, root.totalMeters, 300))
 
     readonly property bool hasData: root.isDeltaTime

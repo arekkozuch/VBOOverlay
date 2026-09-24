@@ -5,8 +5,9 @@ import QtQuick.Controls
 
 // One track map showing both A/B lap traces to the same scale (a shared
 // bounding-box normalization, not each lap filling the frame on its own).
-// hoverDistanceMeters (-1 when idle) drives a position marker per lap at
-// the corresponding point along each lap's own trace.
+// hoverDistanceMeters (-1 when idle; a shared track-progress value, not each
+// lap's own distance-into-lap) drives a position marker per lap at the
+// corresponding point on the shared progress axis (KAN-37/38).
 Rectangle {
     id: root
     property real hoverDistanceMeters: -1
@@ -79,7 +80,7 @@ Rectangle {
                 id: marker
                 required property int index
                 readonly property var point: root.hoverDistanceMeters >= 0
-                    ? appController.comparisonPositionAtDistance(index, root.hoverDistanceMeters) : ({})
+                    ? appController.comparisonPositionAtProgress(index, root.hoverDistanceMeters) : ({})
                 visible: point.x !== undefined
                 width: 10
                 height: 10
