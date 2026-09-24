@@ -82,11 +82,12 @@ Rectangle {
                 readonly property var point: root.hoverDistanceMeters >= 0
                     ? appController.comparisonPositionAtProgress(index, root.hoverDistanceMeters) : ({})
                 visible: point.x !== undefined
-                width: 10
-                height: 10
-                radius: 5
+                width: 16
+                height: 16
+                radius: 8
                 color: index === 0 ? "#55e6a5" : "#58bfff"
                 border.color: "#0c150f"
+                border.width: 2
                 x: Number(point.x || 0) * mapArea.width - width / 2
                 y: Number(point.y || 0) * mapArea.height - height / 2
             }
