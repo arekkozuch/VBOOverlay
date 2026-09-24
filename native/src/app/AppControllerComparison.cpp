@@ -321,7 +321,11 @@ QVariantMap AppController::comparisonTimeDeltaSeries(
         const double delta = (*timeA - startTimeA) - (*timeB - startTimeB);
         if (!haveExtent) { minimum = maximum = delta; haveExtent = true; }
         else { minimum = std::min(minimum, delta); maximum = std::max(maximum, delta); }
-        points.append(QVariantMap{{"x", (targetMeters - startMeters) / span}, {"y", delta}});
+        // QPointF, not {"x":..,"y":..}: this runs for every point of every
+        // visible row on every zoom/pan step, and a QVariantMap's QString-keyed
+        // QMap is dramatically more expensive to build per point than a plain
+        // value type. QML reads point.x/point.y the same way either way.
+        points.append(QPointF((targetMeters - startMeters) / span, delta));
     }
     if (points.isEmpty()) return {};
     return {
@@ -361,7 +365,11 @@ QVariantMap AppController::comparisonLapSeriesByDistance(const int slot, const Q
         }
         if (!haveExtent) { minimum = maximum = *value; haveExtent = true; }
         else { minimum = std::min(minimum, *value); maximum = std::max(maximum, *value); }
-        current.append(QVariantMap{{"x", (targetMeters - startMeters) / span}, {"y", *value}});
+        // QPointF, not {"x":..,"y":..}: this runs for every point of every
+        // visible row on every zoom/pan step, and a QVariantMap's QString-keyed
+        // QMap is dramatically more expensive to build per point than a plain
+        // value type. QML reads point.x/point.y the same way either way.
+        current.append(QPointF((targetMeters - startMeters) / span, *value));
     }
     if (!current.isEmpty()) segments.append(QVariant::fromValue(current));
     if (segments.isEmpty()) return {};
