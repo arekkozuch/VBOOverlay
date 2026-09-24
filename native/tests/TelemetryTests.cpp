@@ -138,7 +138,7 @@ private slots:
     void restoresComparisonSelectionAfterReopen();
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void comparesTwoLapsFromTheSameRun();
-    void overlaysComparisonLapsOnASharedDistanceAxis();
+    void overlaysComparisonLapsOnASharedProgressAxis();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
     void cancelsSupersededComparisonWaitingForCache();
@@ -3085,12 +3085,14 @@ void TelemetryTests::comparesTwoLapsFromTheSameRun()
         b.value("endTime").toDouble(), 200).isEmpty());
 }
 
-void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
+void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()
 {
-    // The A/B comparison screen overlays both laps on one chart/map instead of
-    // two independent, unaligned side-by-side panels. Cover the invokables
-    // that make that possible: a shared-geometry track pair, a distance-into-
-    // lap channel series, and the available-channel intersection.
+    // The A/B comparison screen overlays both laps on one chart/map, aligned
+    // on the shared cross-lap track-progress axis (KAN-31/32/33) rather than
+    // two independent, unaligned side-by-side panels or each lap's own
+    // distance-into-lap. Cover the invokables that make that possible: a
+    // shared-geometry track pair, a progress-parameterized channel series,
+    // and the available-channel intersection.
     QTemporaryDir directory; QVERIFY(directory.isValid());
     QSettings settings; settings.clear(); settings.sync();
     const auto path = directory.filePath("session.vbo");
@@ -3107,8 +3109,8 @@ void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
     QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
     QQmlComponent chartComponent(&engine), mapComponent(&engine);
     chartComponent.setData("import QtQuick\nComparisonOverlayChart { channel: \"latitude\"; width: 300; height: 200; "
-        "totalMeters: (appController.comparisonSlots, Math.max(1, appController.comparisonLapDistanceTotal(0), "
-        "appController.comparisonLapDistanceTotal(1))); zoomEnd: totalMeters }",
+        "totalMeters: (appController.comparisonSlots, Math.max(1, appController.comparisonProgressAxisLength())); "
+        "zoomEnd: totalMeters }",
         QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
     mapComponent.setData("import QtQuick\nComparisonOverlayMap { width: 200; height: 200 }",
         QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
@@ -3125,8 +3127,7 @@ void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
     QTRY_VERIFY(controller.comparisonPairReady());
 
     QCOMPARE(controller.comparisonAvailableChannels(), controller.m_comparisonSlots[0].session->channelNames());
-    QVERIFY(controller.comparisonLapDistanceTotal(0) > 0.0);
-    QVERIFY(controller.comparisonLapDistanceTotal(1) > 0.0);
+    QVERIFY2(controller.comparisonProgressAxisLength() > 0.0, "the shared progress axis should build from slot 0's lap");
 
     QVERIFY2(!controller.comparisonOverlayTrack(0).isEmpty(), "overlay track 0 should not be empty");
     QVERIFY2(!controller.comparisonOverlayTrack(1).isEmpty(), "overlay track 1 should not be empty");
@@ -3140,31 +3141,30 @@ void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
         }
     }
 
-    const auto seriesA = controller.comparisonLapSeriesByDistance(
-        0, "latitude", 0, controller.comparisonLapDistanceTotal(0), 100);
-    const auto seriesB = controller.comparisonLapSeriesByDistance(
-        1, "latitude", 0, controller.comparisonLapDistanceTotal(1), 100);
-    QVERIFY2(!seriesA.value("segments").toList().isEmpty(), "distance series 0 should not be empty");
-    QVERIFY2(!seriesB.value("segments").toList().isEmpty(), "distance series 1 should not be empty");
+    const double axisLength = controller.comparisonProgressAxisLength();
+    const auto seriesA = controller.comparisonChannelSeriesByProgress(0, "latitude", 0, axisLength, 100);
+    const auto seriesB = controller.comparisonChannelSeriesByProgress(1, "latitude", 0, axisLength, 100);
+    QVERIFY2(!seriesA.value("segments").toList().isEmpty(), "progress series 0 should not be empty");
+    QVERIFY2(!seriesB.value("segments").toList().isEmpty(), "progress series 1 should not be empty");
 
-    // A midpoint distance should resolve to a real position on the shared map
-    // for both laps -- this is what drives the hover position markers.
-    const auto midpointA = controller.comparisonPositionAtDistance(0, controller.comparisonLapDistanceTotal(0) / 2);
-    const auto midpointB = controller.comparisonPositionAtDistance(1, controller.comparisonLapDistanceTotal(1) / 2);
+    // A midpoint progress value should resolve to a real position on the
+    // shared map for both laps -- this is what drives the hover markers.
+    const auto midpointA = controller.comparisonPositionAtProgress(0, axisLength / 2);
+    const auto midpointB = controller.comparisonPositionAtProgress(1, axisLength / 2);
     QVERIFY(midpointA.contains("x") && midpointA.contains("y"));
     QVERIFY(midpointB.contains("x") && midpointB.contains("y"));
 
     // The delta-time trace: cumulative time gap between the laps at the same
-    // distance into the lap, not a per-sample channel-value difference.
-    const auto deltaSeries = controller.comparisonTimeDeltaSeries(0, controller.comparisonLapDistanceTotal(0), 50);
+    // shared progress, not a per-sample channel-value difference.
+    const auto deltaSeries = controller.comparisonDeltaSeriesByProgress(0, axisLength, 50);
     QVERIFY2(!deltaSeries.value("segments").toList().isEmpty(), "time delta series should not be empty");
     QCOMPARE(deltaSeries.value("unit").toString(), QString("s"));
     const auto firstDeltaSegment = deltaSeries.value("segments").toList().first().toList();
     QVERIFY(!firstDeltaSegment.isEmpty());
-    // Both laps start their own elapsed-time reference at distance 0, so the
+    // Both laps start their own elapsed-time reference at progress 0, so the
     // gap right at the start of the lap should be close to zero.
     QVERIFY(std::abs(firstDeltaSegment.first().toPointF().y()) < 1.0);
-    QVERIFY(controller.comparisonTimeDeltaSeries(10, 5, 50).contains("reason"));
+    QVERIFY(controller.comparisonDeltaSeriesByProgress(10, 5, 50).contains("reason"));
 
     QTRY_VERIFY2(chartObject->property("hasData").toBool(), "overlay chart should show data once both laps are ready");
     QTRY_VERIFY2(!mapObject->property("trackA").toList().isEmpty(), "overlay map track A should populate");

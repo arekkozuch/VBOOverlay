@@ -4,11 +4,13 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // F1-debrief-style A/B lap comparison: both laps overlaid on shared charts
-// (distance into lap, not raw time, so a corner lines up for both) and one
-// track map (shared scale), with a shared zoom/pan window so every channel
-// row and the map move together. Scroll to zoom (centered under the
-// cursor), scroll sideways to pan, or drag to select a section; hover shows
-// both laps' values, their delta, and where each car was on track.
+// and one track map (shared scale), aligned on the shared cross-lap
+// track-progress axis (KAN-31/32/33) so a corner lines up at the same
+// position for both laps even on different racing lines -- not just "meters
+// since each lap's own start". One shared zoom/pan window keeps every
+// channel row and the map moving together. Scroll to zoom (centered under
+// the cursor), scroll sideways to pan, or drag to select a section; hover
+// shows both laps' values, their delta, and where each car was on track.
 Rectangle {
     id: root
     color: "#090e14"
@@ -19,12 +21,10 @@ Rectangle {
     readonly property var availableChannels: appController.comparisonAvailableChannels.length > 0
         ? ["Δ time"].concat(appController.comparisonAvailableChannels) : []
     property var visibleChannels: []
-    // comparisonLapDistanceTotal is a Q_INVOKABLE, not a property: QML's
+    // comparisonProgressAxisLength is a Q_INVOKABLE, not a property: QML's
     // automatic dependency tracking only follows real property reads, so
-    // force one on comparisonSlots or these never update once a lap loads.
-    readonly property real totalMetersA: (appController.comparisonSlots, appController.comparisonLapDistanceTotal(0))
-    readonly property real totalMetersB: (appController.comparisonSlots, appController.comparisonLapDistanceTotal(1))
-    readonly property real totalMeters: Math.max(1, totalMetersA, totalMetersB)
+    // force one on comparisonSlots or this never updates once a lap loads.
+    readonly property real totalMeters: Math.max(1, (appController.comparisonSlots, appController.comparisonProgressAxisLength()))
     property real zoomStart: 0
     property real zoomEnd: totalMeters
     property real hoverDistanceMeters: -1

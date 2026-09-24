@@ -335,14 +335,6 @@ std::optional<double> timeAtProgressInSegment(const ProgressSegment &segment, co
     return previous.telemetryTime + (next->telemetryTime - previous.telemetryTime) * ratio;
 }
 
-std::optional<double> timeAtProgress(const QVector<ProgressSegment> &lap, const double progress)
-{
-    for (const auto &segment : lap) {
-        if (const auto time = timeAtProgressInSegment(segment, progress)) return time;
-    }
-    return std::nullopt;
-}
-
 // Reference "lap start" time: the exact progress=0 crossing when a segment's
 // coverage reaches it, otherwise the earliest projected sample as the
 // closest available approximation.
@@ -355,6 +347,14 @@ double referenceTime(const QVector<ProgressSegment> &lap)
 }
 
 } // namespace
+
+std::optional<double> timeAtProgress(const QVector<ProgressSegment> &lap, const double progressMeters)
+{
+    for (const auto &segment : lap) {
+        if (const auto time = timeAtProgressInSegment(segment, progressMeters)) return time;
+    }
+    return std::nullopt;
+}
 
 QVector<QVector<DeltaPoint>> computeDeltaSeries(const QVector<ProgressSegment> &lapA,
     const QVector<ProgressSegment> &lapB, const double progressStepMeters, const CancellationCheck &cancelled)

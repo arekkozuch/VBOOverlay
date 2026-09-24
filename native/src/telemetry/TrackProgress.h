@@ -76,6 +76,12 @@ struct ProgressSegment {
     const ProgressAxis &axis, const TelemetrySession &session, double startTime, double endTime,
     const CancellationCheck &cancelled = {});
 
+// Interpolated telemetry time at a given shared progress value, searching
+// every segment (a lap trace may have several after gaps). Returns nullopt
+// when no segment's locked coverage reaches that progress value -- this is
+// never bridged/guessed, matching how computeDeltaSeries treats coverage.
+[[nodiscard]] std::optional<double> timeAtProgress(const QVector<ProgressSegment> &lap, double progressMeters);
+
 struct DeltaPoint {
     double progressMeters = 0.0;
     double deltaSeconds = 0.0; // A minus B; positive means A is behind at this point
