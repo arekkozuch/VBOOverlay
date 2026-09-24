@@ -29,7 +29,44 @@ Rectangle {
     property real zoomEnd: totalMeters
     property real hoverDistanceMeters: -1
     readonly property bool zoomed: zoomStart > 1e-3 || zoomEnd < totalMeters - 1e-3
-    onTotalMetersChanged: { zoomStart = 0; zoomEnd = totalMeters; }
+    // KAN-41: on a fresh pair (this document's persisted A/B just restored, or
+    // freshly (re)opening the compare view), apply the persisted range/channel
+    // selection instead of resetting to full range/defaults, once per such
+    // opening. Re-armed whenever the view closes (including the forced close
+    // on a new document load) so a later, different document's own persisted
+    // state gets its turn; harmless no-op if the same pair stays loaded, since
+    // the persisted value already equals the live one in that case.
+    property bool pendingRangeRestore: true
+    property bool pendingChannelsRestore: true
+    onTotalMetersChanged: {
+        if (root.pendingRangeRestore) {
+            if (!appController.comparisonPairReady) return;
+            const persisted = appController.comparisonPersistedRangeMeters();
+            if (persisted.endMeters > persisted.startMeters && persisted.startMeters >= 0
+                    && persisted.endMeters <= root.totalMeters + 1e-3) {
+                root.zoomStart = persisted.startMeters;
+                root.zoomEnd = persisted.endMeters;
+            } else {
+                root.zoomStart = 0;
+                root.zoomEnd = root.totalMeters;
+            }
+            root.pendingRangeRestore = false;
+        } else {
+            root.zoomStart = 0;
+            root.zoomEnd = root.totalMeters;
+        }
+    }
+    onZoomStartChanged: if (!root.pendingRangeRestore) appController.persistComparisonRange(root.zoomStart, root.zoomEnd)
+    onZoomEndChanged: if (!root.pendingRangeRestore) appController.persistComparisonRange(root.zoomStart, root.zoomEnd)
+    Connections {
+        target: appController
+        function onComparisonViewOpenChanged() {
+            if (!appController.comparisonViewOpen) {
+                root.pendingRangeRestore = true;
+                root.pendingChannelsRestore = true;
+            }
+        }
+    }
 
     function defaultChannels(available) {
         if (available.length === 0) return [];
@@ -38,9 +75,18 @@ Rectangle {
         return picked.length > 0 ? picked.slice(0, 4) : available.slice(0, Math.min(2, available.length));
     }
     onAvailableChannelsChanged: {
-        const stillValid = root.visibleChannels.filter(channel => root.availableChannels.indexOf(channel) >= 0);
-        root.visibleChannels = stillValid.length > 0 ? stillValid : root.defaultChannels(root.availableChannels);
+        if (root.pendingChannelsRestore) {
+            if (root.availableChannels.length === 0) return;
+            const persisted = appController.comparisonPersistedChannels().filter(
+                channel => root.availableChannels.indexOf(channel) >= 0);
+            root.visibleChannels = persisted.length > 0 ? persisted : root.defaultChannels(root.availableChannels);
+            root.pendingChannelsRestore = false;
+        } else {
+            const stillValid = root.visibleChannels.filter(channel => root.availableChannels.indexOf(channel) >= 0);
+            root.visibleChannels = stillValid.length > 0 ? stillValid : root.defaultChannels(root.availableChannels);
+        }
     }
+    onVisibleChannelsChanged: if (!root.pendingChannelsRestore) appController.persistComparisonChannels(root.visibleChannels)
     function toggleChannel(channel) {
         const channels = root.visibleChannels.slice();
         const index = channels.indexOf(channel);

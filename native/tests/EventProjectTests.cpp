@@ -92,6 +92,52 @@ void EventProjectTests::boundsAndPreservesAnalysisDecisions()
         event.insert("analysisDecisions", value); project.insert("event", event);
         QVERIFY(!ProjectLimits::validateProject(project));
     }
+
+    // KAN-41: persisted comparison-view range (shared-progress meters) and
+    // visible-channel selection, following the same undefined/null/valid vs.
+    // malformed split as comparisonGroupId above.
+    for (const auto &range : {QJsonValue(QJsonValue::Undefined), QJsonValue(QJsonValue::Null),
+         QJsonValue(QJsonObject{{"startMeters", 0.0}, {"endMeters", 1234.5}})}) {
+        auto project = original; auto event = project.value("event").toObject();
+        auto decisions = QJsonObject{};
+        if (!range.isUndefined()) decisions.insert("comparisonRange", range);
+        event.insert("analysisDecisions", decisions);
+        project.insert("event", event);
+        QString error; QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+    }
+    for (const auto &range : {
+             QJsonValue(""), QJsonValue(0), QJsonValue(QJsonArray{}),
+             QJsonValue(QJsonObject{{"startMeters", 10.0}, {"endMeters", 5.0}}),      // inverted
+             QJsonValue(QJsonObject{{"startMeters", 10.0}, {"endMeters", 10.0}}),     // empty span
+             QJsonValue(QJsonObject{{"startMeters", -1.0}, {"endMeters", 5.0}}),      // negative start
+             QJsonValue(QJsonObject{{"endMeters", 5.0}}),                            // missing start
+             QJsonValue(QJsonObject{{"startMeters", 0.0}, {"endMeters", 2'000'000.0}}), // over budget
+             QJsonValue(QJsonObject{{"startMeters", QString("0")}, {"endMeters", 5.0}}), // wrong type
+         }) {
+        auto project = original; auto event = project.value("event").toObject();
+        event.insert("analysisDecisions", QJsonObject{{"comparisonRange", range}});
+        project.insert("event", event); QVERIFY(!ProjectLimits::validateProject(project));
+    }
+    for (const auto &channels : {QJsonValue(QJsonValue::Undefined), QJsonValue(QJsonValue::Null),
+         QJsonValue(QJsonArray{}), QJsonValue(QJsonArray{"speed", "throttle"})}) {
+        auto project = original; auto event = project.value("event").toObject();
+        auto decisions = QJsonObject{};
+        if (!channels.isUndefined()) decisions.insert("comparisonChannels", channels);
+        event.insert("analysisDecisions", decisions);
+        project.insert("event", event);
+        QString error; QVERIFY2(ProjectLimits::validateProject(project, &error), qPrintable(error));
+    }
+    for (const auto &channels : {
+             QJsonValue(""), QJsonValue(0),
+             QJsonValue(QJsonArray{"speed", "speed"}),                     // duplicate
+             QJsonValue(QJsonArray{"a", "b", "c", "d", "e"}),              // over budget (>4)
+             QJsonValue(QJsonArray{""}),                                  // empty name
+             QJsonValue(QJsonArray{QString(129, 'x')}),                   // over length
+         }) {
+        auto project = original; auto event = project.value("event").toObject();
+        event.insert("analysisDecisions", QJsonObject{{"comparisonChannels", channels}});
+        project.insert("event", event); QVERIFY(!ProjectLimits::validateProject(project));
+    }
 }
 
 void EventProjectTests::bindsFullContentWithoutMigratingOnLoad()

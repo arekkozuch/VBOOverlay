@@ -140,6 +140,58 @@ void AppController::restorePersistedComparisonSlots()
     }
 }
 
+QVariantMap AppController::comparisonPersistedRangeMeters() const
+{
+    const auto range = currentProjectObject().value("event").toObject()
+        .value("analysisDecisions").toObject().value("comparisonRange").toObject();
+    if (!range.value("startMeters").isDouble() || !range.value("endMeters").isDouble()) return {};
+    return {{"startMeters", range.value("startMeters").toDouble()}, {"endMeters", range.value("endMeters").toDouble()}};
+}
+
+QStringList AppController::comparisonPersistedChannels() const
+{
+    QStringList result;
+    for (const auto &value : currentProjectObject().value("event").toObject()
+             .value("analysisDecisions").toObject().value("comparisonChannels").toArray())
+        result.append(value.toString());
+    return result;
+}
+
+void AppController::persistComparisonRange(const double startMeters, const double endMeters)
+{
+    if (!EventProjectCodec::isEvent(m_projectTemplate) || !std::isfinite(startMeters) || !std::isfinite(endMeters)
+        || startMeters < 0.0 || endMeters <= startMeters
+        || endMeters > ProjectLimits::maximumComparisonRangeMeters) return;
+    auto project = currentProjectObject();
+    auto event = project.value("event").toObject();
+    auto decisions = event.value("analysisDecisions").toObject();
+    const QJsonObject range{{"startMeters", startMeters}, {"endMeters", endMeters}};
+    if (decisions.value("comparisonRange").toObject() == range) return;
+    decisions.insert("comparisonRange", range);
+    event.insert("analysisDecisions", decisions);
+    project.insert("event", event);
+    if (!ProjectLimits::validateProject(project)) return;
+    m_projectTemplate = project;
+    markPersistentChange();
+}
+
+void AppController::persistComparisonChannels(const QStringList &channels)
+{
+    if (!EventProjectCodec::isEvent(m_projectTemplate) || channels.size() > ProjectLimits::maximumComparisonChannels) return;
+    auto project = currentProjectObject();
+    auto event = project.value("event").toObject();
+    auto decisions = event.value("analysisDecisions").toObject();
+    QJsonArray array;
+    for (const auto &channel : channels) array.append(channel);
+    if (decisions.value("comparisonChannels").toArray() == array) return;
+    decisions.insert("comparisonChannels", array);
+    event.insert("analysisDecisions", decisions);
+    project.insert("event", event);
+    if (!ProjectLimits::validateProject(project)) return;
+    m_projectTemplate = project;
+    markPersistentChange();
+}
+
 void AppController::failComparisonLap(const int index, const QString &reason)
 {
     auto &slot = m_comparisonSlots[index];
