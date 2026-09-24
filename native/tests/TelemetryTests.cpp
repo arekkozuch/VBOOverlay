@@ -3106,7 +3106,9 @@ void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
 
     QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
     QQmlComponent chartComponent(&engine), mapComponent(&engine);
-    chartComponent.setData("import QtQuick\nComparisonOverlayChart { channel: \"latitude\"; width: 300; height: 200 }",
+    chartComponent.setData("import QtQuick\nComparisonOverlayChart { channel: \"latitude\"; width: 300; height: 200; "
+        "totalMeters: (appController.comparisonSlots, Math.max(1, appController.comparisonLapDistanceTotal(0), "
+        "appController.comparisonLapDistanceTotal(1))); zoomEnd: totalMeters }",
         QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
     mapComponent.setData("import QtQuick\nComparisonOverlayMap { width: 200; height: 200 }",
         QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));

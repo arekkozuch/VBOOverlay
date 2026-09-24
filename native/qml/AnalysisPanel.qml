@@ -379,12 +379,16 @@ Rectangle {
                                 Rectangle {
                                     id: zoomSelection
                                     // Live drag-to-zoom selection; committed to root.zoomStart/zoomEnd on release.
+                                    // Must reference parent.width, not the bare "width": this Rectangle's own
+                                    // width is what is being computed below, and an unqualified "width" here
+                                    // resolves to that same (self) property, creating a binding loop that gets
+                                    // stuck at 0 -- the selection box never actually appears.
                                     visible: pointer.dragging
-                                    readonly property real otherX: Math.max(0, Math.min(width, pointer.mouseX))
-                                    readonly property real selectedSeconds: Math.abs(otherX - pointer.pressRatio * width)
-                                        / Math.max(1, width) * (root.zoomEnd - root.zoomStart)
-                                    x: Math.min(pointer.pressRatio * width, otherX)
-                                    width: Math.abs(otherX - pointer.pressRatio * width)
+                                    readonly property real otherX: Math.max(0, Math.min(parent.width, pointer.mouseX))
+                                    readonly property real selectedSeconds: Math.abs(otherX - pointer.pressRatio * parent.width)
+                                        / Math.max(1, parent.width) * (root.zoomEnd - root.zoomStart)
+                                    x: Math.min(pointer.pressRatio * parent.width, otherX)
+                                    width: Math.abs(otherX - pointer.pressRatio * parent.width)
                                     height: parent.height
                                     color: "#55e6a52a"
                                     border.color: "#55e6a5"
