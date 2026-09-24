@@ -200,7 +200,7 @@ Rectangle {
                 Label {
                     objectName: "comparisonLapLabelB"
                     text: root.lapLabel(1)
-                    color: "#58bfff"
+                    color: "#d95926"
                     font.pixelSize: 13
                     elide: Text.ElideMiddle
                 }

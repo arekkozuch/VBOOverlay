@@ -24,7 +24,11 @@ Item {
     property real totalMeters: 1
     property real hoverDistanceMeters: -1
     property color colorA: "#55e6a5"
-    property color colorB: "#58bfff"
+    // Orange, not a second bright blue-ish hue: validated (dataviz skill's
+    // palette validator) against #55e6a5 on this chart's dark surface --
+    // the previous blue was a close-enough lightness/hue to green that the
+    // two lines were hard to tell apart at a glance (owner-reported).
+    property color colorB: "#d95926"
     property color colorDelta: "#ffcf5c"
     signal zoomRequested(real start, real end)
     signal hovered(real meters)
@@ -153,7 +157,7 @@ Item {
         }
         Label {
             visible: root.isDeltaTime
-            text: qsTr("+ = A behind")
+            text: qsTr("+ = A behind · − = A ahead")
             color: "#687789"
             font.pixelSize: 9
         }

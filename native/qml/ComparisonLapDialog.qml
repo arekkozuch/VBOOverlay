@@ -49,7 +49,7 @@ Dialog {
                         Layout.fillWidth: true
                         Label {
                             text: entry.index === 0 ? qsTr("Lap A") : qsTr("Lap B")
-                            color: entry.index === 0 ? "#55e6a5" : "#58bfff"
+                            color: entry.index === 0 ? "#55e6a5" : "#d95926"
                             font.bold: true
                             Layout.fillWidth: true
                         }

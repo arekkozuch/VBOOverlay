@@ -65,7 +65,7 @@ Rectangle {
                 const context = getContext("2d");
                 context.reset();
                 drawTrace(context, segmentsA, "#55e6a5");
-                drawTrace(context, segmentsB, "#58bfff");
+                drawTrace(context, segmentsB, "#d95926");
             }
         }
         Label {
@@ -85,7 +85,7 @@ Rectangle {
                 width: 16
                 height: 16
                 radius: 8
-                color: index === 0 ? "#55e6a5" : "#58bfff"
+                color: index === 0 ? "#55e6a5" : "#d95926"
                 border.color: "#0c150f"
                 border.width: 2
                 x: Number(point.x || 0) * mapArea.width - width / 2
