@@ -140,6 +140,7 @@ private slots:
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void comparesTwoLapsFromTheSameRun();
     void overlaysComparisonLapsOnASharedProgressAxis();
+    void showsComparisonSlotCompatibilityAndCoverageContext();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
     void cancelsSupersededComparisonWaitingForCache();
@@ -3163,7 +3164,7 @@ void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()
     QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
     QQmlComponent chartComponent(&engine), mapComponent(&engine);
     chartComponent.setData("import QtQuick\nComparisonOverlayChart { channel: \"latitude\"; width: 300; height: 200; "
-        "totalMeters: (appController.comparisonSlots, Math.max(1, appController.comparisonProgressAxisLength())); "
+        "totalMeters: Math.max(1, appController.comparisonProgressAxisLength); "
         "zoomEnd: totalMeters }",
         QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
     mapComponent.setData("import QtQuick\nComparisonOverlayMap { width: 200; height: 200 }",
@@ -3223,6 +3224,73 @@ void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()
     QTRY_VERIFY2(chartObject->property("hasData").toBool(), "overlay chart should show data once both laps are ready");
     QTRY_VERIFY2(!mapObject->property("trackA").toList().isEmpty(), "overlay map track A should populate");
     QTRY_VERIFY2(!mapObject->property("trackB").toList().isEmpty(), "overlay map track B should populate");
+}
+
+void TelemetryTests::showsComparisonSlotCompatibilityAndCoverageContext()
+{
+    // KAN-40: the full-screen compare view must show compatibility group,
+    // exclusions and the reason a slot is unavailable directly (not just the
+    // lap-picker dialog), since a slot can go stale/error while this view is
+    // already open. The text is always-visible plain Label content, not
+    // behind a mouse-only hover/tooltip, so there is nothing here a keyboard
+    // user could fail to reach.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("morning.vbo"), second = directory.filePath("afternoon.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Coverage", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    QVariantMap a, b;
+    for (const auto &value : candidates) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (b.isEmpty() && row.value("runId") != a.value("runId")
+            && row.value("compatibilityGroupId") == a.value("compatibilityGroupId")) b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\nWindow { width: 900; height: 600; visible: true; ComparisonDetailPanel { anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    auto *statusRepeater = window->findChild<QObject *>("comparisonSlotStatusRepeater"); QVERIFY(statusRepeater);
+    QQuickItem *statusA = nullptr, *statusB = nullptr;
+    QVERIFY(QMetaObject::invokeMethod(statusRepeater, "itemAt", Q_RETURN_ARG(QQuickItem *, statusA), Q_ARG(int, 0)) && statusA);
+    QVERIFY(QMetaObject::invokeMethod(statusRepeater, "itemAt", Q_RETURN_ARG(QQuickItem *, statusB), Q_ARG(int, 1)) && statusB);
+    QCOMPARE(statusA->property("text").toString(), QString("Lap A: No lap selected."));
+    QCOMPARE(statusB->property("text").toString(), QString("Lap B: No lap selected."));
+
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    const auto expectedGroupLabel = a.value("compatibilityGroupLabel").toString();
+    QVERIFY(!expectedGroupLabel.isEmpty());
+    QTRY_VERIFY(statusA->property("text").toString().contains(expectedGroupLabel));
+    // Ready and mutually compatible: neutral color, not the warning one.
+    QCOMPARE(qvariant_cast<QColor>(statusA->property("color")), QColor("#657386"));
+
+    // Excluding the underlying lap while the view is open surfaces the
+    // resulting error reason directly, not just a blank "not ready" screen.
+    QVERIFY(controller.setOutingLapExcluded(a.value("reference").toMap(), true, "Traffic"));
+    QTRY_COMPARE(controller.m_comparisonSlots[0].state, QString("error"));
+    const auto reason = controller.m_comparisonSlots[0].error;
+    QVERIFY(!reason.isEmpty());
+    QTRY_VERIFY(statusA->property("text").toString().contains(reason));
+    QCOMPARE(qvariant_cast<QColor>(statusA->property("color")), QColor("#ffb84d"));
+    auto *pairStatus = window->findChild<QObject *>("comparisonPairStatus"); QVERIFY(pairStatus);
+    QVERIFY(pairStatus->property("visible").toBool());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::sharesComparisonCacheAndRevalidatesSources()
