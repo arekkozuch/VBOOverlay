@@ -13,7 +13,11 @@ Rectangle {
     id: root
     color: "#090e14"
     readonly property var slots: appController.comparisonSlots
-    readonly property var availableChannels: appController.comparisonAvailableChannels
+    // "Δ time" is a synthetic pseudo-channel (the cumulative time gap between
+    // the laps, not a recorded telemetry channel) offered alongside the real
+    // ones once both laps are loaded.
+    readonly property var availableChannels: appController.comparisonAvailableChannels.length > 0
+        ? ["Δ time"].concat(appController.comparisonAvailableChannels) : []
     property var visibleChannels: []
     // comparisonLapDistanceTotal is a Q_INVOKABLE, not a property: QML's
     // automatic dependency tracking only follows real property reads, so
@@ -28,7 +32,8 @@ Rectangle {
     onTotalMetersChanged: { zoomStart = 0; zoomEnd = totalMeters; }
 
     function defaultChannels(available) {
-        const preferred = ["speed", "throttle", "brake"];
+        if (available.length === 0) return [];
+        const preferred = ["Δ time", "speed", "throttle", "brake"];
         const picked = preferred.filter(channel => available.indexOf(channel) >= 0);
         return picked.length > 0 ? picked.slice(0, 4) : available.slice(0, Math.min(2, available.length));
     }

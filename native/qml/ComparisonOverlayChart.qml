@@ -9,25 +9,62 @@ import QtQuick.Layouts
 // state is owned by the parent (not this row) so multiple channel rows and
 // the track map all move together: this row only requests changes via
 // signals and renders whatever zoomStart/zoomEnd/hoverDistanceMeters it is
-// given.
+// given. channel === "Δ time" is a synthetic pseudo-channel: the cumulative
+// time gap between the laps (comparisonTimeDeltaSeries) rather than a
+// per-lap telemetry channel, drawn as one line instead of an A/B overlay.
 Item {
     id: root
     required property string channel
+    readonly property bool isDeltaTime: root.channel === "Δ time"
     property real zoomStart: 0
     property real zoomEnd: 1
     property real totalMeters: 1
     property real hoverDistanceMeters: -1
     property color colorA: "#55e6a5"
     property color colorB: "#58bfff"
+    property color colorDelta: "#ffcf5c"
     signal zoomRequested(real start, real end)
     signal hovered(real meters)
 
-    readonly property var seriesA: (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+    // Drawn at the current zoom resolution.
+    readonly property var seriesA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
         0, root.channel, root.zoomStart, root.zoomEnd, Math.max(100, Math.round(plotArea.width * 1.5))))
-    readonly property var seriesB: (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+    readonly property var seriesB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
         1, root.channel, root.zoomStart, root.zoomEnd, Math.max(100, Math.round(plotArea.width * 1.5))))
-    readonly property bool hasData: (seriesA.segments || []).length > 0 || (seriesB.segments || []).length > 0
-    readonly property string unit: seriesA.unit || seriesB.unit || ""
+    readonly property var deltaSeries: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonTimeDeltaSeries(
+        root.zoomStart, root.zoomEnd, Math.max(100, Math.round(plotArea.width * 1.5))))
+
+    // Fetched once over the whole lap (depends on comparisonSlots/totalMeters,
+    // NOT zoomStart/zoomEnd), used only to fix the value axis. Rescaling the
+    // axis to whatever sliver of data is visible while zooming/panning makes
+    // an actually-tiny wobble look like a huge spike, and refitting it on
+    // every wheel tick was also needless recompute on top of the zoom refetch.
+    readonly property var fullRangeA: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+        0, root.channel, 0, root.totalMeters, 300))
+    readonly property var fullRangeB: root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonLapSeriesByDistance(
+        1, root.channel, 0, root.totalMeters, 300))
+    readonly property var fullRangeDelta: !root.isDeltaTime ? ({}) : (appController.comparisonSlots, appController.comparisonTimeDeltaSeries(
+        0, root.totalMeters, 300))
+
+    readonly property bool hasData: root.isDeltaTime
+        ? (deltaSeries.segments || []).length > 0
+        : ((seriesA.segments || []).length > 0 || (seriesB.segments || []).length > 0)
+    readonly property string unit: root.isDeltaTime ? qsTr("s") : (seriesA.unit || seriesB.unit || "")
+
+    readonly property bool hasRangeData: root.isDeltaTime
+        ? !!fullRangeDelta.segments
+        : !!(fullRangeA.segments || fullRangeB.segments)
+    readonly property real rawLow: !hasRangeData ? 0 : (root.isDeltaTime
+        ? Number(fullRangeDelta.minimum)
+        : Math.min(fullRangeA.segments ? Number(fullRangeA.minimum) : Infinity,
+                   fullRangeB.segments ? Number(fullRangeB.minimum) : Infinity))
+    readonly property real rawHigh: !hasRangeData ? 1 : (root.isDeltaTime
+        ? Number(fullRangeDelta.maximum)
+        : Math.max(fullRangeA.segments ? Number(fullRangeA.maximum) : -Infinity,
+                   fullRangeB.segments ? Number(fullRangeB.maximum) : -Infinity))
+    readonly property real valuePadding: rawHigh === rawLow ? Math.max(0.5, Math.abs(rawLow) * 0.05) : (rawHigh - rawLow) * 0.08
+    readonly property real valueLow: rawLow - valuePadding
+    readonly property real valueHigh: rawHigh + valuePadding
 
     function graphY(value, low, high, height, brakingUp) {
         const fraction = (value - low) / Math.max(0.000001, high - low);
@@ -46,10 +83,11 @@ Item {
     }
     readonly property real hoverRatio: zoomEnd > zoomStart
         ? (hoverDistanceMeters - zoomStart) / (zoomEnd - zoomStart) : 0
-    readonly property var hoverValueA: hoverDistanceMeters >= 0 ? valueAt(seriesA, hoverRatio) : undefined
-    readonly property var hoverValueB: hoverDistanceMeters >= 0 ? valueAt(seriesB, hoverRatio) : undefined
+    readonly property var hoverValueA: hoverDistanceMeters >= 0 && !root.isDeltaTime ? valueAt(seriesA, hoverRatio) : undefined
+    readonly property var hoverValueB: hoverDistanceMeters >= 0 && !root.isDeltaTime ? valueAt(seriesB, hoverRatio) : undefined
     readonly property var hoverDelta: hoverValueA !== undefined && hoverValueB !== undefined
         ? hoverValueA - hoverValueB : undefined
+    readonly property var hoverDeltaTime: hoverDistanceMeters >= 0 && root.isDeltaTime ? valueAt(deltaSeries, hoverRatio) : undefined
 
     Column {
         id: channelInfo
@@ -59,7 +97,7 @@ Item {
         width: Math.min(180, parent.width * 0.34, Math.max(140, parent.width * 0.24))
         spacing: 4
         Label {
-            text: root.channel
+            text: root.isDeltaTime ? qsTr("Δ time (A−B)") : root.channel
             color: "#dce4ee"
             font.pixelSize: 11
             font.weight: Font.DemiBold
@@ -67,6 +105,7 @@ Item {
             width: channelInfo.width
         }
         Row {
+            visible: !root.isDeltaTime
             spacing: 6
             Rectangle { width: 9; height: 9; radius: 4.5; color: root.colorA; anchors.verticalCenter: parent.verticalCenter }
             Label {
@@ -77,6 +116,7 @@ Item {
             }
         }
         Row {
+            visible: !root.isDeltaTime
             spacing: 6
             Rectangle { width: 9; height: 9; radius: 4.5; color: root.colorB; anchors.verticalCenter: parent.verticalCenter }
             Label {
@@ -87,12 +127,28 @@ Item {
             }
         }
         Label {
-            visible: root.hoverDelta !== undefined
+            visible: !root.isDeltaTime && root.hoverDelta !== undefined
             text: qsTr("Δ %1%2").arg(root.hoverDelta >= 0 ? "+" : "").arg((root.hoverDelta || 0).toFixed(1))
             color: "#f3f6fa"
             font.family: "Menlo"
             font.pixelSize: 13
             font.bold: true
+        }
+        Label {
+            visible: root.isDeltaTime
+            text: root.hoverDeltaTime !== undefined
+                ? (root.hoverDeltaTime >= 0 ? "+" : "") + Number(root.hoverDeltaTime).toFixed(2) + " s"
+                : "–"
+            color: root.hoverDeltaTime === undefined ? "#dce4ee" : (root.hoverDeltaTime > 0 ? "#ff8a7a" : "#55e6a5")
+            font.family: "Menlo"
+            font.pixelSize: 16
+            font.bold: true
+        }
+        Label {
+            visible: root.isDeltaTime
+            text: qsTr("+ = A behind")
+            color: "#687789"
+            font.pixelSize: 9
         }
     }
 
@@ -110,8 +166,14 @@ Item {
             anchors.fill: parent
             property var a: root.seriesA
             property var b: root.seriesB
+            property var d: root.deltaSeries
+            property real low: root.valueLow
+            property real high: root.valueHigh
             onAChanged: requestPaint()
             onBChanged: requestPaint()
+            onDChanged: requestPaint()
+            onLowChanged: requestPaint()
+            onHighChanged: requestPaint()
             onAvailableChanged: if (available) requestPaint()
             onVisibleChanged: if (visible) requestPaint()
             onWidthChanged: requestPaint()
@@ -155,15 +217,23 @@ Item {
                     context.stroke();
                 }
                 if (!root.hasData) return;
-                const rawLow = Math.min(
-                    a.segments ? Number(a.minimum) : Infinity, b.segments ? Number(b.minimum) : Infinity);
-                const rawHigh = Math.max(
-                    a.segments ? Number(a.maximum) : -Infinity, b.segments ? Number(b.maximum) : -Infinity);
-                const padding = rawHigh === rawLow ? Math.max(0.5, Math.abs(rawLow) * 0.05) : 0;
-                const low = rawLow - padding;
-                const high = rawHigh + padding;
-                if (a.segments) drawSeries(context, a, root.colorA, low, high);
-                if (b.segments) drawSeries(context, b, root.colorB, low, high);
+                if (root.isDeltaTime) {
+                    if (low < 0 && high > 0) {
+                        const zeroY = root.graphY(0, low, high, height, false);
+                        context.setLineDash([4, 4]);
+                        context.strokeStyle = "#3a4a5c";
+                        context.lineWidth = 1;
+                        context.beginPath();
+                        context.moveTo(0, zeroY);
+                        context.lineTo(width, zeroY);
+                        context.stroke();
+                        context.setLineDash([]);
+                    }
+                    if (d.segments) drawSeries(context, d, root.colorDelta, low, high);
+                } else {
+                    if (a.segments) drawSeries(context, a, root.colorA, low, high);
+                    if (b.segments) drawSeries(context, b, root.colorB, low, high);
+                }
             }
         }
 
@@ -254,15 +324,23 @@ Item {
             onDoubleClicked: root.zoomRequested(0, root.totalMeters)
 
             WheelHandler {
+                id: wheel
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                // Wheel/trackpad events can fire far faster than the chart can
+                // usefully redraw (each tick refetches every visible row's
+                // series). Accumulate into pending values and only actually
+                // apply -- and trigger the expensive refetch -- once per
+                // throttle tick, using the still-pending target as the base
+                // for the next tick so a fast scroll still feels continuous.
+                property real pendingStart: -1
+                property real pendingEnd: -1
                 onWheel: event => {
                     const width = plotArea.width;
                     const centerRatio = Math.max(0, Math.min(1, event.x / width));
-                    const span = root.zoomEnd - root.zoomStart;
-                    const centerMeters = root.zoomStart + centerRatio * span;
-                    // Vertical scroll zooms (centered under the cursor); horizontal
-                    // scroll pans -- the two-finger trackpad gestures users expect,
-                    // rather than only being able to re-drag a fresh selection box.
+                    const baseStart = wheel.pendingStart >= 0 ? wheel.pendingStart : root.zoomStart;
+                    const baseEnd = wheel.pendingEnd >= 0 ? wheel.pendingEnd : root.zoomEnd;
+                    const span = baseEnd - baseStart;
+                    const centerMeters = baseStart + centerRatio * span;
                     let newSpan = event.angleDelta.y !== 0
                         ? Math.max(2, Math.min(root.totalMeters, span * Math.pow(0.85, event.angleDelta.y / 120)))
                         : span;
@@ -274,7 +352,21 @@ Item {
                     }
                     if (start < 0) { end -= start; start = 0; }
                     if (end > root.totalMeters) { start -= (end - root.totalMeters); end = root.totalMeters; }
-                    root.zoomRequested(Math.max(0, start), Math.min(root.totalMeters, end));
+                    wheel.pendingStart = Math.max(0, start);
+                    wheel.pendingEnd = Math.min(root.totalMeters, end);
+                    zoomThrottle.restart();
+                }
+            }
+            Timer {
+                id: zoomThrottle
+                interval: 50
+                repeat: false
+                onTriggered: {
+                    if (wheel.pendingStart >= 0) {
+                        root.zoomRequested(wheel.pendingStart, wheel.pendingEnd);
+                        wheel.pendingStart = -1;
+                        wheel.pendingEnd = -1;
+                    }
                 }
             }
         }

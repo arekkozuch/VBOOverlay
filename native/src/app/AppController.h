@@ -249,6 +249,11 @@ public:
     Q_INVOKABLE QVariantMap comparisonLapSeriesByDistance(
         int slot, const QString &channel, double startMeters, double endMeters, int maximumPoints) const;
     Q_INVOKABLE double comparisonLapDistanceTotal(int slot) const;
+    // Cumulative time gap between the two laps at the same distance into the
+    // lap (A minus B; positive means A took longer to reach that point, i.e.
+    // A is behind there) -- the classic lap-delta trace, not a per-sample
+    // channel-value difference.
+    Q_INVOKABLE QVariantMap comparisonTimeDeltaSeries(double startMeters, double endMeters, int maximumPoints) const;
     [[nodiscard]] QStringList comparisonAvailableChannels() const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
