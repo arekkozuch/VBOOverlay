@@ -3154,6 +3154,18 @@ void TelemetryTests::overlaysComparisonLapsOnASharedDistanceAxis()
     QVERIFY(midpointA.contains("x") && midpointA.contains("y"));
     QVERIFY(midpointB.contains("x") && midpointB.contains("y"));
 
+    // The delta-time trace: cumulative time gap between the laps at the same
+    // distance into the lap, not a per-sample channel-value difference.
+    const auto deltaSeries = controller.comparisonTimeDeltaSeries(0, controller.comparisonLapDistanceTotal(0), 50);
+    QVERIFY2(!deltaSeries.value("segments").toList().isEmpty(), "time delta series should not be empty");
+    QCOMPARE(deltaSeries.value("unit").toString(), QString("s"));
+    const auto firstDeltaSegment = deltaSeries.value("segments").toList().first().toList();
+    QVERIFY(!firstDeltaSegment.isEmpty());
+    // Both laps start their own elapsed-time reference at distance 0, so the
+    // gap right at the start of the lap should be close to zero.
+    QVERIFY(std::abs(firstDeltaSegment.first().toMap().value("y").toDouble()) < 1.0);
+    QVERIFY(controller.comparisonTimeDeltaSeries(10, 5, 50).contains("reason"));
+
     QTRY_VERIFY2(chartObject->property("hasData").toBool(), "overlay chart should show data once both laps are ready");
     QTRY_VERIFY2(!mapObject->property("trackA").toList().isEmpty(), "overlay map track A should populate");
     QTRY_VERIFY2(!mapObject->property("trackB").toList().isEmpty(), "overlay map track B should populate");

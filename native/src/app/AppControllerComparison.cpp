@@ -297,6 +297,41 @@ double AppController::comparisonLapDistanceTotal(const int slot) const
     return m_comparisonSlots[slot].distanceProfile.totalMeters;
 }
 
+QVariantMap AppController::comparisonTimeDeltaSeries(
+    const double startMeters, const double endMeters, const int maximumPoints) const
+{
+    if (maximumPoints < 2) return {};
+    const auto &a = m_comparisonSlots[0];
+    const auto &b = m_comparisonSlots[1];
+    if (a.state != "ready" || b.state != "ready" || !a.distanceProfile.valid || !b.distanceProfile.valid) return {};
+    if (!std::isfinite(startMeters) || !std::isfinite(endMeters) || endMeters <= startMeters)
+        return {{"reason", QStringLiteral("invalidRange")}};
+
+    const double startTimeA = a.row.value("startTime").toDouble();
+    const double startTimeB = b.row.value("startTime").toDouble();
+    const double span = endMeters - startMeters;
+    QVariantList points;
+    double minimum = 0.0, maximum = 0.0;
+    bool haveExtent = false;
+    for (int index = 0; index < maximumPoints; ++index) {
+        const double targetMeters = startMeters + span * index / (maximumPoints - 1);
+        const auto timeA = timeAtDistance(a.distanceProfile, targetMeters);
+        const auto timeB = timeAtDistance(b.distanceProfile, targetMeters);
+        if (!timeA || !timeB) continue;
+        const double delta = (*timeA - startTimeA) - (*timeB - startTimeB);
+        if (!haveExtent) { minimum = maximum = delta; haveExtent = true; }
+        else { minimum = std::min(minimum, delta); maximum = std::max(maximum, delta); }
+        points.append(QVariantMap{{"x", (targetMeters - startMeters) / span}, {"y", delta}});
+    }
+    if (points.isEmpty()) return {};
+    return {
+        {"segments", QVariantList{QVariant::fromValue(points)}},
+        {"minimum", minimum},
+        {"maximum", maximum},
+        {"unit", QStringLiteral("s")},
+    };
+}
+
 QVariantMap AppController::comparisonLapSeriesByDistance(const int slot, const QString &channel,
     const double startMeters, const double endMeters, const int maximumPoints) const
 {
