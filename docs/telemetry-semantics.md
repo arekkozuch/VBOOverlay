@@ -121,6 +121,12 @@ segments stop applying and every stamped result becomes stale. Review
 rejections are persisted in `trackSegmentReview` and never change the
 revision.
 
+Sector times (KAN-51) interpolate boundary crossings on the lap's projected
+progress and use the lap's timed start and end at the gate. A sector without
+continuous projected coverage, or one that crosses the gate, has no numeric
+time. For a complete partition the sector times sum to the lap time within
+1 ms.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;

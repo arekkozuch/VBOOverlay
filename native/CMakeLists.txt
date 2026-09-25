@@ -122,6 +122,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TrackSegmentReview.h
     src/telemetry/TrackSegmentEditing.cpp
     src/telemetry/TrackSegmentEditing.h
+    src/telemetry/SectorTiming.cpp
+    src/telemetry/SectorTiming.h
     src/telemetry/CornerPhases.cpp
     src/telemetry/CornerPhases.h
     src/telemetry/BrakingOnset.cpp
