@@ -110,6 +110,8 @@ private slots:
     void showsRunProgressionWithLiveContext();
     void startsOutingThroughAnalysisQml();
     void opensOutingLapWithoutChangingEditor();
+    void linksOutingLapVideoToActiveRunOnly();
+    void followsOutingLapVideoPositionWithinLapBounds();
     void derivesOutingLapSections();
     void rejectsMalformedLapReferences_data();
     void rejectsMalformedLapReferences();
@@ -1557,6 +1559,122 @@ void TelemetryTests::opensOutingLapWithoutChangingEditor()
     QTRY_VERIFY(!controller.m_outingLapDetailWatcher.isRunning());
     QVERIFY(controller.selectedOutingLap().isEmpty());
     QCOMPARE(controller.currentProjectObject(), before);
+}
+
+void TelemetryTests::linksOutingLapVideoToActiveRunOnly()
+{
+    // KAN-39: video linkage is gated to the open lap's run being the
+    // currently active/loaded one. Uses direct member access (this class is
+    // a declared friend) to give the controller a deterministic, known video
+    // duration without needing a real decodable file -- outingLapVideoAvailable/
+    // outingLapVideoPositionMilliseconds only need m_videoSource non-empty and
+    // m_exportSourceInfo populated, the same fields the existing preview-bound
+    // invokables already read.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Video linkage", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto active = controller.activeRunId();
+    QVariantMap sameRunLap, otherRunLap;
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("type") != "LAP") continue;
+        if (sameRunLap.isEmpty() && row.value("runId").toString() == active) sameRunLap = row;
+        else if (otherRunLap.isEmpty() && row.value("runId").toString() != active) otherRunLap = row;
+    }
+    QVERIFY(!sameRunLap.isEmpty() && !otherRunLap.isEmpty());
+
+    // No video loaded at all: unavailable regardless of which lap is open.
+    QVERIFY(controller.selectOutingLapReference(sameRunLap.value("reference").toMap()));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QVERIFY(!controller.outingLapVideoAvailable());
+
+    // A synthetic video at 30fps, without decoding anything real, long enough
+    // to cover mid-lap but deliberately shorter than the lap's own end --
+    // the "past the last real frame" case below needs that gap to exist.
+    const auto start = sameRunLap.value("startTime").toDouble(), end = sameRunLap.value("endTime").toDouble();
+    const auto midpoint = (start + end) / 2.0;
+    controller.m_videoSource = QUrl::fromLocalFile(QStringLiteral("/synthetic/video.mp4"));
+    MediaInfo info;
+    info.frameRate = {30, 1};
+    info.averageFrameRate = {30, 1};
+    info.videoFrameCount = qRound64((midpoint + 1.0) * 30.0);
+    info.timeBase = {1, 30};
+    info.videoDurationTicks = info.videoFrameCount;
+    controller.m_exportSourceInfo = info;
+    controller.m_sync = {0.0, 1.0}; // offset 0, 1:1 scale -- telemetry time == video time here.
+
+    // Lap belongs to the active run: available, and mid-lap maps to a real,
+    // in-range video position.
+    controller.setOutingLapCursor(midpoint);
+    QVERIFY(controller.outingLapVideoAvailable());
+    QCOMPARE(controller.outingLapVideoPositionMilliseconds(), qRound64((start + end) / 2 * 1000.0));
+
+    // Past the video's last real frame: unavailable, not clamped into a
+    // misleadingly-nearby frame. The synthetic video was deliberately sized
+    // to end before the lap does, so this gap is guaranteed to exist.
+    controller.setOutingLapCursor(end);
+    QVERIFY(end * 1000.0 > controller.previewEndPositionMilliseconds());
+    QVERIFY(!controller.outingLapVideoAvailable());
+
+    // A lap from the non-active run: unavailable even with video loaded and
+    // sync configured, and following a video position must not move its cursor.
+    controller.closeOutingLap();
+    QVERIFY(controller.selectOutingLapReference(otherRunLap.value("reference").toMap()));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    QVERIFY(!controller.outingLapVideoAvailable());
+    const auto otherCursorBefore = controller.outingLapCursor();
+    QVERIFY(!controller.followOutingLapVideoPosition(1000));
+    QCOMPARE(controller.outingLapCursor(), otherCursorBefore);
+}
+
+void TelemetryTests::followsOutingLapVideoPositionWithinLapBounds()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("first.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::lapsVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Follow video", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QVariantMap lap;
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("type") == "LAP") { lap = row; break; }
+    }
+    QVERIFY(!lap.isEmpty());
+    QVERIFY(controller.selectOutingLapReference(lap.value("reference").toMap()));
+    QTRY_COMPARE(controller.outingLapDetailState(), QStringLiteral("ready"));
+    controller.m_videoSource = QUrl::fromLocalFile(QStringLiteral("/synthetic/video.mp4"));
+    MediaInfo info;
+    info.frameRate = {30, 1};
+    info.averageFrameRate = {30, 1};
+    info.videoFrameCount = 6000; // 200 seconds, comfortably covering the lap
+    info.timeBase = {1, 30};
+    info.videoDurationTicks = 6000;
+    controller.m_exportSourceInfo = info;
+    controller.m_sync = {10.0, 1.0}; // telemetry = video + 10s
+
+    const auto start = lap.value("startTime").toDouble(), end = lap.value("endTime").toDouble();
+    // A video position mapping inside the lap moves the cursor there exactly.
+    // sync offset is 10 (telemetry = video + 10), so video position (start - 10 + 0.5)s
+    // maps to telemetry time (start + 0.5)s.
+    QVERIFY(controller.followOutingLapVideoPosition(qRound64((start - 10.0 + 0.5) * 1000.0)));
+    QCOMPARE(controller.outingLapCursor(), start + 0.5);
+
+    // A video position mapping before/after the lap clamps to the lap's own
+    // bounds (setOutingLapCursor's existing clamp), never runs the cursor
+    // outside the lap it belongs to.
+    QVERIFY(controller.followOutingLapVideoPosition(qRound64((start - 10.0 - 5.0) * 1000.0)));
+    QCOMPARE(controller.outingLapCursor(), start);
+    QVERIFY(controller.followOutingLapVideoPosition(qRound64((end - 10.0 + 5.0) * 1000.0)));
+    QCOMPARE(controller.outingLapCursor(), end);
 }
 
 void TelemetryTests::derivesOutingLapSections()

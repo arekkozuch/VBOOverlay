@@ -2712,7 +2712,7 @@ void AppController::setSyncOffset(const double seconds)
     emit syncChanged();
     emit lapNavigationChanged();
     emit liveValuesChanged();
-    markPersistentChange();
+    markPersistentChange(); // also emits documentStateChanged, which refreshes outingLapVideoAvailable/Position
 }
 
 void AppController::setTimeScale(const double scale)
@@ -2726,7 +2726,7 @@ void AppController::setTimeScale(const double scale)
     emit syncChanged();
     emit lapNavigationChanged();
     emit liveValuesChanged();
-    markPersistentChange();
+    markPersistentChange(); // also emits documentStateChanged, which refreshes outingLapVideoAvailable/Position
 }
 
 void AppController::setAnalysisChannels(const QStringList &channels)

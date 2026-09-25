@@ -230,6 +230,10 @@ Window {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.showingLap
+            videoSource: root.videoSource
+            playbackPosition: root.playbackPosition
+            playbackRunning: root.playbackRunning
+            onSeekRequested: milliseconds => root.seekRequested(milliseconds)
         }
 
         ComparisonDetailPanel {

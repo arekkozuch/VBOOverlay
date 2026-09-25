@@ -2,16 +2,88 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
 
+// KAN-39: optional video evidence for the open lap. Video is only ever
+// available when the lap's own run is the currently active/loaded one --
+// opening a lap from a different run shows "no video for this run" rather
+// than silently switching the active run just to follow a lap selection
+// (a heavier, more disruptive action with its own reload/generation
+// semantics elsewhere). Metrics (chart, map, section-time slider) work
+// identically either way; video is additive, never required.
 Rectangle {
     id: root
     color: "#090e14"
+    // Mirrors AnalysisWindow.qml's own videoSource/playbackPosition/
+    // playbackRunning/seekRequested contract for its legacy video pane --
+    // the same shape, passed down explicitly since this is a separate
+    // component, not sharing that file's local ids.
+    property url videoSource
+    property real playbackPosition: 0
+    property bool playbackRunning: false
+    signal seekRequested(real milliseconds)
     readonly property var lap: appController.selectedOutingLap
     readonly property bool ready: appController.outingLapDetailState === "ready"
     function duration(seconds) {
         return Math.floor(seconds / 60) + ":" + (seconds % 60).toFixed(3).padStart(6, "0");
     }
     Shortcut { sequence: "Escape"; enabled: root.visible; onActivated: appController.closeOutingLap() }
+
+    // A second, muted, position-mirrored player -- the same pattern
+    // AnalysisWindow.qml already uses for its own (legacy-mode) video pane,
+    // since one MediaPlayer can only render into one VideoOutput sink at a
+    // time and the two modes (legacy vs. Event/outing) are mutually
+    // exclusive by construction (eventRuns.length is 0 or >0 for a given
+    // document's lifetime), so there's never real contention over playback.
+    // Loaded only while this panel is actually visible (a lap is open) --
+    // the startup-smoke test asserts the analysis decoder lifecycle stays
+    // lazy (flappedear_startup_smoke's "media players closed/open/released"
+    // check), so a MediaPlayer must not exist just because the analysis
+    // window itself is open with no lap selected.
+    Loader {
+        id: lapVideoPlayerLoader
+        active: root.visible
+        sourceComponent: MediaPlayer {
+            source: root.videoSource
+            videoOutput: lapVideoOutput
+            audioOutput: AudioOutput {
+                muted: true
+            }
+            onMediaStatusChanged: {
+                if (mediaStatus === MediaPlayer.LoadedMedia) {
+                    position = root.playbackPosition;
+                    if (root.playbackRunning) play();
+                }
+            }
+            onErrorOccurred: function(error, errorString) {
+                pause();
+                appController.reportPlaybackError(errorString);
+            }
+        }
+    }
+    onPlaybackPositionChanged: {
+        if (lapVideoPlayerLoader.item && Math.abs(lapVideoPlayerLoader.item.position - root.playbackPosition) > 180)
+            lapVideoPlayerLoader.item.position = root.playbackPosition;
+        // Playback drives the analysis cursor while playing; scrubbing the
+        // cursor drives video seeking otherwise (below) -- kept mutually
+        // exclusive on root.playbackRunning so the two directions cannot
+        // fight/oscillate against each other on the same tick.
+        if (root.playbackRunning) appController.followOutingLapVideoPosition(Math.round(root.playbackPosition));
+    }
+    onPlaybackRunningChanged: {
+        if (!lapVideoPlayerLoader.item) return;
+        if (root.playbackRunning) lapVideoPlayerLoader.item.play();
+        else lapVideoPlayerLoader.item.pause();
+    }
+    // appController.outingLapVideoPositionMilliseconds is a real Q_PROPERTY
+    // (NOTIFY outingLapVideoChanged) -- reading it here is a plain property
+    // read, not a function call re-entering reactive state, so this cannot
+    // reproduce the KAN-40 binding-loop class of bug.
+    readonly property int lapVideoTargetPosition: appController.outingLapVideoPositionMilliseconds
+    onLapVideoTargetPositionChanged: {
+        if (!root.playbackRunning && appController.outingLapVideoAvailable)
+            root.seekRequested(root.lapVideoTargetPosition);
+    }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 14
@@ -94,10 +166,57 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 10
-            TrackMapPanel {
-                lapDetail: true
+            ColumnLayout {
                 Layout.preferredWidth: Math.max(190, root.width * 0.29)
+                Layout.maximumWidth: Layout.preferredWidth
                 Layout.fillHeight: true
+                spacing: 10
+                Rectangle {
+                    objectName: "outingLapVideoPane"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: visible ? Math.max(110, parent.height * 0.32) : 0
+                    Layout.maximumHeight: visible ? -1 : 0
+                    color: "#020304"
+                    border.color: "#1c2631"
+                    visible: appController.outingLapVideoAvailable
+                    VideoOutput {
+                        id: lapVideoOutput
+                        anchors.fill: parent
+                        fillMode: VideoOutput.PreserveAspectFit
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        width: Math.max(0, parent.width - 24)
+                        visible: lapVideoPlayerLoader.item && lapVideoPlayerLoader.item.error !== MediaPlayer.NoError
+                        text: (lapVideoPlayerLoader.item && lapVideoPlayerLoader.item.errorString) || qsTr("The video could not be decoded.")
+                        color: "#ff8f99"
+                        font.pixelSize: 11
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
+                    }
+                }
+                Label {
+                    objectName: "outingLapNoVideoLabel"
+                    Layout.fillWidth: true
+                    // Qt Quick Layouts otherwise defaults a wrapped Label's
+                    // minimum width to its unwrapped implicitWidth, which
+                    // forced this whole column (and everything to its right)
+                    // wider than intended.
+                    Layout.minimumWidth: 0
+                    visible: !appController.outingLapVideoAvailable
+                    text: !root.videoSource.toString() ? qsTr("No video loaded")
+                        : root.lap.runId !== undefined && appController.activeRunId !== root.lap.runId
+                            ? qsTr("Video not shown — this lap is from a different run")
+                            : qsTr("No video for this section")
+                    color: "#657386"
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
+                TrackMapPanel {
+                    lapDetail: true
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
             }
             AnalysisPanel {
                 objectName: "outingLapCharts"

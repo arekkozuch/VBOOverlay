@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 #include "project/EventProjectCodec.h"
 #include "project/ProjectLimits.h"
+#include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetrySource.h"
 
 #include <QDateTime>
@@ -301,7 +302,7 @@ void AppController::refreshOutingCompatibility()
         if (m_outingStaleRunIds.contains(runId)) row.insert("bestOfRun", false);
         value = row;
         if (!m_selectedOutingLap.isEmpty() && m_selectedOutingLap.value("reference") == row.value("reference")) {
-            m_selectedOutingLap = row; emit outingLapDetailChanged();
+            m_selectedOutingLap = row; emit outingLapDetailChanged(); emit outingLapVideoChanged();
         }
     }
 }
@@ -404,6 +405,7 @@ void AppController::refreshLapExclusionPolicy()
         if (!m_selectedOutingLap.isEmpty() && m_selectedOutingLap.value("reference") == item.value("reference")) {
             m_selectedOutingLap = item;
             emit outingLapDetailChanged();
+            emit outingLapVideoChanged();
         }
     }
     refreshOutingCompatibility();
@@ -607,6 +609,12 @@ void AppController::initializeOutingLaps()
     connect(this, &AppController::documentStateChanged, this, &AppController::refreshLapExclusionPolicy);
     connect(this, &AppController::documentStateChanged, this, schedule);
     connect(this, &AppController::sourceLoadStateChanged, this, schedule);
+    // KAN-39: catch-all so outingLapVideoAvailable/outingLapVideoPositionMilliseconds
+    // never go stale -- covers active-run switches (documentStateChanged) and video
+    // finishing loading/probing (sourceLoadStateChanged), on top of the more specific
+    // emits at lap open/close/cursor-move.
+    connect(this, &AppController::documentStateChanged, this, &AppController::outingLapVideoChanged);
+    connect(this, &AppController::sourceLoadStateChanged, this, &AppController::outingLapVideoChanged);
     connect(&m_outingLapTimer, &QTimer::timeout, this, &AppController::refreshOutingLaps);
     connect(&m_outingLapWatcher, &QFutureWatcher<OutingLapResult>::finished, this, [this] {
         const auto result = m_outingLapWatcher.future().takeResult();
@@ -851,6 +859,7 @@ void AppController::initializeOutingLapDetail()
         }
         emit outingLapDetailChanged();
         emit outingLapCursorChanged();
+        emit outingLapVideoChanged();
     });
 }
 
@@ -927,6 +936,7 @@ bool AppController::selectOutingLap(int index)
     m_outingLapDetailTimer.start();
     emit outingLapDetailChanged();
     emit outingLapCursorChanged();
+    emit outingLapVideoChanged();
     return true;
 }
 
@@ -944,6 +954,7 @@ void AppController::closeOutingLap()
     m_outingLapDetailError.clear();
     emit outingLapDetailChanged();
     emit outingLapCursorChanged();
+    emit outingLapVideoChanged();
 }
 
 void AppController::loadOutingLapDetail()
@@ -1105,6 +1116,38 @@ void AppController::setOutingLapCursor(double seconds)
     if (seconds == m_outingLapCursor) return;
     m_outingLapCursor = seconds;
     emit outingLapCursorChanged();
+    emit outingLapVideoChanged();
+}
+
+// KAN-39: the open lap's run must be the currently active/loaded one -- a lap
+// from a different run has no video for this increment rather than silently
+// switching the active run (and reloading its sources) just to follow a
+// lap selection. Out-of-range footage (the cursor maps to a video time before
+// 0 or past the last real frame) is also "unavailable", never clamped into a
+// misleading nearby frame, per the same rule the main preview already follows.
+bool AppController::outingLapVideoAvailable() const
+{
+    if (m_selectedOutingLap.isEmpty() || m_videoSource.isEmpty()) return false;
+    if (m_selectedOutingLap.value("runId").toString() != activeRunId()) return false;
+    const auto videoTime = FlappedEar::telemetryToVideoTime(m_outingLapCursor, m_sync);
+    if (!videoTime || *videoTime < 0.0) return false;
+    return qRound64(*videoTime * 1000.0) <= previewEndPositionMilliseconds();
+}
+
+qint64 AppController::outingLapVideoPositionMilliseconds() const
+{
+    if (!outingLapVideoAvailable()) return 0;
+    const auto videoTime = FlappedEar::telemetryToVideoTime(m_outingLapCursor, m_sync);
+    return clampPreviewPositionMilliseconds(qRound64(*videoTime * 1000.0));
+}
+
+bool AppController::followOutingLapVideoPosition(const qint64 videoPositionMilliseconds)
+{
+    if (m_selectedOutingLap.isEmpty() || m_selectedOutingLap.value("runId").toString() != activeRunId()) return false;
+    const auto telemetryTime = FlappedEar::videoToTelemetryTime(videoPositionMilliseconds / 1000.0, m_sync);
+    if (!telemetryTime) return false;
+    setOutingLapCursor(*telemetryTime);
+    return true;
 }
 
 } // namespace FlappedEar
