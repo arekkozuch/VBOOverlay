@@ -225,6 +225,10 @@ Rectangle {
                     lapDetail: true
                     segmentReview: root.reviewingSegments
                     selectedSegmentIndex: segmentReviewLoader.item ? segmentReviewLoader.item.selectedIndex : -1
+                    pickingProgress: segmentReviewLoader.item ? segmentReviewLoader.item.pickTarget !== "" : false
+                    onProgressPicked: (x, y) => {
+                        if (segmentReviewLoader.item) segmentReviewLoader.item.acceptMapPick(x, y);
+                    }
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                 }

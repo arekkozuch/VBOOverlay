@@ -144,6 +144,7 @@ private slots:
     void comparesTwoLapsFromTheSameRun();
     void overlaysComparisonLapsOnASharedProgressAxis();
     void reviewsSegmentProposalsForTheOpenLap();
+    void editsApprovedSegmentsWithUndo();
     void showsComparisonSlotCompatibilityAndCoverageContext();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
@@ -3487,6 +3488,143 @@ void TelemetryTests::reviewsSegmentProposalsForTheOpenLap()
     QCOMPARE(reopened.segmentReviewApproved().value("segments").toList().first().toMap().value("name").toString(),
         QString("Back section"));
     QCOMPARE(reopened.segmentReviewItems()[0].toMap().value("state").toString(), QString("proposed"));
+}
+
+void TelemetryTests::editsApprovedSegmentsWithUndo()
+{
+    // KAN-49: approved segments are edited in place (stable IDs), split,
+    // merged and renamed; overlap and empty segments are refused; every change
+    // is dirty document state with bounded undo/redo, and changes the revision.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Editing", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    int lapIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+    }
+    QVERIFY(lapIndex >= 0);
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    const auto configuration = controller.selectedOutingLap().value("compatibilityGroupId").toString();
+    QVERIFY(!controller.editApprovedSegment("any", "X", "corner", 1.0, 2.0, true).isEmpty()); // no review open
+    controller.requestSegmentReview();
+    QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+    const double length = controller.segmentReviewAxisLength();
+    QVERIFY(controller.segmentReviewItems().size() >= 3);
+    const auto stored = [&] { return controller.storedRunTrackSegments(runId).toArray(); };
+    const auto find = [&](const QString &id) {
+        for (const auto &value : stored())
+            if (value.toObject().value("id").toString() == id) return value.toObject();
+        return QJsonObject{};
+    };
+
+    QVERIFY(!controller.dirty() || controller.saveProject(QUrl::fromLocalFile(directory.filePath("before.fetproject"))));
+    QCOMPARE(controller.approveSegmentProposal(0), QString());
+    QCOMPARE(controller.approveSegmentProposal(1), QString());
+    QVERIFY(controller.dirty());
+    QVERIFY(controller.segmentReviewApproved().value("canUndo").toBool());
+    const auto firstId = controller.segmentReviewItems()[0].toMap().value("approvedSegmentId").toString();
+    const auto secondId = controller.segmentReviewItems()[1].toMap().value("approvedSegmentId").toString();
+    QVERIFY(!firstId.isEmpty() && !secondId.isEmpty());
+    const auto first = find(firstId);
+    const double start0 = first.value("startProgressMeters").toDouble();
+    const double end0 = first.value("endProgressMeters").toDouble();
+    QVERIFY(end0 > start0 + 10.0);
+    QCOMPARE(find(secondId).value("startProgressMeters").toDouble(), end0);
+
+    // A point on the approved segment's map line resolves to progress within it.
+    QVariantList polyline;
+    for (const auto &layer : controller.segmentReviewMapLayers()) {
+        const auto map = layer.toMap();
+        if (map.value("kind") == "approved" && map.value("id") == firstId && !map.value("polylines").toList().isEmpty())
+            polyline = map.value("polylines").toList().first().toList();
+    }
+    QVERIFY(polyline.size() >= 3);
+    const auto middle = polyline[polyline.size() / 2].toMap();
+    const auto picked = controller.segmentReviewProgressAt(middle.value("x").toDouble(), middle.value("y").toDouble());
+    QVERIFY2(picked.contains("progressMeters"), qPrintable(picked.value("error").toString()));
+    QVERIFY(picked.value("progressMeters").toDouble() >= start0 - 5.0);
+    QVERIFY(picked.value("progressMeters").toDouble() <= end0 + 5.0);
+    QVERIFY(controller.segmentReviewProgressAt(5.0, 5.0).contains("error"));
+
+    // Rename keeps the ID and changes the revision; results stamped earlier are stale.
+    const auto revisionBefore = controller.segmentReviewApproved().value("revision").toString();
+    const auto stamp = segmentationResultStamp(approvedSegmentation(stored(), configuration));
+    QCOMPARE(controller.editApprovedSegment(firstId, "Turn A", first.value("type").toString(), start0, end0, true), QString());
+    QCOMPARE(find(firstId).value("name").toString(), QString("Turn A"));
+    QVERIFY(controller.segmentReviewApproved().value("revision").toString() != revisionBefore);
+    QVERIFY(!segmentationResultCurrent(stamp, approvedSegmentation(stored(), configuration)));
+
+    // Moving the shared boundary moves the neighbour with it; without that, overlap is refused.
+    const double moved = end0 - 5.0;
+    QVERIFY(controller.editApprovedSegment(firstId, "Turn A", first.value("type").toString(), start0, end0 + 5.0, false)
+        .contains("overlap"));
+    QCOMPARE(controller.editApprovedSegment(firstId, "Turn A", first.value("type").toString(), start0, moved, true), QString());
+    QCOMPARE(find(firstId).value("endProgressMeters").toDouble(), moved);
+    QCOMPARE(find(secondId).value("startProgressMeters").toDouble(), moved);
+    QVERIFY(!controller.editApprovedSegment(firstId, "Turn A", "corner", start0, start0, true).isEmpty()); // empty
+    QVERIFY(!controller.editApprovedSegment(firstId, "Turn A", "corner", start0, length + 1.0, true).isEmpty());
+
+    // Split keeps the first ID; merging the parts restores one segment with that ID.
+    const auto second = find(secondId);
+    const double s1 = second.value("startProgressMeters").toDouble();
+    const double e1 = second.value("endProgressMeters").toDouble();
+    const double span = e1 > s1 ? e1 - s1 : e1 + length - s1;
+    QCOMPARE(controller.splitApprovedSegment(secondId, std::fmod(s1 + span / 2.0, length)), QString());
+    QCOMPARE(stored().size(), 3);
+    QString splitId;
+    for (const auto &value : stored()) {
+        const auto id = value.toObject().value("id").toString();
+        if (id != firstId && id != secondId) splitId = id;
+    }
+    QVERIFY(!splitId.isEmpty());
+    QVERIFY(find(splitId).value("name").toString().endsWith("(2)"));
+    QVERIFY(!controller.splitApprovedSegment(secondId, s1).isEmpty()); // on its own boundary
+    QCOMPARE(controller.mergeApprovedSegments(splitId, secondId), QString());
+    QCOMPARE(stored().size(), 2);
+    QCOMPARE(find(secondId).value("endProgressMeters").toDouble(), e1);
+    QVERIFY(!controller.mergeApprovedSegments(firstId, firstId).isEmpty());
+
+    {
+        // The approved-segment editor lists every approved segment.
+        QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick\nItem { width: 700; height: 900\n"
+            "SegmentReviewPanel { objectName: \"panel\"; width: 640; height: 900 } }",
+            QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *editor = root->findChild<QObject *>("approvedSegmentList");
+        QVERIFY(editor);
+        QTRY_COMPARE(editor->property("count").toInt(), 2);
+    }
+
+    // Undo walks back every recorded change (approvals included); redo replays them.
+    const auto finalSegments = stored();
+    int undone = 0;
+    while (controller.undoSegmentEdit().isEmpty()) ++undone;
+    QCOMPARE(undone, 6); // approve, approve, rename, move, split, merge
+    QVERIFY(stored().isEmpty());
+    QVERIFY(!controller.segmentReviewApproved().value("canUndo").toBool());
+    QVERIFY(controller.segmentReviewApproved().value("canRedo").toBool());
+    for (int i = 0; i < undone; ++i) QCOMPARE(controller.redoSegmentEdit(), QString());
+    QVERIFY(stored() == finalSegments);
+    QVERIFY(!controller.redoSegmentEdit().isEmpty());
+
+    // A change made outside the history is never overwritten by undo.
+    QVERIFY(controller.replaceRunTrackSegments(runId, QJsonArray{}, false));
+    QVERIFY(controller.undoSegmentEdit().contains("changed outside"));
+    QVERIFY(stored().isEmpty());
+    QVERIFY(!controller.segmentReviewApproved().value("canUndo").toBool());
 }
 
 void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()
