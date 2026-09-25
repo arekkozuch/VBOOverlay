@@ -116,6 +116,11 @@ target_compile_features(flappedear_corner_phase_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_corner_phase_tests PRIVATE flappedear_core Qt6::Test)
 flappedear_enable_warnings(flappedear_corner_phase_tests)
 add_test(NAME flappedear_corner_phase_tests COMMAND flappedear_corner_phase_tests)
+qt_add_executable(flappedear_braking_onset_tests BrakingOnsetTests.cpp)
+target_compile_features(flappedear_braking_onset_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_braking_onset_tests PRIVATE flappedear_core Qt6::Test)
+flappedear_enable_warnings(flappedear_braking_onset_tests)
+add_test(NAME flappedear_braking_onset_tests COMMAND flappedear_braking_onset_tests)
 add_test(NAME flappedear_startup_smoke COMMAND flappedear_native --startup-smoke)
 set_tests_properties(flappedear_startup_smoke PROPERTIES
     # Startup checks QML loading and controller/window lifecycle. Offscreen QPA

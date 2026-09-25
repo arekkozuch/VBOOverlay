@@ -234,6 +234,42 @@ inputs. Expected apex positions were checked beforehand with a Python model.
 Synthetic fixtures only; braking onset (KAN-47) and review UI (KAN-48) are
 separate.
 
+## Braking-onset candidates with explicit provenance (KAN-47)
+
+`detectBrakingOnsets` (`native/src/telemetry/BrakingOnset.h/.cpp`, algorithm
+tag `braking-onset-v1`) scans raw samples in a time window, never
+interpolating across gaps:
+
+- A session with a `brake` channel always uses it (`measuredBrake`,
+  provenance `measured`) with explicit hysteresis thresholds (default on 10 /
+  off 5, unit `%`). Deceleration is never substituted, even where the brake
+  channel has no data in the window (`noSamplesInWindow`).
+- Only without a brake channel does it use `longitudinalAcceleration`
+  (`inferredDeceleration`, provenance `inferred`; default on 0.30 / off 0.15
+  g, braking = negative G as in the analysis charts). Inference can be
+  disabled. With neither channel the result is `noBrakeOrDecelerationChannel`.
+  No brake value is manufactured.
+- Thresholds carry a unit. A channel declaring a different unit is
+  unresolved (`unitMismatch`); VBO channels currently declare no unit, so
+  their candidates carry `channelUnitUndeclared`.
+- Onset is the interpolated on-threshold crossing between two contiguous
+  samples (tolerance: that sample interval). Episodes shorter than
+  `minimumDurationSeconds` (0.2 s) are counted as rejected spikes. A gap
+  (non-finite value or a timestamp jump over three median intervals) ends an
+  episode (`interruptedByGap`); an onset right after a gap is `followsGap`;
+  window edges give `alreadyBrakingAtWindowStart` / `truncatedAtWindowEnd`.
+- The result reports method, provenance, channel, declared unit, thresholds,
+  minimum duration, rejected spikes and gap count. An optional projected lap
+  trace maps each onset to track progress.
+
+`BrakingOnsetTests` uses synthetic 20 Hz channels: a known 10% crossing at
+5.025 s (with a competing deceleration event ignored), a one-sample spike,
+chatter between the thresholds, missing and non-finite samples, window
+edges, inferred deceleration at 6.075 s, disabled inference, no substitution
+for an empty brake channel, `bar` vs `%` units, undeclared units, progress
+mapping and invalid inputs. Synthetic only; no real brake-sensor recording
+has been validated.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
