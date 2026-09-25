@@ -952,6 +952,7 @@ void AppController::closeOutingLap()
     m_outingLapChannels.clear();
     m_outingLapDetailState = "idle";
     m_outingLapDetailError.clear();
+    resetSegmentReview();
     emit outingLapDetailChanged();
     emit outingLapCursorChanged();
     emit outingLapVideoChanged();

@@ -320,6 +320,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
     initializeBatchImport();
     initializeOutingLaps();
     initializeOutingLapDetail();
+    initializeSegmentReview();
     initializeComparisonLaps();
     retireLegacyDocumentSettings();
     restoreStartupState();
@@ -334,12 +335,14 @@ AppController::~AppController()
     while (sourceShutdown.elapsed() < 2'000
            && (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
                || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
-               || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning() || m_comparisonWatcher.isRunning())) {
+               || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning() || m_comparisonWatcher.isRunning()
+               || m_segmentReviewWatcher.isRunning())) {
         QThread::msleep(10);
     }
     if (m_videoProbeWatcher.isRunning() || m_vboLoadWatcher.isRunning()
         || m_projectLoadWatcher.isRunning() || m_syncWatcher.isRunning() || m_batchWatcher.isRunning()
-        || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning() || m_comparisonWatcher.isRunning()) {
+        || m_outingLapWatcher.isRunning() || m_outingLapDetailWatcher.isRunning() || m_comparisonWatcher.isRunning()
+        || m_segmentReviewWatcher.isRunning()) {
         AppLog::warn(QStringLiteral("Source worker shutdown exceeded the bounded wait"));
     }
     bool exportStopped = true;
@@ -906,6 +909,7 @@ void AppController::cancelSourceJobs(const bool cancelOutingDetail)
 {
     if (cancelOutingDetail && m_comparisonCancellation) m_comparisonCancellation->store(true);
     if (cancelOutingDetail && m_outingLapDetailCancellation) m_outingLapDetailCancellation->store(true);
+    if (cancelOutingDetail && m_segmentReviewCancellation) m_segmentReviewCancellation->store(true);
     for (const auto &cancellation : {m_videoProbeCancellation, m_vboLoadCancellation,
                                      m_projectLoadCancellation, m_syncCancellation, m_outingLapCancellation}) {
         if (cancellation) {

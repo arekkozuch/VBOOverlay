@@ -23,6 +23,7 @@ qt_add_executable(flappedear_native_tests
     ../src/app/AppControllerImport.cpp
     ../src/app/AppControllerComparison.cpp
     ../src/app/AppControllerOuting.cpp
+    ../src/app/AppControllerSegmentReview.cpp
     TelemetryTests.cpp
     ../src/app/AppController.cpp
     ../src/app/AppController.h
@@ -111,6 +112,11 @@ target_compile_features(flappedear_track_segment_proposal_tests PRIVATE cxx_std_
 target_link_libraries(flappedear_track_segment_proposal_tests PRIVATE flappedear_core Qt6::Test)
 flappedear_enable_warnings(flappedear_track_segment_proposal_tests)
 add_test(NAME flappedear_track_segment_proposal_tests COMMAND flappedear_track_segment_proposal_tests)
+qt_add_executable(flappedear_track_segment_review_tests TrackSegmentReviewTests.cpp)
+target_compile_features(flappedear_track_segment_review_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_track_segment_review_tests PRIVATE flappedear_core Qt6::Test)
+flappedear_enable_warnings(flappedear_track_segment_review_tests)
+add_test(NAME flappedear_track_segment_review_tests COMMAND flappedear_track_segment_review_tests)
 qt_add_executable(flappedear_corner_phase_tests CornerPhaseTests.cpp)
 target_compile_features(flappedear_corner_phase_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_corner_phase_tests PRIVATE flappedear_core Qt6::Test)

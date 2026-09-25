@@ -10,6 +10,10 @@ Rectangle {
     // single-lap/playback session. No marker yet: a shared scrubbing cursor
     // across both traces lands with the shared-progress axis.
     property int comparisonSlot: -1
+    // KAN-48: draw the open lap's segment proposals and approved segments.
+    // Static geometry: repainted only when the review changes, never on playback.
+    property bool segmentReview: false
+    property int selectedSegmentIndex: -1
     readonly property var pathSegments: {
         if (root.comparisonSlot >= 0) {
             appController.comparisonSlots;
@@ -73,6 +77,54 @@ Rectangle {
                 target: appController
                 function onTelemetryChanged() {
                     trackCanvas.requestPaint();
+                }
+            }
+        }
+        Canvas {
+            id: segmentCanvas
+            objectName: "segmentReviewMapLayer"
+            anchors.fill: parent
+            visible: root.segmentReview
+            property var layers: root.segmentReview ? appController.segmentReviewMapLayers : []
+            property int selected: root.selectedSegmentIndex
+            onLayersChanged: requestPaint()
+            onSelectedChanged: requestPaint()
+            onAvailableChanged: if (available) requestPaint()
+            onVisibleChanged: if (visible) requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            function strokeLayer(context, layer) {
+                for (const points of layer.polylines) {
+                    if (points.length < 2) continue;
+                    context.beginPath();
+                    context.moveTo(Number(points[0].x) * width, Number(points[0].y) * height);
+                    for (let index = 1; index < points.length; ++index)
+                        context.lineTo(Number(points[index].x) * width, Number(points[index].y) * height);
+                    context.stroke();
+                }
+            }
+            onPaint: {
+                const context = getContext("2d");
+                context.reset();
+                context.lineCap = "round";
+                context.lineJoin = "round";
+                // Approved first, then proposals, then uncertainty windows on top.
+                for (const kind of ["approved", "proposal", "uncertain"]) {
+                    for (const layer of layers) {
+                        if (layer.kind !== kind) continue;
+                        const selectedLayer = layer.index !== undefined && layer.index === selected;
+                        if (kind === "approved") {
+                            context.strokeStyle = "#55e6a5";
+                            context.lineWidth = 4;
+                        } else if (kind === "proposal") {
+                            context.strokeStyle = layer.type === "corner" ? "#4da3ff" : "#8a9bb0";
+                            context.lineWidth = selectedLayer ? 6 : 3;
+                        } else {
+                            context.strokeStyle = "#ffb84d";
+                            context.lineWidth = selectedLayer ? 9 : 7;
+                        }
+                        strokeLayer(context, layer);
+                    }
                 }
             }
         }

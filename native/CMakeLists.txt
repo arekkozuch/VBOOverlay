@@ -118,6 +118,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TrackSegments.h
     src/telemetry/TrackSegmentProposals.cpp
     src/telemetry/TrackSegmentProposals.h
+    src/telemetry/TrackSegmentReview.cpp
+    src/telemetry/TrackSegmentReview.h
     src/telemetry/CornerPhases.cpp
     src/telemetry/CornerPhases.h
     src/telemetry/BrakingOnset.cpp
@@ -163,6 +165,7 @@ qt_add_executable(flappedear_native MACOSX_BUNDLE
     src/app/AppControllerImport.cpp
     src/app/AppControllerComparison.cpp
     src/app/AppControllerOuting.cpp
+    src/app/AppControllerSegmentReview.cpp
     src/app/AppController.cpp
     src/app/AppController.h
     src/main.cpp
@@ -214,6 +217,7 @@ qt_add_qml_module(flappedear_native
         qml/StartupError.qml
         qml/Main.qml
         qml/SectionTitle.qml
+        qml/SegmentReviewPanel.qml
         qml/TrackMapPanel.qml
         qml/TelemetryScene.qml
         qml/VisualSmokeScene.qml
