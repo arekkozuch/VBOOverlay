@@ -15,7 +15,7 @@ namespace {
 
 constexpr double dt = 0.05; // 20 Hz
 constexpr int sampleCount = 201; // t = 0 .. 10 s
-const double nan = std::numeric_limits<double>::quiet_NaN();
+const double noData = std::numeric_limits<double>::quiet_NaN();
 
 // Sample k at t = k * dt. `value` may return NaN (no data); `present` false omits the sample.
 TelemetryChannel makeChannel(const QString &name, const QString &unit, const std::function<double(int)> &value,
@@ -137,7 +137,7 @@ void BrakingOnsetTests::neverBridgesGaps()
 
     // Non-finite samples 120..125 split one application into two flagged candidates.
     const auto interrupted = sessionWith({{"brake", makeChannel("brake_pos", "%",
-        [](int k) { return k >= 120 && k <= 125 ? nan : brakeProfile(k); })}});
+        [](int k) { return k >= 120 && k <= 125 ? noData : brakeProfile(k); })}});
     const auto split = detectBrakingOnsets(interrupted, 0.0, 10.0);
     QCOMPARE(split.gaps, 1);
     QCOMPARE(split.candidates.size(), 2);
@@ -186,7 +186,7 @@ void BrakingOnsetTests::infersFromDecelerationOnlyWithoutABrakeChannel()
 
 void BrakingOnsetTests::neverSubstitutesDecelerationForMissingBrakeData()
 {
-    const auto session = sessionWith({{"brake", makeChannel("brake_pos", "%", [](int) { return nan; })},
+    const auto session = sessionWith({{"brake", makeChannel("brake_pos", "%", [](int) { return noData; })},
         {"longitudinalAcceleration", makeChannel("longacc", "g", decelerationProfile)}});
     const auto result = detectBrakingOnsets(session, 0.0, 10.0);
     QCOMPARE(result.method, QString(brakingMethodMeasured));
@@ -234,7 +234,7 @@ void BrakingOnsetTests::rejectsInvalidInputs()
 {
     const auto session = sessionWith({{"brake", makeChannel("brake_pos", "%", brakeProfile)}});
     QVERIFY(!detectBrakingOnsets(session, 5.0, 5.0).valid);
-    QVERIFY(!detectBrakingOnsets(session, nan, 5.0).valid);
+    QVERIFY(!detectBrakingOnsets(session, noData, 5.0).valid);
     BrakingOnsetOptions options;
     options.measuredBrake = {5.0, 5.0, "%"};
     QVERIFY(!detectBrakingOnsets(session, 0.0, 10.0, options).valid);
