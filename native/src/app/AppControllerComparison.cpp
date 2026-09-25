@@ -313,6 +313,10 @@ void AppController::setComparisonViewOpen(const bool open)
 {
     if (m_comparisonViewOpen == open) return;
     m_comparisonViewOpen = open;
+    if (!open) {
+        clearComparisonFocusSegment();
+        m_comparisonSegmentationRunId.clear();
+    }
     emit comparisonViewOpenChanged();
 }
 

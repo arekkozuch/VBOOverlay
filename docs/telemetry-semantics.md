@@ -133,6 +133,9 @@ Each sector names its donor lap. It is a sum of separately recorded fragments
 and does not show that the whole lap can be driven that fast. If any sector
 has no timed lap, no total is reported. All laps are timed on one shared axis
 built from the canonical run (the lowest run ID with approved segments).
+When the Corner Analyzer is opened from a theoretical-best sector, it
+compares the donor lap with the actual best using that canonical
+segmentation, and says so.
 
 Corner speeds (KAN-52) are read only from the recorded speed channel: entry
 and exit at the segment boundaries, the apex speed at the geometric apex and

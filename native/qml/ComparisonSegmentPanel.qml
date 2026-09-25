@@ -34,6 +34,22 @@ Rectangle {
         if (root.segments.length === 0) { root.selectedSegmentId = ""; return; }
         if (!root.segments.some(segment => segment.id === root.selectedSegmentId))
             root.selectedSegmentId = root.segments[0].id;
+        // Deferred: the same pair change also resets the shared zoom window
+        // (ComparisonDetailPanel.onTotalMetersChanged); apply after it.
+        Qt.callLater(root.applyRequestedSegment);
+    }
+    // KAN-57: a segment requested from elsewhere (the theoretical-best
+    // dialog). Applied once the requested pair's segments are available, then
+    // cleared so later list changes do not keep jumping back to it.
+    readonly property string requestedSegmentId: appController.comparisonFocusSegmentId
+    onRequestedSegmentIdChanged: root.applyRequestedSegment()
+    function applyRequestedSegment() {
+        if (root.requestedSegmentId.length === 0) return;
+        const segment = root.segments.find(candidate => candidate.id === root.requestedSegmentId);
+        if (!segment) return;
+        root.selectedSegmentId = segment.id;
+        if (segment.endMeters > segment.startMeters) root.selectMetric(segment.startMeters, segment.endMeters);
+        Qt.callLater(() => appController.clearComparisonFocusSegment());
     }
 
     function selectMetric(startMeters, endMeters) {
@@ -60,6 +76,16 @@ Rectangle {
             font.pixelSize: 9
             font.weight: Font.DemiBold
             font.letterSpacing: 1
+        }
+        Label {
+            objectName: "cornerAnalyzerSegmentationNote"
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: (appController.comparisonSlots, appController.comparisonSegmentationNote())
+            color: "#d6a457"
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            font.pixelSize: 11
         }
         Label {
             objectName: "cornerAnalyzerEmptyMessage"

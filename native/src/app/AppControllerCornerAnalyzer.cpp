@@ -5,7 +5,9 @@
 // (ensureComparisonProgressAxis) rather than a second alignment. Segments are
 // only ever shown when both slots' approved segmentation matches exactly
 // (same revision, same track configuration) -- never a guessed
-// correspondence between two independently-approved sets.
+// correspondence between two independently-approved sets -- or, when opened
+// from a theoretical-best sector (KAN-57), against the canonical run's
+// segmentation that result used, labelled via comparisonSegmentationNote().
 
 #include "app/AppController.h"
 #include "telemetry/MetricProvenance.h"
@@ -61,17 +63,52 @@ ApprovedSegmentation AppController::comparisonApprovedSegmentation(const int slo
     return {};
 }
 
-QVariantList AppController::comparisonApprovedSegments() const
+std::optional<ApprovedSegmentation> AppController::comparisonSharedSegmentation() const
 {
-    if (!comparisonPairReady()) return {};
+    if (!comparisonPairReady()) return std::nullopt;
     const auto approvedA = comparisonApprovedSegmentation(0);
     const auto approvedB = comparisonApprovedSegmentation(1);
-    if (!approvedA.valid || !approvedB.valid || approvedA.revision.isEmpty()
-        || approvedA.revision != approvedB.revision
-        || approvedA.trackConfigurationReference != approvedB.trackConfigurationReference)
-        return {};
+    if (approvedA.valid && approvedB.valid && !approvedA.revision.isEmpty()
+        && approvedA.revision == approvedB.revision
+        && approvedA.trackConfigurationReference == approvedB.trackConfigurationReference)
+        return approvedA;
+    // KAN-57: opened from a theoretical-best sector -- use the same canonical
+    // segmentation the theoretical best measured every lap against, but only
+    // when both laps belong to the group it was approved for.
+    if (m_comparisonSegmentationRunId.isEmpty()) return std::nullopt;
+    const auto group = m_comparisonSlots[0].row.value("compatibilityGroupId").toString();
+    if (group.isEmpty() || m_comparisonSlots[1].row.value("compatibilityGroupId").toString() != group)
+        return std::nullopt;
+    for (const auto &value : currentProjectObject().value("event").toObject().value("runs").toArray()) {
+        const auto run = value.toObject();
+        if (run.value("id").toString() != m_comparisonSegmentationRunId) continue;
+        auto canonical = approvedSegmentation(run.value("trackSegments"), group);
+        if (canonical.valid && !canonical.revision.isEmpty() && !canonical.segments.isEmpty()) return canonical;
+    }
+    return std::nullopt;
+}
+
+QString AppController::comparisonSegmentationNote() const
+{
+    if (!comparisonPairReady() || m_comparisonSegmentationRunId.isEmpty()) return {};
+    const auto approvedA = comparisonApprovedSegmentation(0);
+    const auto approvedB = comparisonApprovedSegmentation(1);
+    if (approvedA.valid && !approvedA.revision.isEmpty() && approvedA.revision == approvedB.revision) return {};
+    if (!comparisonSharedSegmentation()) return {};
+    QString runName = m_comparisonSegmentationRunId;
+    for (const auto &value : currentProjectObject().value("event").toObject().value("runs").toArray())
+        if (value.toObject().value("id").toString() == m_comparisonSegmentationRunId)
+            runName = value.toObject().value("name").toString();
+    return tr("Segments approved on %1, as used by the sector theoretical best. Boundaries are distances along "
+              "that run's axis, so they can shift by a few metres on these laps.").arg(runName);
+}
+
+QVariantList AppController::comparisonApprovedSegments() const
+{
+    const auto shared = comparisonSharedSegmentation();
+    if (!shared) return {};
     QVariantList rows;
-    for (const auto &value : approvedA.segments) {
+    for (const auto &value : shared->segments) {
         const auto segment = value.toObject();
         rows.append(QVariantMap{{"id", segment.value("id").toString()}, {"name", segment.value("name").toString()},
             {"type", segment.value("type").toString()},
@@ -86,12 +123,10 @@ QVariantMap AppController::comparisonSegmentMetrics(const QString &segmentId) co
     if (!comparisonPairReady() || segmentId.isEmpty()) return {};
     ensureComparisonProgressAxis();
     if (!m_comparisonProgressAxis.valid) return {};
-    const auto approvedA = comparisonApprovedSegmentation(0);
-    const auto approvedB = comparisonApprovedSegmentation(1);
-    if (!approvedA.valid || !approvedB.valid || approvedA.revision.isEmpty()
-        || approvedA.revision != approvedB.revision
-        || approvedA.trackConfigurationReference != approvedB.trackConfigurationReference)
-        return {};
+    const auto shared = comparisonSharedSegmentation();
+    if (!shared) return {};
+    const auto &approvedA = *shared;
+    const auto &approvedB = *shared;
     QString segmentType;
     for (const auto &value : approvedA.segments) {
         const auto segment = value.toObject();
