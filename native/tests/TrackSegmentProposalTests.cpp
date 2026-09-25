@@ -33,7 +33,8 @@ private slots:
     void proposesAlternatingCornersAndStraightsOnAStadium();
     void convertsProposalsIntoEditableTrackSegments();
     void marksBoundariesNearAGpsGapUncertain();
-    void marksConnectedOppositeCornersUncertain();
+    void chainsConnectedOppositeCorners();
+    void chainsCornersAcrossATooShortStraight();
     void marksShortStraightBoundariesUncertain();
     void foldsSmallKinksIntoTheStraight();
     void leavesAContinuousCornerUnresolved();
@@ -122,38 +123,69 @@ void TrackSegmentProposalTests::marksBoundariesNearAGpsGapUncertain()
     QVERIFY(wrapping.proposals[0].start.uncertaintyReasons.contains(proposalUncertainGpsGap));
 }
 
-void TrackSegmentProposalTests::marksConnectedOppositeCornersUncertain()
+void TrackSegmentProposalTests::chainsConnectedOppositeCorners()
 {
-    // Each 80 m straight on the long sides carries a left-right chicane with no straight between.
+    // KAN-116: each 80 m straight on the long sides carries a left-right
+    // chicane with no straight between; the chicane is one corner chain.
     const auto axis = buildLoopAxis(
         {straight(100), arc(180, 40), straight(80), arc(45, 25), arc(-45, 25), straight(80)});
     QVERIFY(axis.valid);
     const auto result = proposeTrackSegments(axis, computeTrackFeatures(axis, 6.0));
     QVERIFY(result.valid);
-    QCOMPARE(result.proposals.size(), 10);
 
     int corners = 0;
-    int connected = 0;
-    const auto count = result.proposals.size();
-    for (qsizetype i = 0; i < count; ++i) {
-        const auto &proposal = result.proposals[i];
-        if (proposal.type == TrackSegmentType::Corner) ++corners;
-        if (proposal.end.uncertaintyReasons.contains(proposalUncertainConnectedCorners)) {
-            ++connected;
-            const auto &next = result.proposals[(i + 1) % count];
-            QVERIFY(proposal.type == TrackSegmentType::Corner);
-            QVERIFY(next.type == TrackSegmentType::Corner);
-            QVERIFY(proposal.turnRadians > 0.0);
-            QVERIFY(next.turnRadians < 0.0);
-        }
+    int chains = 0;
+    int straights = 0;
+    for (const auto &proposal : result.proposals) {
+        QVERIFY(!proposal.start.uncertaintyReasons.contains(proposalUncertainConnectedCorners));
         if (proposal.type == TrackSegmentType::Straight) {
-            QVERIFY(proposal.start.certain());
-            QVERIFY(proposal.end.certain());
+            ++straights;
+            QCOMPARE(proposal.chainedCorners, 0);
+            continue;
+        }
+        ++corners;
+        if (proposal.chainedCorners > 1) {
+            ++chains;
+            QCOMPARE(proposal.chainedCorners, 2);
+            QVERIFY2(proposal.name.startsWith("Corners "), qPrintable(proposal.name));
+            // Left then right: the chain's net heading change is close to zero.
+            QVERIFY(std::abs(proposal.turnRadians) < 0.2);
+        } else {
+            QCOMPARE(proposal.chainedCorners, 1);
+            QVERIFY(std::abs(proposal.turnRadians - std::numbers::pi) < 0.15);
         }
     }
-    QCOMPARE(corners, 6);
-    QCOMPARE(connected, 2);
-    QCOMPARE(uncertainBoundaryCount(result), 2);
+    QCOMPARE(chains, 2);
+    QCOMPARE(corners, 4);
+    QCOMPARE(straights, 4); // corners and straights still alternate
+    for (qsizetype i = 0; i < result.proposals.size(); ++i) {
+        const auto &next = result.proposals[(i + 1) % result.proposals.size()];
+        QVERIFY(result.proposals[i].type != next.type);
+    }
+    QCOMPARE(uncertainBoundaryCount(result), 0);
+    // Corner numbering counts the corners inside a chain.
+    QStringList names;
+    for (const auto &proposal : result.proposals) if (proposal.type == TrackSegmentType::Corner) names << proposal.name;
+    QCOMPARE(names.size(), 4);
+    QVERIFY(names.contains("Corner 1") && names.contains("Corners 2–3") && names.contains("Corner 4") && names.contains("Corners 5–6"));
+}
+
+void TrackSegmentProposalTests::chainsCornersAcrossATooShortStraight()
+{
+    // Two 90-degree corners separated by a 16 m straight (a few metres of it
+    // survive the 6 m smoothing, below the 20 m minimum) at each end: one
+    // same-direction chain per end.
+    const auto axis = buildLoopAxis(
+        {straight(100), arc(90, 30), straight(16), arc(90, 30), straight(100)});
+    QVERIFY(axis.valid);
+    const auto result = proposeTrackSegments(axis, computeTrackFeatures(axis, 6.0));
+    QVERIFY(result.valid);
+    QCOMPARE(result.proposals.size(), 4);
+    for (const auto &proposal : result.proposals) {
+        if (proposal.type != TrackSegmentType::Corner) continue;
+        QCOMPARE(proposal.chainedCorners, 2);
+        QVERIFY(std::abs(proposal.turnRadians - std::numbers::pi) < 0.15);
+    }
 }
 
 void TrackSegmentProposalTests::marksShortStraightBoundariesUncertain()

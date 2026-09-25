@@ -137,9 +137,6 @@ TrackSegmentProposals proposeTrackSegments(const ProgressAxis &axis, const Track
     const int m = static_cast<int>(pieces.size());
     for (int k = 0; k < m; ++k) {
         const auto &run = pieces[k].run;
-        const auto &previous = pieces[(k - 1 + m) % m].run;
-        // Opposite-direction corners with no straight between them (an S-bend).
-        if (run.label != 0 && previous.label != 0) addReason(pieces[k].start.uncertaintyReasons, proposalUncertainConnectedCorners);
         const double straightLength = run.count * spacing;
         if (run.label == 0 && straightLength >= options.connectedStraightMeters
             && straightLength < options.certainStraightMeters) {
@@ -148,24 +145,30 @@ TrackSegmentProposals proposeTrackSegments(const ProgressAxis &axis, const Track
         }
     }
 
-    // A straight too short to stand on its own is not proposed; its two
-    // corners meet at its midpoint, and that shared boundary is uncertain.
-    QVector<Piece> kept;
-    kept.reserve(m);
-    QVector<bool> dropped(m, false);
-    for (int k = 0; k < m; ++k) {
+    // A straight too short to stand on its own is not proposed. Corners with
+    // no proposed straight between them (an S-bend, or a straight shorter than
+    // connectedStraightMeters) form one corner chain (KAN-116).
+    int anchor = -1;
+    for (int k = 0; k < m && anchor < 0; ++k) {
         const auto &run = pieces[k].run;
-        if (run.label == 0 && run.count * spacing < options.connectedStraightMeters) dropped[k] = true;
+        if (run.label == 0 && run.count * spacing >= options.connectedStraightMeters) anchor = k;
     }
-    for (int k = 0; k < m; ++k) {
-        if (!dropped[k]) continue;
-        const int next = (k + 1) % m;
-        const double midpoint = std::fmod(pieces[k].start.progressMeters + pieces[k].run.count * spacing / 2.0, length);
-        pieces[next].start.progressMeters = midpoint;
-        addReason(pieces[next].start.uncertaintyReasons, proposalUncertainConnectedCorners);
-    }
-    for (int k = 0; k < m; ++k) {
-        if (!dropped[k]) kept.append(pieces[k]);
+    if (anchor < 0) return unresolved(options, "continuousCorner");
+    QVector<Piece> kept;
+    QVector<int> chained;
+    kept.reserve(m);
+    for (int step = 0; step < m; ++step) {
+        const auto &piece = pieces[(anchor + step) % m];
+        const bool straightPiece = piece.run.label == 0;
+        const bool proposedStraight = straightPiece && piece.run.count * spacing >= options.connectedStraightMeters;
+        if (proposedStraight || kept.isEmpty() || kept.last().run.label == 0) {
+            kept.append(piece);
+            chained.append(straightPiece ? 0 : 1);
+            continue;
+        }
+        // Extend the current chain (label stays non-zero: it is a corner).
+        kept.last().run.count += piece.run.count;
+        if (!straightPiece) ++chained.last();
     }
     if (kept.size() < 2) return unresolved(options, "continuousCorner");
     if (kept.size() > maximumTrackSegments) return unresolved(options, "tooManySegments");
@@ -182,7 +185,9 @@ TrackSegmentProposals proposeTrackSegments(const ProgressAxis &axis, const Track
     // Order by start progress so only the final proposal can wrap the gate.
     const auto firstIt = std::min_element(kept.cbegin(), kept.cend(),
         [](const Piece &a, const Piece &b) { return a.start.progressMeters < b.start.progressMeters; });
-    std::rotate(kept.begin(), kept.begin() + std::distance(kept.cbegin(), firstIt), kept.end());
+    const auto rotation = std::distance(kept.cbegin(), firstIt);
+    std::rotate(kept.begin(), kept.begin() + rotation, kept.end());
+    std::rotate(chained.begin(), chained.begin() + rotation, chained.end());
 
     TrackSegmentProposals result;
     result.options = options;
@@ -203,7 +208,11 @@ TrackSegmentProposals proposeTrackSegments(const ProgressAxis &axis, const Track
             proposal.name = QString("Straight %1").arg(++straightNumber);
         } else {
             proposal.type = TrackSegmentType::Corner;
-            proposal.name = QString("Corner %1").arg(++cornerNumber);
+            proposal.chainedCorners = chained[k];
+            const int firstCorner = cornerNumber + 1;
+            cornerNumber += chained[k];
+            proposal.name = chained[k] > 1 ? QString("Corners %1–%2").arg(firstCorner).arg(cornerNumber)
+                                           : QString("Corner %1").arg(firstCorner);
             proposal.turnRadians = turnOf(piece.run);
             for (int j = 0; j < piece.run.count; ++j) {
                 const double curvature = features.samples[(piece.run.first + j) % n].curvaturePerMeter;
