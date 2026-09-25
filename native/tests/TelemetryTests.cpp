@@ -153,6 +153,7 @@ private slots:
     void calculatesOutingTheoreticalBestAcrossPopulation();
     void opensTheoreticalBestDonorFromAnotherRun();
     void opensTheoreticalBestSectorThroughQml();
+    void acceptsM3SegmentationCornerAndTheoreticalBestWorkflow();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -4183,6 +4184,33 @@ QByteArray scaledRouteVbo(const double scale)
     return out.join('\n').toUtf8();
 }
 
+// routeVbo() with each 48 s lap split into two halves of the revolution
+// driven at 0.9x and 1.1x the nominal time: every lap still takes exactly
+// 48 s, but one half is 10% quicker. `fastFirstHalf` picks which half.
+QByteArray warpedRouteVbo(const bool fastFirstHalf, const int samplesPerLap = 240)
+{
+    const auto lines = QString::fromUtf8(EventProjectFixture::routeVbo(samplesPerLap)).split('\n');
+    QStringList out;
+    bool data = false;
+    int index = 0;
+    double time = 0.0;
+    for (const auto &line : lines) {
+        if (!data || line.trimmed().isEmpty()) {
+            out << line;
+            data = data || line == "[data]";
+            continue;
+        }
+        if (index > 0) {
+            const bool firstHalf = (index - 1) % samplesPerLap < samplesPerLap / 2;
+            time += 48.0 / samplesPerLap * (firstHalf == fastFirstHalf ? 0.9 : 1.1);
+        }
+        auto fields = line.split(' ');
+        fields[0] = QString::number(time, 'f', 6);
+        out << fields.join(' ');
+        ++index;
+    }
+    return out.join('\n').toUtf8();
+}
 } // namespace
 
 // Approves every proposal on the first eligible lap of `runName`'s run and
@@ -4343,6 +4371,135 @@ void TelemetryTests::opensTheoreticalBestSectorThroughQml()
     QTRY_COMPARE_WITH_TIMEOUT(panel->property("selectedSegmentId").toString(), timedId, 20000);
     QTRY_VERIFY(controller.comparisonFocusSegmentId().isEmpty());
     QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow()
+{
+    // KAN-58 (M3 acceptance): proposal -> review -> correction -> save ->
+    // reopen -> corner comparison -> donor-sector navigation, with a
+    // known-time fixture, cache invalidation, a missing speed sensor and a
+    // changed layout. Two runs lap in exactly 48 s each, one 10% quicker in
+    // the first half of the revolution and the other in the second half, so
+    // the sector theoretical best must be clearly quicker than either lap
+    // and must take donors from both runs.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("fastfirst.vbo"), second = directory.filePath("fastsecond.vbo");
+    QVERIFY(writeBytes(first, warpedRouteVbo(true)));
+    QVERIFY(writeBytes(second, warpedRouteVbo(false)));
+    const auto projectPath = directory.filePath("m3.fetproject");
+    const auto ready = [](AppController &controller) {
+        controller.requestOutingTheoreticalBest();
+        return QTest::qWaitFor([&] { return controller.outingTheoreticalBest().value("state") != "loading"; }, 30000)
+            && controller.outingTheoreticalBest().value("state") == "ready";
+    };
+    QString revision;
+    double total = 0.0;
+    qsizetype sectorCount = 0;
+    {
+        AppController controller(nullptr, directory.filePath("recovery-first.json"));
+        QVERIFY(controller.importAnalysisRuns("M3 acceptance", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+        QTRY_VERIFY(!controller.outingLapsLoading());
+        QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+
+        // Proposal and review: approve every proposal on one run only.
+        const auto approved = approveAllSegmentsOnRun(controller, "fastfirst");
+        QVERIFY(approved.size() >= 3);
+
+        // Known-time sums.
+        QVERIFY2(ready(controller), qPrintable(controller.outingTheoreticalBest().value("message").toString()));
+        auto best = controller.outingTheoreticalBest();
+        const auto actual = best.value("actualBest").toMap();
+        QVERIFY(actual.value("coversWholeLap").toBool());
+        QVERIFY2(qAbs(actual.value("lapSeconds").toDouble() - 48.0) < 0.05, qPrintable(actual.value("lapSeconds").toString()));
+        QVERIFY(qAbs(actual.value("sectorSumSeconds").toDouble() - actual.value("lapSeconds").toDouble()) < 0.01);
+        QVERIFY(best.contains("totalSeconds"));
+        total = best.value("totalSeconds").toDouble();
+        QVERIFY2(total < 48.0 - 0.5 && total > 43.2 - 0.05, qPrintable(QString::number(total, 'f', 3)));
+        QVERIFY(qAbs(best.value("differenceSeconds").toDouble()
+            - (actual.value("sectorSumSeconds").toDouble() - total)) < 1e-6);
+        QSet<QString> donorRuns;
+        for (const auto &value : best.value("sectors").toList())
+            donorRuns.insert(value.toMap().value("sourceLapLabel").toString().section(" · ", 0, 0));
+        QVERIFY2(donorRuns.contains("fastfirst") && donorRuns.contains("fastsecond"),
+            qPrintable(QStringList(donorRuns.values()).join(", ")));
+        revision = best.value("revision").toString();
+        QVERIFY(!revision.isEmpty());
+
+        // Correction invalidates the cached result; a finer partition can only lower the sum.
+        int lapIndex = -1;
+        const auto rows = controller.outingLaps();
+        for (int i = 0; i < rows.size() && lapIndex < 0; ++i)
+            if (rows[i].toMap().value("type") == "LAP" && rows[i].toMap().value("runName") == "fastfirst") lapIndex = i;
+        QVERIFY(controller.selectOutingLap(lapIndex));
+        QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+        controller.requestSegmentReview();
+        QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+        QCOMPARE(controller.outingTheoreticalBest().value("state").toString(), QString("ready"));
+        const auto runId = controller.selectedOutingLap().value("runId").toString();
+        QJsonObject splittable;
+        for (const auto &value : controller.storedRunTrackSegments(runId).toArray())
+            if (splittable.isEmpty() && value.toObject().value("endProgressMeters").toDouble()
+                    > value.toObject().value("startProgressMeters").toDouble() + 40.0) splittable = value.toObject();
+        QVERIFY(!splittable.isEmpty());
+        QCOMPARE(controller.splitApprovedSegment(splittable.value("id").toString(),
+            (splittable.value("startProgressMeters").toDouble() + splittable.value("endProgressMeters").toDouble()) / 2.0), QString());
+        QTRY_COMPARE(controller.outingTheoreticalBest().value("state").toString(), QString("idle"));
+        controller.closeOutingLap();
+        QVERIFY(ready(controller));
+        best = controller.outingTheoreticalBest();
+        QVERIFY(best.value("revision").toString() != revision);
+        QCOMPARE(best.value("sectors").toList().size(), approved.size() + 1);
+        QVERIFY(best.value("totalSeconds").toDouble() <= total + 1e-6);
+        revision = best.value("revision").toString();
+        total = best.value("totalSeconds").toDouble();
+        sectorCount = best.value("sectors").toList().size();
+
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectPath)));
+        QVERIFY(!controller.dirty());
+    }
+    {
+        // Reopen: the same approved revision gives the same result.
+        AppController reopened(nullptr, directory.filePath("recovery-reopen.json"));
+        reopened.requestOpenProject(QUrl::fromLocalFile(projectPath));
+        QTRY_COMPARE(reopened.vboLoadState(), QString("ready"));
+        QTRY_VERIFY(!reopened.outingLapsLoading());
+        QTRY_VERIFY(!reopened.outingComparisonGroupId().isEmpty());
+        QVERIFY(ready(reopened));
+        const auto best = reopened.outingTheoreticalBest();
+        QCOMPARE(best.value("revision").toString(), revision);
+        QCOMPARE(best.value("sectors").toList().size(), sectorCount);
+        QVERIFY(qAbs(best.value("totalSeconds").toDouble() - total) < 1e-6);
+
+        // Donor-sector navigation into the corner comparison; the route has
+        // no speed channel, so corner speeds are unavailable, never derived.
+        QString cornerId;
+        for (const auto &value : best.value("sectors").toList())
+            if (cornerId.isEmpty() && value.toMap().value("type") == "corner" && value.toMap().contains("seconds"))
+                cornerId = value.toMap().value("segmentId").toString();
+        QVERIFY(!cornerId.isEmpty());
+        QVERIFY(reopened.openTheoreticalBestSector(cornerId));
+        QTRY_VERIFY(reopened.comparisonPairReady());
+        QCOMPARE(reopened.comparisonApprovedSegments().size(), sectorCount);
+        const auto metrics = reopened.comparisonSegmentMetrics(cornerId);
+        QVERIFY(metrics.value("sectorTime").toMap().value("a").toMap().contains("value"));
+        QVERIFY(metrics.value("sectorTime").toMap().value("b").toMap().contains("value"));
+        QCOMPARE(metrics.value("corner").toMap().value("entry").toMap().value("a").toMap().value("unavailableReason").toString(),
+            QString(cornerPhaseSpeedChannelMissing));
+        reopened.setComparisonViewOpen(false);
+
+        // A layout change: the approved segments no longer apply to the run.
+        QString runId;
+        for (const auto &value : reopened.outingLaps())
+            if (value.toMap().value("runName") == "fastfirst") runId = value.toMap().value("runId").toString();
+        QVERIFY(reopened.setRunTrackConfiguration(runId, "Changed", "clockwise"));
+        QTRY_VERIFY(!reopened.outingLapsLoading() && reopened.m_outingLapRequestedKey == reopened.outingLapKey());
+        QTRY_COMPARE(reopened.outingTheoreticalBest().value("state").toString(), QString("idle"));
+        reopened.requestOutingTheoreticalBest();
+        QTRY_VERIFY(reopened.outingTheoreticalBest().value("state") != "loading");
+        QCOMPARE(reopened.outingTheoreticalBest().value("state").toString(), QString("unavailable"));
+    }
 }
 
 void TelemetryTests::selectsCornerAnalyzerSegmentThroughQml()
