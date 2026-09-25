@@ -397,6 +397,46 @@ segments and their IDs but applies none of them, so no stamp stays current.
 The timing gate cannot be edited directly; it changes the same configuration
 reference when telemetry is replaced. Synthetic only.
 
+## Sector times and coverage per lap (KAN-51)
+
+`computeLapSectorTimes` (`native/src/telemetry/SectorTiming.h/.cpp`, tag
+`sector-timing-v1`) times each approved segment on one lap's projection onto
+the shared progress axis:
+
+- Boundary crossing times are interpolated between projected samples
+  (`timeAtProgress`). Boundaries at progress 0 and the axis length use the
+  lap's own timed start and end, so a complete partition telescopes to the lap
+  time; `sectorSumToleranceSeconds` (1 ms) bounds the difference.
+- Coverage: the lap's projected ranges are merged; an end within 15 m of the
+  gate counts as reaching it (projection starts a sample or two past the gate).
+  Each sector reports `coveredMeters`. A sector has a numeric time only when
+  one covered range spans it and both crossings exist; otherwise it is
+  `incompleteCoverage` with no time, never bridged across a gap.
+- A gate-crossing sector cannot be timed within one gate-to-gate lap
+  (`crossesGate`). `completePartition` is true only when approved segments
+  tile [0, axis length] without gaps or a gate-crossing segment; only then,
+  with every sector timed, are `sumSeconds` and `partitionErrorSeconds` set.
+- Each result carries the lap reference, segment IDs and a
+  `SegmentationResultStamp` tagged `sector-timing-v1`.
+- `AppController::outingLapSectorTimes()` exposes the reviewed lap's sector
+  times; there is no UI for them yet.
+
+Axis limitation: segment bounds are distances along the axis built when the
+segments were approved (the reviewed lap's own axis). Timing a different lap
+uses that lap's axis, so boundaries can shift by the difference in lap
+lengths along the racing line (typically metres). A canonical axis per track
+configuration is not implemented yet.
+
+`SectorTimingTests` uses a constant-speed projected lap: interpolated
+crossings between samples, gate boundaries from the lap timing, a complete
+partition summing within tolerance, a coverage hole leaving only the affected
+sector untimed (and a boundary inside the hole without a crossing time),
+gate-crossing and gapped partitions, no approved segments, and invalid inputs.
+`TelemetryTests::timesApprovedSectorsForTheOpenLap` approves every proposal on
+the synthetic route, splits the gate-crossing one at the gate and checks that
+every sector is timed and the sum matches the lap time within tolerance.
+Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

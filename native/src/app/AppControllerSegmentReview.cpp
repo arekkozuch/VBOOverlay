@@ -647,3 +647,28 @@ QVariantMap AppController::segmentReviewProgressAt(const double x, const double 
     if (pick.reason == "farFromTrack") return {{"error", QStringLiteral("Click on the lap's track line.")}};
     return {{"error", QStringLiteral("The lap trace is not available for picking.")}};
 }
+
+QVariantMap AppController::outingLapSectorTimes() const
+{
+    if (m_segmentReviewState != "ready" || !m_segmentReviewAxis.valid) return {{"valid", false}};
+    const auto times = computeLapSectorTimes(currentApprovedSegmentation(), m_segmentReviewAxis.lengthMeters,
+        m_segmentReviewLapTrace, m_selectedOutingLap.value("startTime").toDouble(),
+        m_selectedOutingLap.value("endTime").toDouble(),
+        QJsonObject::fromVariantMap(m_selectedOutingLap.value("reference").toMap()));
+    QVariantList sectors;
+    for (const auto &sector : times.sectors) {
+        QVariantMap row{{"segmentId", sector.segmentId}, {"name", sector.name}, {"type", sector.type},
+            {"startMeters", sector.startProgressMeters}, {"endMeters", sector.endProgressMeters},
+            {"lengthMeters", sector.lengthMeters}, {"coveredMeters", sector.coveredMeters}};
+        if (sector.seconds) row.insert("seconds", *sector.seconds);
+        else row.insert("unavailableReason", sector.unavailableReason);
+        sectors.append(row);
+    }
+    QVariantMap result{{"valid", times.valid}, {"revision", times.stamp.revision},
+        {"trackConfigurationReference", times.stamp.trackConfigurationReference},
+        {"calculationAlgorithm", times.stamp.calculationAlgorithm}, {"completePartition", times.completePartition},
+        {"lapSeconds", times.lapSeconds}, {"sectors", sectors}};
+    if (times.sumSeconds) result.insert("sumSeconds", *times.sumSeconds);
+    if (times.partitionErrorSeconds) result.insert("partitionErrorSeconds", *times.partitionErrorSeconds);
+    return result;
+}

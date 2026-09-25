@@ -34,6 +34,7 @@
 #include "RczFixture.h"
 #include "EventProjectFixture.h"
 #include "telemetry/TrackSegmentReview.h"
+#include "telemetry/SectorTiming.h"
 #include "project/EventProjectCodec.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -146,6 +147,7 @@ private slots:
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
+    void timesApprovedSectorsForTheOpenLap();
     void showsComparisonSlotCompatibilityAndCoverageContext();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
@@ -3745,6 +3747,72 @@ void TelemetryTests::persistsSegmentationAcrossSaveRecoveryAndReopen()
         QVERIFY(afterLayout.segments.isEmpty());
         QVERIFY(!segmentationResultCurrent(recoveredStamp, afterLayout, calculation));
     }
+}
+
+void TelemetryTests::timesApprovedSectorsForTheOpenLap()
+{
+    // KAN-51: approving every proposal and splitting the gate-crossing one at the
+    // gate tiles the lap; sector times then sum to the lap time within tolerance.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Sectors", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    int lapIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+    }
+    QVERIFY(lapIndex >= 0);
+    QVERIFY(!controller.outingLapSectorTimes().value("valid").toBool()); // no review yet
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    controller.requestSegmentReview();
+    QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+
+    // Nothing approved: valid, no sectors, no revision.
+    auto times = controller.outingLapSectorTimes();
+    QVERIFY(times.value("valid").toBool());
+    QVERIFY(times.value("sectors").toList().isEmpty());
+    QVERIFY(times.value("revision").toString().isEmpty());
+
+    const auto count = controller.segmentReviewItems().size();
+    for (int i = 0; i < count; ++i) QCOMPARE(controller.approveSegmentProposal(i), QString());
+    QString wrappingId;
+    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
+        const auto segment = value.toObject();
+        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble())
+            wrappingId = segment.value("id").toString();
+    }
+    if (!wrappingId.isEmpty()) {
+        times = controller.outingLapSectorTimes();
+        QVERIFY(!times.value("completePartition").toBool());
+        QCOMPARE(controller.splitApprovedSegment(wrappingId, controller.segmentReviewAxisLength()), QString());
+    }
+
+    times = controller.outingLapSectorTimes();
+    QVERIFY(times.value("valid").toBool());
+    QVERIFY(times.value("completePartition").toBool());
+    QCOMPARE(times.value("revision").toString(), controller.segmentReviewApproved().value("revision").toString());
+    QCOMPARE(times.value("calculationAlgorithm").toString(), QString(sectorTimingAlgorithm));
+    const auto sectors = times.value("sectors").toList();
+    QCOMPARE(sectors.size(), controller.storedRunTrackSegments(runId).toArray().size());
+    for (const auto &value : sectors) {
+        const auto sector = value.toMap();
+        QVERIFY2(sector.contains("seconds"), qPrintable(sector.value("name").toString() + ": "
+            + sector.value("unavailableReason").toString()));
+        QVERIFY(sector.value("seconds").toDouble() > 0.0);
+    }
+    QVERIFY(times.contains("sumSeconds"));
+    const double lapSeconds = controller.selectedOutingLap().value("endTime").toDouble()
+        - controller.selectedOutingLap().value("startTime").toDouble();
+    QVERIFY(std::abs(times.value("lapSeconds").toDouble() - lapSeconds) < 1e-9);
+    QVERIFY(times.value("partitionErrorSeconds").toDouble() <= sectorSumToleranceSeconds);
 }
 
 void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()

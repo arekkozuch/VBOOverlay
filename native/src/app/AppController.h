@@ -10,6 +10,7 @@
 #include "telemetry/TrackProgress.h"
 #include "telemetry/TrackSegmentReview.h"
 #include "telemetry/TrackSegmentEditing.h"
+#include "telemetry/SectorTiming.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -313,6 +314,8 @@ public:
     Q_INVOKABLE QString redoSegmentEdit();
     // Track progress at a normalized point of the lap map, or {"error": reason}.
     Q_INVOKABLE QVariantMap segmentReviewProgressAt(double x, double y) const;
+    // KAN-51: sector times of the reviewed lap from the approved segmentation.
+    Q_INVOKABLE QVariantMap outingLapSectorTimes() const;
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QVariantMap outingLapSeries(
         const QString &channel, double startTime, double endTime, int maximumPoints) const;
