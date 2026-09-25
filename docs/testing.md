@@ -437,6 +437,37 @@ the synthetic route, splits the gate-crossing one at the gate and checks that
 every sector is timed and the sum matches the lap time within tolerance.
 Synthetic only.
 
+## Corner entry, minimum, apex and exit speeds (KAN-52)
+
+`computeCornerSpeeds` (`native/src/telemetry/CornerSpeeds.h/.cpp`, tag
+`corner-speeds-v1`) reports four separate values for one approved segment on
+one lap, read from the recorded `speed` channel (provenance `measured`):
+
+- entry and exit: speed where the lap crosses the segment's start and end;
+- apex: speed at the geometric apex (`proposeCornerGeometryPhases` on the
+  segment via `cornerFromSegment`); unavailable when the apex is unresolved
+  (`multipleApexes`) or the segment is not a corner (`notACorner`), and
+  limited by `broadPeak` when the apex region is wide;
+- minimum: `locateMinimumSpeed` inside the segment, never the apex.
+
+No value is derived from GPS positions: without a speed channel every value
+is `speedChannelMissing` and provenance is `unavailable`. A value at a point
+without projected coverage or speed data is `incompleteCoverage`; a
+gate-crossing segment is `crossesGate`. When recorded speed samples inside the
+segment are more than 10 m apart on average, every present value carries
+`sparseSamples`. Results carry covered metres, mean sample spacing and a
+`SegmentationResultStamp` tagged `corner-speeds-v1`.
+`AppController::outingLapCornerSpeeds()` returns them for the reviewed lap's
+approved corners; there is no UI for them yet.
+
+`CornerPhaseTests` covers four separate values on the single-apex fixture
+(apex speed read ~28 m before the slowest point), a GPS gap removing only the
+minimum, sparse samples marked as limited, a missing speed channel, two
+apexes, a straight segment and a gate-crossing segment.
+`TelemetryTests::timesApprovedSectorsForTheOpenLap` checks that the synthetic
+route, which has no speed channel, yields explicitly unavailable corner
+speeds. The axis limitation of KAN-51 applies. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

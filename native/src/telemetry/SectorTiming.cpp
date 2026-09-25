@@ -124,4 +124,11 @@ LapSectorTimes computeLapSectorTimes(const ApprovedSegmentation &approved, const
     return result;
 }
 
+double projectedCoverageMeters(const QVector<ProgressSegment> &lapTrace, const double fromMeters, const double toMeters,
+    const double axisLengthMeters)
+{
+    if (!std::isfinite(axisLengthMeters) || axisLengthMeters <= 0.0 || !(toMeters >= fromMeters)) return 0.0;
+    return coveredWithin(coverage(lapTrace, axisLengthMeters), fromMeters, toMeters);
+}
+
 } // namespace FlappedEar

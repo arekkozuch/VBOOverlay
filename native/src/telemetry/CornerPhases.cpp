@@ -213,4 +213,26 @@ CornerPhasePoint locateMinimumSpeed(const ProgressAxis &axis, const TrackSegment
     return point;
 }
 
+TrackSegmentProposal cornerFromSegment(const ProgressAxis &axis, const TrackFeatures &features, const QJsonObject &segment)
+{
+    TrackSegmentProposal corner;
+    if (!axis.valid || !features.valid || features.samples.size() != axis.points.size() || !validTrackSegment(segment))
+        return corner;
+    const double length = axis.lengthMeters;
+    const double start = segment.value("startProgressMeters").toDouble();
+    const double end = segment.value("endProgressMeters").toDouble();
+    if (start > length || end > length) return corner;
+    corner.type = TrackSegmentType::Corner;
+    corner.name = segment.value("name").toString();
+    corner.start = {start, 0.0, {}};
+    corner.end = {end, 0.0, {}};
+    corner.lengthMeters = end >= start ? end - start : end + length - start;
+    for (const int index : cornerIndices(features, corner)) {
+        const double curvature = features.samples[index].curvaturePerMeter;
+        corner.turnRadians += curvature * axis.spacingMeters;
+        if (std::abs(curvature) > std::abs(corner.peakCurvaturePerMeter)) corner.peakCurvaturePerMeter = curvature;
+    }
+    return corner;
+}
+
 } // namespace FlappedEar

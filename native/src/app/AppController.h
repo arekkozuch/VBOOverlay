@@ -11,6 +11,7 @@
 #include "telemetry/TrackSegmentReview.h"
 #include "telemetry/TrackSegmentEditing.h"
 #include "telemetry/SectorTiming.h"
+#include "telemetry/CornerSpeeds.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -316,6 +317,8 @@ public:
     Q_INVOKABLE QVariantMap segmentReviewProgressAt(double x, double y) const;
     // KAN-51: sector times of the reviewed lap from the approved segmentation.
     Q_INVOKABLE QVariantMap outingLapSectorTimes() const;
+    // KAN-52: entry/apex/minimum/exit speeds of the reviewed lap per approved corner.
+    Q_INVOKABLE QVariantList outingLapCornerSpeeds() const;
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QVariantMap outingLapSeries(
         const QString &channel, double startTime, double endTime, int maximumPoints) const;
