@@ -24,7 +24,9 @@ inline constexpr double sectorSumToleranceSeconds = 0.001;
 inline constexpr double gateCoverageToleranceMeters = 15.0;
 
 // Why a sector has no numeric time.
-inline constexpr auto sectorCrossesGate = "crossesGate";           // needs two laps
+// No longer produced for sector times: since KAN-120 a gate-crossing sector is
+// timed within the lap (part after its start + part before its end).
+inline constexpr auto sectorCrossesGate = "crossesGate";
 inline constexpr auto sectorIncompleteCoverage = "incompleteCoverage"; // GPS/projection gap inside or at a boundary
 
 struct SectorTime {

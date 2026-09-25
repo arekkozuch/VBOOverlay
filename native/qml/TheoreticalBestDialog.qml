@@ -3,21 +3,27 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// KAN-57: the group's actual best lap against its sector theoretical best,
-// sector by sector, with the donor lap each fastest sector came from.
-// Selecting a sector opens the donor lap against the actual best in the
-// Corner Analyzer.
+// KAN-57/KAN-120: where the best lap can improve. The group's best lap
+// against the sector theoretical best, with the track map coloured by the
+// time the best lap leaves in each approved segment. Selecting a segment in
+// the list (or double-clicking it on the map) opens its fastest lap against
+// the best lap in the Corner Analyzer.
 Dialog {
     id: root
     objectName: "theoreticalBestDialog"
-    title: qsTr("Sector theoretical best")
+    title: qsTr("Where your best lap can improve")
     modal: true
     anchors.centerIn: parent
-    width: Math.min(820, parent.width - 40)
-    height: Math.min(640, parent.height - 30)
+    width: Math.min(1100, parent.width - 40)
+    height: Math.min(760, parent.height - 30)
     standardButtons: Dialog.Close
     readonly property var theoretical: appController.outingTheoreticalBest
     readonly property var actualBest: root.theoretical.actualBest || null
+    readonly property var gains: root.theoretical.gains || []
+    readonly property var mapData: root.theoretical.map || ({})
+    readonly property real maximumGain: Math.max(0.001, ...root.gains.map(gain => Number(gain.lossSeconds || 0)))
+    property string selectedSegmentId: ""
+
     function calculateIfNeeded() {
         if (root.visible && ["idle", "error"].indexOf(root.theoretical.state) >= 0) appController.requestOutingTheoreticalBest();
     }
@@ -26,30 +32,30 @@ Dialog {
     // recalculate while the dialog is showing.
     onTheoreticalChanged: if (root.theoretical.state === "idle") Qt.callLater(root.calculateIfNeeded)
 
-    function duration(seconds) {
-        if (seconds === null || seconds === undefined || !isFinite(seconds)) return "—";
-        const ms = Math.round(seconds * 1000);
-        return Math.floor(ms / 60000) + ":" + (Math.floor(ms / 1000) % 60).toString().padStart(2, "0")
-            + "." + (ms % 1000).toString().padStart(3, "0");
+    function actualSeconds() {
+        if (!root.actualBest) return undefined;
+        return root.actualBest.coversWholeLap ? root.actualBest.lapSeconds : root.actualBest.sectorSumSeconds;
     }
-    function seconds(value) {
-        return value === null || value === undefined ? "—" : appController.formatElapsedTime(Number(value));
+    // One hue, dim to bright: no loss is neutral, the largest loss is brightest.
+    function gainColor(gain) {
+        if (!gain || gain.lossSeconds === undefined) return "#26303b";
+        const t = Math.max(0, Math.min(1, Number(gain.lossSeconds) / root.maximumGain));
+        return Qt.rgba(0.30 + 0.70 * t, 0.36 + 0.24 * t, 0.42 - 0.22 * t, 1);
     }
-    function signedSeconds(value) {
-        if (value === null || value === undefined) return "—";
-        return (value >= 0 ? "+" : "") + Number(value).toFixed(3) + " s";
+    function openSegment(segmentId) {
+        if (appController.openTheoreticalBestSector(segmentId)) root.close();
     }
 
     contentItem: Item {
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
+            spacing: 10
             Label {
                 Layout.fillWidth: true
                 text: appController.outingRanking.groupLabel || qsTr("Choose a compatibility group in Day results")
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
-                color: "#dce4ee"
+                color: "#91a0b2"
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -72,121 +78,244 @@ Dialog {
                 text: qsTr("Calculate again")
                 onClicked: appController.requestOutingTheoreticalBest()
             }
-            GridLayout {
+
+            // Headline: your best lap -> theoretical best -> time available.
+            RowLayout {
                 objectName: "theoreticalBestSummary"
                 Layout.fillWidth: true
                 visible: root.theoretical.state === "ready"
-                columns: 2
-                columnSpacing: 16
-                rowSpacing: 4
-                Label { text: qsTr("Actual best"); color: "#91a0b2" }
-                Label {
-                    objectName: "theoreticalBestActual"
+                spacing: 28
+                ColumnLayout {
+                    spacing: 0
+                    Label { text: qsTr("YOUR BEST LAP"); color: "#8d9aaa"; font.pixelSize: 10; font.letterSpacing: 1 }
+                    Label {
+                        objectName: "theoreticalBestActual"
+                        text: appController.formatElapsedTime(Number(root.actualSeconds()))
+                            + (root.actualBest ? " · " + root.actualBest.label : "")
+                        textFormat: Text.PlainText
+                        color: "#f2f6fb"; font.pixelSize: 22; font.weight: Font.DemiBold
+                    }
+                }
+                Label { text: "→"; color: "#657386"; font.pixelSize: 22 }
+                ColumnLayout {
+                    spacing: 0
+                    Label { text: qsTr("THEORETICAL BEST"); color: "#8d9aaa"; font.pixelSize: 10; font.letterSpacing: 1 }
+                    Label {
+                        objectName: "theoreticalBestTotal"
+                        text: appController.formatElapsedTime(Number(root.theoretical.totalSeconds))
+                        color: "#55e6a5"; font.pixelSize: 22; font.weight: Font.DemiBold
+                    }
+                }
+                ColumnLayout {
+                    spacing: 0
+                    Label { text: qsTr("AVAILABLE"); color: "#8d9aaa"; font.pixelSize: 10; font.letterSpacing: 1 }
+                    Label {
+                        objectName: "theoreticalBestDifference"
+                        text: root.theoretical.differenceSeconds === undefined ? "—"
+                            : Number(root.theoretical.differenceSeconds).toFixed(3) + " s"
+                        color: "#ff9a4d"; font.pixelSize: 22; font.weight: Font.DemiBold
+                    }
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: root.theoretical.state === "ready"
+                spacing: 12
+                // Track map, each segment coloured by the time left there.
+                Rectangle {
                     Layout.fillWidth: true
-                    text: root.actualBest
-                        ? root.duration(root.actualBest.coversWholeLap ? root.actualBest.lapSeconds : root.actualBest.sectorSumSeconds)
-                            + " · " + root.actualBest.label
-                        : qsTr("Unavailable")
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                    color: "#f2f6fb"
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: 260
+                    color: "#070b10"
+                    border.color: "#1c2631"
+                    radius: 8
+                    Item {
+                        id: mapArea
+                        anchors.centerIn: parent
+                        anchors.verticalCenterOffset: -14
+                        width: Math.max(0, Math.min(parent.width - 40, parent.height - 70))
+                        height: width
+                        Canvas {
+                            id: mapCanvas
+                            objectName: "theoreticalBestMap"
+                            anchors.fill: parent
+                            property var segments: root.mapData.segments || []
+                            property string selected: root.selectedSegmentId
+                            onSegmentsChanged: requestPaint()
+                            onSelectedChanged: requestPaint()
+                            onAvailableChanged: if (available) requestPaint()
+                            onWidthChanged: requestPaint()
+                            onHeightChanged: requestPaint()
+                            function drawPart(context, points) {
+                                if (points.length < 2) return;
+                                context.beginPath();
+                                context.moveTo(points[0].x * width, points[0].y * height);
+                                for (let index = 1; index < points.length; ++index)
+                                    context.lineTo(points[index].x * width, points[index].y * height);
+                                context.stroke();
+                            }
+                            onPaint: {
+                                const context = getContext("2d");
+                                context.reset();
+                                context.lineCap = "round";
+                                context.lineJoin = "round";
+                                for (const segment of segments) {
+                                    context.lineWidth = 7;
+                                    context.strokeStyle = root.gainColor(segment);
+                                    for (const part of segment.parts) drawPart(context, part);
+                                }
+                                for (const segment of segments) {
+                                    if (segment.segmentId !== selected) continue;
+                                    context.lineWidth = 13;
+                                    context.strokeStyle = "#ffffff";
+                                    for (const part of segment.parts) drawPart(context, part);
+                                    context.lineWidth = 8;
+                                    context.strokeStyle = root.gainColor(segment);
+                                    for (const part of segment.parts) drawPart(context, part);
+                                }
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            // The segment nearest the pointer, within 16 px.
+                            function segmentAt(x, y) {
+                                let best = "", bestDistance = 16 * 16;
+                                for (const segment of mapCanvas.segments) {
+                                    for (const part of segment.parts) {
+                                        for (const point of part) {
+                                            const dx = point.x * width - x, dy = point.y * height - y;
+                                            if (dx * dx + dy * dy < bestDistance) { bestDistance = dx * dx + dy * dy; best = segment.segmentId; }
+                                        }
+                                    }
+                                }
+                                return best;
+                            }
+                            onClicked: mouse => {
+                                const id = segmentAt(mouse.x, mouse.y);
+                                if (id.length > 0) root.selectedSegmentId = id;
+                            }
+                            onDoubleClicked: mouse => {
+                                const id = segmentAt(mouse.x, mouse.y);
+                                if (id.length > 0) root.openSegment(id);
+                            }
+                        }
+                    }
+                    // Legend: one sequential scale.
+                    RowLayout {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 12
+                        spacing: 8
+                        Label { text: "0 s"; color: "#91a0b2"; font.pixelSize: 10 }
+                        Rectangle {
+                            Layout.preferredWidth: 140
+                            Layout.preferredHeight: 8
+                            radius: 4
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: root.gainColor({lossSeconds: 0}) }
+                                GradientStop { position: 1.0; color: root.gainColor({lossSeconds: root.maximumGain}) }
+                            }
+                        }
+                        Label { text: "+" + root.maximumGain.toFixed(3) + " s"; color: "#91a0b2"; font.pixelSize: 10 }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("time your best lap loses to the fastest recorded time · double-click a segment to compare")
+                            color: "#657386"; font.pixelSize: 10; elide: Text.ElideRight
+                        }
+                    }
                 }
-                Label { text: qsTr("Sector theoretical"); color: "#91a0b2" }
-                Label {
-                    objectName: "theoreticalBestTotal"
-                    text: root.duration(root.theoretical.totalSeconds)
-                    color: "#55e6a5"
-                    font.bold: true
-                }
-                Label { text: qsTr("Difference"); color: "#91a0b2" }
-                Label {
-                    objectName: "theoreticalBestDifference"
-                    text: root.signedSeconds(root.theoretical.differenceSeconds)
-                    color: "#f2f6fb"
+                // Segments, largest gain first.
+                ColumnLayout {
+                    Layout.preferredWidth: 420
+                    Layout.maximumWidth: 420
+                    Layout.fillHeight: true
+                    spacing: 4
+                    Label { text: qsTr("WHERE THE TIME IS"); color: "#8d9aaa"; font.pixelSize: 10; font.letterSpacing: 1 }
+                    ListView {
+                        id: sectors
+                        objectName: "theoreticalBestSectors"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 2
+                        model: root.gains
+                        currentIndex: root.gains.findIndex(gain => gain.segmentId === root.selectedSegmentId)
+                        onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+                        ScrollBar.vertical: ScrollBar {}
+                        delegate: ItemDelegate {
+                            id: sectorRow
+                            required property var modelData
+                            required property int index
+                            objectName: "theoreticalBestSector" + sectorRow.index
+                            width: sectors.width - 12
+                            height: 46
+                            highlighted: sectorRow.modelData.segmentId === root.selectedSegmentId
+                            enabled: sectorRow.modelData.seconds !== undefined
+                            onClicked: root.openSegment(sectorRow.modelData.segmentId)
+                            onHoveredChanged: if (sectorRow.hovered) root.selectedSegmentId = sectorRow.modelData.segmentId
+                            ToolTip.visible: sectorRow.hovered && sectorRow.enabled
+                            ToolTip.text: qsTr("Compare the fastest lap here with your best lap in the Corner Analyzer")
+                            contentItem: RowLayout {
+                                spacing: 10
+                                Rectangle {
+                                    Layout.preferredWidth: 6
+                                    Layout.fillHeight: true
+                                    radius: 3
+                                    color: root.gainColor(sectorRow.modelData)
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: sectorRow.modelData.name
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        color: "#f2f6fb"; font.pixelSize: 13
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: sectorRow.modelData.seconds === undefined
+                                            ? (sectorRow.modelData.unavailableReason || "")
+                                            : Number(sectorRow.modelData.lossSeconds || 0) > 0.0005
+                                                ? qsTr("fastest: %1 · %2").arg(sectorRow.modelData.sourceLapLabel || qsTr("lap unavailable"))
+                                                    .arg(appController.formatElapsedTime(Number(sectorRow.modelData.seconds)))
+                                                : qsTr("your best lap is the fastest here")
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        color: "#91a0b2"; font.pixelSize: 11
+                                    }
+                                }
+                                Label {
+                                    objectName: "theoreticalBestLoss" + sectorRow.index
+                                    text: sectorRow.modelData.lossSeconds === undefined ? "—"
+                                        : "+" + Number(sectorRow.modelData.lossSeconds).toFixed(3) + " s"
+                                    color: Number(sectorRow.modelData.lossSeconds || 0) > 0.0005 ? "#ff9a4d" : "#657386"
+                                    font.pixelSize: 14; font.weight: Font.DemiBold
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Label {
                 objectName: "theoreticalBestExplanation"
                 Layout.fillWidth: true
                 visible: root.theoretical.state === "ready"
-                text: qsTr("Algorithm: %1. The sum of the fastest recorded time for each approved sector across the eligible laps of this group, every lap timed on one shared track axis. It combines fragments of different laps and does not show that the whole lap can be driven that fast.")
+                text: qsTr("Algorithm: %1. The fastest recorded time for each approved segment across the eligible laps of this group, every lap timed on one shared track axis. It combines fragments of different laps and does not show that the whole lap can be driven that fast.")
                     .arg(root.theoretical.algorithm || "")
                     + (root.actualBest && !root.actualBest.coversWholeLap
-                        ? " " + qsTr("The approved sectors do not cover the whole lap, so the actual best above is the sum of its own times over the same sectors, not its lap time.")
+                        ? " " + qsTr("The approved segments do not cover the whole lap, so your best lap above is the sum of its own times over the same segments, not its lap time.")
                         : "")
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
-                font.pixelSize: 11
-                color: "#91a0b2"
-            }
-            ListView {
-                id: sectors
-                objectName: "theoreticalBestSectors"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumHeight: 80
-                visible: root.theoretical.state === "ready"
-                clip: true
-                spacing: 4
-                model: root.theoretical.sectors || []
-                ScrollBar.vertical: ScrollBar {}
-                header: RowLayout {
-                    width: sectors.width - 18
-                    spacing: 8
-                    Label { text: qsTr("Sector"); color: "#657386"; font.pixelSize: 11; Layout.fillWidth: true }
-                    Label { text: qsTr("Best"); color: "#657386"; font.pixelSize: 11; Layout.preferredWidth: 80 }
-                    Label { text: qsTr("Donor lap"); color: "#657386"; font.pixelSize: 11; Layout.preferredWidth: 170 }
-                    Label { text: qsTr("Actual best"); color: "#657386"; font.pixelSize: 11; Layout.preferredWidth: 80 }
-                    Label { text: qsTr("Loss"); color: "#657386"; font.pixelSize: 11; Layout.preferredWidth: 80 }
-                }
-                delegate: ItemDelegate {
-                    id: sectorRow
-                    required property var modelData
-                    required property int index
-                    objectName: "theoreticalBestSector" + index
-                    width: sectors.width - 18
-                    enabled: sectorRow.modelData.seconds !== undefined
-                    onClicked: {
-                        if (appController.openTheoreticalBestSector(sectorRow.modelData.segmentId)) root.close();
-                    }
-                    ToolTip.visible: hovered && enabled
-                    ToolTip.text: qsTr("Open the donor lap against the actual best in the Corner Analyzer")
-                    contentItem: RowLayout {
-                        spacing: 8
-                        Label {
-                            Layout.fillWidth: true
-                            text: sectorRow.modelData.name + " · " + sectorRow.modelData.type
-                            textFormat: Text.PlainText
-                            elide: Text.ElideRight
-                            color: "#dce4ee"
-                        }
-                        Label {
-                            Layout.preferredWidth: 80
-                            text: root.seconds(sectorRow.modelData.seconds)
-                            color: "#55e6a5"
-                        }
-                        Label {
-                            Layout.preferredWidth: 170
-                            text: sectorRow.modelData.seconds !== undefined
-                                ? (sectorRow.modelData.sourceLapLabel || qsTr("Lap unavailable"))
-                                : (sectorRow.modelData.unavailableReason || "")
-                            textFormat: Text.PlainText
-                            elide: Text.ElideRight
-                            color: sectorRow.modelData.seconds !== undefined ? "#dce4ee" : "#d6a457"
-                        }
-                        Label {
-                            Layout.preferredWidth: 80
-                            text: root.seconds(sectorRow.modelData.actualSeconds)
-                            color: "#b5c1d0"
-                        }
-                        Label {
-                            objectName: "theoreticalBestLoss" + sectorRow.index
-                            Layout.preferredWidth: 80
-                            text: root.signedSeconds(sectorRow.modelData.lossSeconds)
-                            color: "#f2f6fb"
-                        }
-                    }
-                }
+                font.pixelSize: 10
+                color: "#657386"
             }
         }
     }

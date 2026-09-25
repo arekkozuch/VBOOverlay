@@ -109,16 +109,26 @@ void SectorTimingTests::gapsLeaveOnlyTheAffectedSectorUntimed()
 
 void SectorTimingTests::gateCrossingAndGappedPartitionsAreNotComplete()
 {
+    // KAN-120: a sector crossing the gate is timed within the lap -- the part
+    // after its start (900 m to the lap end) plus the part before its end
+    // (lap start to 100 m) -- and the pair tiles the lap.
     const auto wrapping = approvedOf({{100.0, 900.0}, {900.0, 100.0}});
     auto times = computeLapSectorTimes(wrapping, lapLength, projectedLap(), lapStart, lapEnd, reference);
     QVERIFY(times.valid);
-    QVERIFY(!times.completePartition);
+    QVERIFY(times.completePartition);
     QVERIFY(times.sectors[0].seconds);
     QVERIFY(std::abs(*times.sectors[0].seconds - 40.0) < 1e-9);
-    QVERIFY(!times.sectors[1].seconds);
-    QCOMPARE(times.sectors[1].unavailableReason, QString(sectorCrossesGate));
+    QVERIFY(times.sectors[1].seconds);
+    QVERIFY(std::abs(*times.sectors[1].seconds - 10.0) < 1e-9);
+    QVERIFY(times.sectors[1].unavailableReason.isEmpty());
     QVERIFY(std::abs(times.sectors[1].lengthMeters - 200.0) < 1e-9);
-    QVERIFY(!times.sumSeconds);
+    QVERIFY(times.sumSeconds);
+    QVERIFY(*times.partitionErrorSeconds <= sectorSumToleranceSeconds);
+    // A hole in either part leaves it untimed, never bridged.
+    const auto holed = computeLapSectorTimes(wrapping, lapLength, projectedLap(930.0, 960.0), lapStart, lapEnd, reference);
+    QVERIFY(!holed.sectors[1].seconds);
+    QCOMPARE(holed.sectors[1].unavailableReason, QString(sectorIncompleteCoverage));
+    QVERIFY(!holed.sumSeconds);
 
     const auto gapped = approvedOf({{0.0, 300.0}, {400.0, lapLength}});
     times = computeLapSectorTimes(gapped, lapLength, projectedLap(), lapStart, lapEnd, reference);
