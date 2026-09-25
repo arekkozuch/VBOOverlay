@@ -108,6 +108,11 @@ must use `approvedSegmentation(run.trackSegments, configuration)`, record its
 reference, and treat itself as stale once `segmentationResultCurrent` fails.
 With no approved segments there is no revision and no segment-based result.
 
+Editing an approved segment (KAN-49) keeps its ID; a split keeps the ID on the
+first part and a merge keeps the earlier segment's ID. Every edit, split,
+merge, approval or revocation changes the revision, so dependent results must
+be recomputed. Approved segments never overlap and are never empty.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;

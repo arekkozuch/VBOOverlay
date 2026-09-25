@@ -297,7 +297,7 @@ has been validated.
 - Edits (name, type, numeric bounds) are validated (finite, within the axis,
   non-empty, 1–160 character name). A moved boundary drops the automatic
   uncertainty, and the geometric apex is hidden for an edited proposal.
-  Approved segments are revoked, not edited; full editing is KAN-49.
+  Approved segments are edited in the approved-segment editor (KAN-49).
 - `approvedSegmentation` gives the segments for one configuration and their
   `trackSegmentSetRevision`. Results record a `SegmentationResultStamp` and are
   current only while `segmentationResultCurrent` holds. Approval, revocation,
@@ -317,6 +317,53 @@ finite map layers, QML panel/map loading, approve/reject/edit/supersede/revoke,
 dirty state, revision changes, and save/reopen matching of the approved segment.
 Synthetic only; no real track has been reviewed. Rejections and edits are not
 persisted, and the approval state beyond the stored segments belongs to KAN-50.
+
+## Editing approved segments (KAN-49)
+
+`native/src/telemetry/TrackSegmentEditing.h/.cpp` (tag
+`track-segment-editing-v1`) holds the pure editing rules; the controller glue
+is in `AppControllerSegmentReview.cpp` and the editor is the approved-segment
+list in `SegmentReviewPanel.qml`.
+
+- Every operation takes the run's stored `trackSegments` and returns a
+  complete, ordered replacement (the one gate-crossing segment last) or a
+  reason. Overlap, empty segments, bounds outside the axis, invalid names or
+  types, the 64-segment bound and stored segments from another track
+  configuration are refused.
+- Stable identity: edit, move and rename keep the segment's ID; a split keeps
+  the ID on the first part and gives the second part a fresh ID and the name
+  "<name> (2)"; a merge keeps the earlier segment's ID and name, and becomes a
+  `sector` when the two types differ. Only segments that share a boundary
+  merge, and a merge that would span the whole lap is refused. Progress 0 and
+  the lap length are the same boundary.
+- *Move adjoining segments with shared boundaries* (on by default) moves a
+  neighbour whose boundary coincided with the moved one; otherwise a move into
+  a neighbour is refused as overlap. Gaps between segments are allowed.
+- Boundaries are entered numerically or picked on the map. A tap maps to the
+  nearest lap-trace sample within 3% of the map; it is refused when another
+  part of the track at least 30 m away along the lap is within 1% of that
+  distance (crossings and close parallel sections), so a pick is never guessed.
+- History policy: there was no document undo before this ticket. Segment
+  changes follow the existing document policy (dirty state, atomic save,
+  recovery) and add a bounded (50-step) undo/redo for the open review
+  session, covering approvals, revocations, edits, splits and merges. A step
+  is applied only while the run still holds exactly the state it left; any
+  other change clears the history instead of being overwritten. History is
+  not saved and is cleared when the review is reset or recomputed.
+- Any change produces a new `trackSegmentSetRevision`, so results stamped with
+  the old revision become stale (`segmentationResultCurrent` fails).
+
+`TrackSegmentEditingTests` covers identity, revision change, joined/unjoined
+moves, gaps, invalid edits, mixed configurations, split inside/at/across the
+gate, adjacent-only merge including across the gate and the whole-lap refusal,
+the segment bound, history order/redo clearing/bound, and picking on a
+figure-eight crossing (nearest, ambiguous, far, empty).
+`TelemetryTests::editsApprovedSegmentsWithUndo` drives the controller on the
+synthetic route: map pick inside an approved segment, rename, joined move,
+refused overlap and empty edits, split and merge with stable IDs, the editor
+list in QML, six-step undo and redo, and refusal to undo over a change made
+outside the history. Synthetic only; the map pick has not been exercised
+interactively, and no real track has been edited.
 
 ## Video-free day-result states (KAN-27)
 

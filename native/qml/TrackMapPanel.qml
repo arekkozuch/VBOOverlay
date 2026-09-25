@@ -14,6 +14,9 @@ Rectangle {
     // Static geometry: repainted only when the review changes, never on playback.
     property bool segmentReview: false
     property int selectedSegmentIndex: -1
+    // KAN-49: while a boundary is being placed, a tap reports its normalized map point.
+    property bool pickingProgress: false
+    signal progressPicked(real x, real y)
     readonly property var pathSegments: {
         if (root.comparisonSlot >= 0) {
             appController.comparisonSlots;
@@ -93,6 +96,15 @@ Rectangle {
             onVisibleChanged: if (visible) requestPaint()
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
+            TapHandler {
+                objectName: "segmentPickHandler"
+                enabled: root.segmentReview && root.pickingProgress
+                onTapped: (eventPoint, button) => {
+                    if (segmentCanvas.width > 0 && segmentCanvas.height > 0)
+                        root.progressPicked(eventPoint.position.x / segmentCanvas.width,
+                                            eventPoint.position.y / segmentCanvas.height);
+                }
+            }
             function strokeLayer(context, layer) {
                 for (const points of layer.polylines) {
                     if (points.length < 2) continue;
@@ -127,6 +139,15 @@ Rectangle {
                     }
                 }
             }
+        }
+        Label {
+            objectName: "segmentPickHint"
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: root.segmentReview && root.pickingProgress
+            text: qsTr("Click the track line to place the boundary")
+            color: "#ffb84d"
+            font.pixelSize: 11
         }
         Label {
             anchors.centerIn: parent

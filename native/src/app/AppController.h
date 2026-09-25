@@ -9,6 +9,7 @@
 #include "telemetry/CornerPhases.h"
 #include "telemetry/TrackProgress.h"
 #include "telemetry/TrackSegmentReview.h"
+#include "telemetry/TrackSegmentEditing.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -301,6 +302,16 @@ public:
         double startMeters, double endMeters);
     Q_INVOKABLE bool revokeApprovedSegment(const QString &id);
     Q_INVOKABLE bool discardOtherConfigurationSegments();
+    // KAN-49: editing approved segments. Each returns an empty string on
+    // success, otherwise the reason the edit was refused.
+    Q_INVOKABLE QString editApprovedSegment(const QString &id, const QString &name, const QString &type,
+        double startMeters, double endMeters, bool keepAdjacentJoined);
+    Q_INVOKABLE QString splitApprovedSegment(const QString &id, double atMeters);
+    Q_INVOKABLE QString mergeApprovedSegments(const QString &firstId, const QString &secondId);
+    Q_INVOKABLE QString undoSegmentEdit();
+    Q_INVOKABLE QString redoSegmentEdit();
+    // Track progress at a normalized point of the lap map, or {"error": reason}.
+    Q_INVOKABLE QVariantMap segmentReviewProgressAt(double x, double y) const;
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QVariantMap outingLapSeries(
         const QString &channel, double startTime, double endTime, int maximumPoints) const;
@@ -668,7 +679,10 @@ private:
     [[nodiscard]] QString segmentReviewConfiguration() const;
     [[nodiscard]] FlappedEar::ApprovedSegmentation currentApprovedSegmentation() const;
     [[nodiscard]] QVector<FlappedEar::SegmentReviewItem> currentSegmentReviewItems() const;
-    bool replaceRunTrackSegments(const QString &runId, const QJsonArray &segments);
+    bool replaceRunTrackSegments(const QString &runId, const QJsonArray &segments, bool recordHistory = true);
+    [[nodiscard]] QJsonValue storedRunTrackSegments(const QString &runId) const;
+    QString applySegmentEdit(const std::optional<QJsonArray> &next, const QString &error);
+    QString applySegmentHistoryStep(bool undo);
     [[nodiscard]] QVariantList mapPolylines(double startMeters, double endMeters) const;
     QFutureWatcher<SegmentReviewResult> m_segmentReviewWatcher;
     std::shared_ptr<std::atomic_bool> m_segmentReviewCancellation;
@@ -683,6 +697,9 @@ private:
     QSet<int> m_rejectedSegmentProposals;
     mutable QVariantList m_segmentReviewLayerCache;
     mutable bool m_segmentReviewLayersDirty = true;
+    FlappedEar::SegmentEditHistory m_segmentEditHistory;
+    mutable QVector<FlappedEar::ProgressMapPoint> m_segmentReviewPickTrace;
+    mutable bool m_segmentReviewPickTraceDirty = true;
     struct OutingSourceMessage {
         QString runId;
         QString text;

@@ -18,6 +18,34 @@ Rectangle {
     readonly property var approved: appController.segmentReviewApproved
     readonly property var items: appController.segmentReviewItems
     readonly property var types: ["corner", "straight", "sector"]
+    // KAN-49: a boundary being placed on the map ("start", "end" or "split") and its segment.
+    property string pickTarget: ""
+    property string pickSegmentId: ""
+    signal mapPicked(string target, string segmentId, real meters)
+
+    function startPick(target, segmentId) {
+        root.actionError = "";
+        root.pickTarget = target;
+        root.pickSegmentId = segmentId;
+    }
+    function acceptMapPick(x, y) {
+        const result = appController.segmentReviewProgressAt(x, y);
+        if (result.error !== undefined) {
+            root.actionError = result.error;
+            return;
+        }
+        root.actionError = "";
+        const target = root.pickTarget;
+        const segmentId = root.pickSegmentId;
+        root.pickTarget = "";
+        root.pickSegmentId = "";
+        root.mapPicked(target, segmentId, Number(result.progressMeters));
+    }
+    // An untouched field keeps the exact stored boundary, not its rounded display.
+    function fieldMeters(text, original) {
+        if (text === Number(original).toFixed(1)) return Number(original);
+        return text.trim().length > 0 ? Number(text) : NaN;
+    }
 
     function meters(value) { return Number(value).toFixed(1) + " m"; }
     function stateText(state) {
@@ -51,6 +79,20 @@ Rectangle {
                 font.pixelSize: 9
                 font.letterSpacing: 1
                 Layout.fillWidth: true
+            }
+            FeButton {
+                objectName: "undoSegmentEdit"
+                compact: true
+                text: qsTr("Undo")
+                enabled: root.approved.canUndo === true
+                onClicked: root.actionError = appController.undoSegmentEdit()
+            }
+            FeButton {
+                objectName: "redoSegmentEdit"
+                compact: true
+                text: qsTr("Redo")
+                enabled: root.approved.canRedo === true
+                onClicked: root.actionError = appController.redoSegmentEdit()
             }
             FeButton {
                 objectName: "recomputeSegmentProposals"
@@ -89,27 +131,191 @@ Rectangle {
                     wrapMode: Text.WordWrap
                     color: "#657386"
                     font.pixelSize: 10
-                    text: qsTr("Only approved segments are used by sector, theoretical-lap and report results, which record this revision. Proposals and rejections are not saved.")
+                    text: qsTr("Only approved segments are used by sector, theoretical-lap and report results, which record this revision; any edit makes earlier results stale. Proposals and rejections are not saved.")
                 }
-                Repeater {
-                    model: (root.approved.segments || []).filter(segment => !segment.matchesProposal)
-                    delegate: RowLayout {
-                        id: otherSegment
+                // KAN-49: every approved segment can be renamed, retyped, moved (numerically
+                // or by picking on the map), split, merged with the next one or revoked.
+                ListView {
+                    id: approvedList
+                    objectName: "approvedSegmentList"
+                    Layout.fillWidth: true
+                    implicitHeight: Math.min(contentHeight, 240)
+                    clip: true
+                    spacing: 4
+                    model: root.approved.segments || []
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: ColumnLayout {
+                        id: approvedRow
                         required property var modelData
-                        Layout.fillWidth: true
-                        Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            color: "#b5c0cd"
-                            font.pixelSize: 11
-                            text: otherSegment.modelData.name + " · " + root.typeText(otherSegment.modelData.type) + " · "
-                                + root.meters(otherSegment.modelData.startMeters) + " – " + root.meters(otherSegment.modelData.endMeters)
+                        required property int index
+                        property string mode: "" // "edit" or "split"
+                        readonly property var nextSegment: {
+                            const list = root.approved.segments || [];
+                            return list.length > 1 ? list[(approvedRow.index + 1) % list.length] : null;
                         }
-                        FeButton {
-                            compact: true
-                            danger: true
-                            text: qsTr("Revoke")
-                            onClicked: appController.revokeApprovedSegment(otherSegment.modelData.id)
+                        width: ListView.view.width - 10
+                        spacing: 4
+
+                        Connections {
+                            target: root
+                            function onMapPicked(pickTarget, segmentId, meters) {
+                                if (segmentId !== approvedRow.modelData.id) return;
+                                if (pickTarget === "start") approvedStart.text = meters.toFixed(1);
+                                else if (pickTarget === "end") approvedEnd.text = meters.toFixed(1);
+                                else if (pickTarget === "split") splitField.text = meters.toFixed(1);
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Label {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                color: "#b5c0cd"
+                                font.pixelSize: 11
+                                text: approvedRow.modelData.name + " · " + root.typeText(approvedRow.modelData.type) + " · "
+                                    + root.meters(approvedRow.modelData.startMeters) + " – " + root.meters(approvedRow.modelData.endMeters)
+                            }
+                            FeButton {
+                                objectName: "editApprovedSegment"
+                                compact: true
+                                text: qsTr("Edit")
+                                onClicked: {
+                                    approvedName.text = approvedRow.modelData.name;
+                                    approvedType.currentIndex = root.types.indexOf(approvedRow.modelData.type);
+                                    approvedStart.text = Number(approvedRow.modelData.startMeters).toFixed(1);
+                                    approvedEnd.text = Number(approvedRow.modelData.endMeters).toFixed(1);
+                                    approvedRow.mode = "edit";
+                                }
+                            }
+                            FeButton {
+                                objectName: "splitApprovedSegment"
+                                compact: true
+                                text: qsTr("Split")
+                                onClicked: { splitField.text = ""; approvedRow.mode = "split"; }
+                            }
+                            FeButton {
+                                objectName: "mergeApprovedSegment"
+                                compact: true
+                                text: qsTr("Merge next")
+                                enabled: approvedRow.nextSegment !== null
+                                onClicked: root.actionError = appController.mergeApprovedSegments(
+                                    approvedRow.modelData.id, approvedRow.nextSegment.id)
+                            }
+                            FeButton {
+                                compact: true
+                                danger: true
+                                text: qsTr("Revoke")
+                                onClicked: appController.revokeApprovedSegment(approvedRow.modelData.id)
+                            }
+                        }
+                        GridLayout {
+                            visible: approvedRow.mode === "edit"
+                            Layout.fillWidth: true
+                            columns: 3
+                            columnSpacing: 6
+                            rowSpacing: 4
+                            FeTextField {
+                                id: approvedName
+                                Layout.columnSpan: 2
+                                Layout.fillWidth: true
+                                maximumLength: 160
+                                placeholderText: qsTr("Name")
+                                Accessible.name: qsTr("Approved segment name")
+                            }
+                            FeComboBox {
+                                id: approvedType
+                                Layout.fillWidth: true
+                                model: root.types.map(type => root.typeText(type))
+                                Accessible.name: qsTr("Approved segment type")
+                            }
+                            FeTextField {
+                                id: approvedStart
+                                Layout.columnSpan: 2
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("Start (m)")
+                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                Accessible.name: qsTr("Approved segment start in meters")
+                            }
+                            FeButton {
+                                compact: true
+                                text: root.pickTarget === "start" && root.pickSegmentId === approvedRow.modelData.id
+                                    ? qsTr("Click map…") : qsTr("Pick on map")
+                                onClicked: root.startPick("start", approvedRow.modelData.id)
+                            }
+                            FeTextField {
+                                id: approvedEnd
+                                Layout.columnSpan: 2
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("End (m)")
+                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                Accessible.name: qsTr("Approved segment end in meters")
+                            }
+                            FeButton {
+                                compact: true
+                                text: root.pickTarget === "end" && root.pickSegmentId === approvedRow.modelData.id
+                                    ? qsTr("Click map…") : qsTr("Pick on map")
+                                onClicked: root.startPick("end", approvedRow.modelData.id)
+                            }
+                            FeCheckBox {
+                                id: keepJoined
+                                Layout.columnSpan: 3
+                                checked: true
+                                text: qsTr("Move adjoining segments with shared boundaries")
+                            }
+                            FeButton {
+                                compact: true
+                                accent: true
+                                text: qsTr("Save")
+                                onClicked: {
+                                    const error = appController.editApprovedSegment(approvedRow.modelData.id, approvedName.text,
+                                        root.types[approvedType.currentIndex],
+                                        root.fieldMeters(approvedStart.text, approvedRow.modelData.startMeters),
+                                        root.fieldMeters(approvedEnd.text, approvedRow.modelData.endMeters),
+                                        keepJoined.checked);
+                                    root.actionError = error;
+                                    if (error.length === 0) approvedRow.mode = "";
+                                }
+                            }
+                            FeButton {
+                                compact: true
+                                text: qsTr("Cancel")
+                                onClicked: { approvedRow.mode = ""; root.pickTarget = ""; root.actionError = ""; }
+                            }
+                        }
+                        RowLayout {
+                            visible: approvedRow.mode === "split"
+                            Layout.fillWidth: true
+                            spacing: 6
+                            FeTextField {
+                                id: splitField
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("Split at (m)")
+                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                Accessible.name: qsTr("Split position in meters")
+                            }
+                            FeButton {
+                                compact: true
+                                text: root.pickTarget === "split" && root.pickSegmentId === approvedRow.modelData.id
+                                    ? qsTr("Click map…") : qsTr("Pick on map")
+                                onClicked: root.startPick("split", approvedRow.modelData.id)
+                            }
+                            FeButton {
+                                compact: true
+                                accent: true
+                                text: qsTr("Split here")
+                                onClicked: {
+                                    const at = splitField.text.trim().length > 0 ? Number(splitField.text) : NaN;
+                                    const error = appController.splitApprovedSegment(approvedRow.modelData.id, at);
+                                    root.actionError = error;
+                                    if (error.length === 0) approvedRow.mode = "";
+                                }
+                            }
+                            FeButton {
+                                compact: true
+                                text: qsTr("Cancel")
+                                onClicked: { approvedRow.mode = ""; root.pickTarget = ""; root.actionError = ""; }
+                            }
                         }
                     }
                 }

@@ -101,6 +101,7 @@ void AppController::initializeSegmentReview()
             m_segmentReviewLapTrace = std::move(result.lapTrace);
         }
         m_segmentReviewLayersDirty = true;
+        m_segmentReviewPickTraceDirty = true;
         emit segmentReviewChanged();
     });
     // Approvals, and any other edit of the run's stored segments, change the approved revision.
@@ -126,6 +127,9 @@ void AppController::resetSegmentReview()
     m_rejectedSegmentProposals.clear();
     m_segmentReviewLayerCache.clear();
     m_segmentReviewLayersDirty = true;
+    m_segmentReviewPickTrace.clear();
+    m_segmentReviewPickTraceDirty = true;
+    m_segmentEditHistory.clear();
     if (changed) emit segmentReviewChanged();
 }
 
@@ -289,6 +293,7 @@ QVariantMap AppController::segmentReviewApproved() const
     }
     const auto hash = approved.revision.section(':', 1);
     return {{"valid", approved.valid}, {"revision", approved.revision}, {"shortRevision", hash.left(12)},
+        {"canUndo", m_segmentEditHistory.nextUndo() != nullptr}, {"canRedo", m_segmentEditHistory.nextRedo() != nullptr},
         {"trackConfigurationReference", approved.trackConfigurationReference}, {"count", approved.segments.size()},
         {"otherConfigurationCount", approved.otherConfigurationSegments}, {"segments", segments}};
 }
@@ -353,7 +358,7 @@ QVariantList AppController::segmentReviewMapLayers() const
     return m_segmentReviewLayerCache;
 }
 
-bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArray &segments)
+bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArray &segments, const bool recordHistory)
 {
     if (!EventProjectCodec::isEvent(m_projectTemplate) || projectLoading() || exporting()
         || recoveryPending() || m_batchPending
@@ -365,7 +370,8 @@ bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArr
     for (qsizetype i = 0; i < runs.size(); ++i) {
         auto run = runs[i].toObject();
         if (run.value("id").toString() != runId) continue;
-        if (run.value("trackSegments").toArray() == segments) return true;
+        const auto before = run.value("trackSegments").toArray();
+        if (before == segments) return true;
         if (segments.isEmpty()) run.remove("trackSegments");
         else run.insert("trackSegments", segments);
         runs[i] = run;
@@ -375,6 +381,7 @@ bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArr
         if (!ProjectLimits::validateProject(project, &error)) return false;
         m_projectTemplate = project;
         markPersistentChange();
+        if (recordHistory) m_segmentEditHistory.record(runId, before, segments);
         m_segmentReviewLayersDirty = true;
         emit segmentReviewChanged();
         return true;
@@ -495,4 +502,113 @@ bool AppController::discardOtherConfigurationSegments()
         return replaceRunTrackSegments(runId, withoutOtherConfigurations(run.value("trackSegments"), configuration));
     }
     return false;
+}
+
+QJsonValue AppController::storedRunTrackSegments(const QString &runId) const
+{
+    for (const auto &value : currentProjectObject().value("event").toObject().value("runs").toArray())
+        if (value.toObject().value("id").toString() == runId) return value.toObject().value("trackSegments");
+    return {};
+}
+
+QString AppController::applySegmentEdit(const std::optional<QJsonArray> &next, const QString &error)
+{
+    if (!next) return error.isEmpty() ? QStringLiteral("This edit is not possible.") : error;
+    if (!replaceRunTrackSegments(m_selectedOutingLap.value("runId").toString(), *next))
+        return QStringLiteral("The project cannot be changed right now.");
+    return {};
+}
+
+QString AppController::editApprovedSegment(const QString &id, const QString &name, const QString &type,
+    const double startMeters, const double endMeters, const bool keepAdjacentJoined)
+{
+    if (m_segmentReviewState != "ready") return QStringLiteral("Open the segment review first.");
+    if (currentApprovedSegmentation().otherConfigurationSegments > 0)
+        return QStringLiteral("Segments approved for a different track configuration must be discarded first.");
+    QString error;
+    const auto next = withEditedSegment(storedRunTrackSegments(m_selectedOutingLap.value("runId").toString()), id, name,
+        type, startMeters, endMeters, keepAdjacentJoined, m_segmentReviewAxis.lengthMeters, &error);
+    return applySegmentEdit(next, error);
+}
+
+QString AppController::splitApprovedSegment(const QString &id, const double atMeters)
+{
+    if (m_segmentReviewState != "ready") return QStringLiteral("Open the segment review first.");
+    if (currentApprovedSegmentation().otherConfigurationSegments > 0)
+        return QStringLiteral("Segments approved for a different track configuration must be discarded first.");
+    const auto stored = storedRunTrackSegments(m_selectedOutingLap.value("runId").toString());
+    QString name;
+    for (const auto &value : stored.toArray())
+        if (value.toObject().value("id").toString() == id) name = value.toObject().value("name").toString();
+    QString error;
+    const auto next = withSplitSegment(stored, id, atMeters, QStringLiteral("%1 (2)").arg(name.left(150)),
+        m_segmentReviewAxis.lengthMeters, &error);
+    return applySegmentEdit(next, error);
+}
+
+QString AppController::mergeApprovedSegments(const QString &firstId, const QString &secondId)
+{
+    if (m_segmentReviewState != "ready") return QStringLiteral("Open the segment review first.");
+    if (currentApprovedSegmentation().otherConfigurationSegments > 0)
+        return QStringLiteral("Segments approved for a different track configuration must be discarded first.");
+    QString error;
+    const auto next = withMergedSegments(storedRunTrackSegments(m_selectedOutingLap.value("runId").toString()),
+        firstId, secondId, m_segmentReviewAxis.lengthMeters, &error);
+    return applySegmentEdit(next, error);
+}
+
+QString AppController::applySegmentHistoryStep(const bool undo)
+{
+    const auto *step = undo ? m_segmentEditHistory.nextUndo() : m_segmentEditHistory.nextRedo();
+    if (!step) return undo ? QStringLiteral("Nothing to undo.") : QStringLiteral("Nothing to redo.");
+    const auto runId = step->runId;
+    const auto expected = undo ? step->after : step->before;
+    const auto target = undo ? step->before : step->after;
+    // Never overwrite a change made outside this history (another run, a reopened project).
+    if (storedRunTrackSegments(runId).toArray() != expected) {
+        m_segmentEditHistory.clear();
+        emit segmentReviewChanged();
+        return QStringLiteral("The segments changed outside this editor, so the edit history was cleared.");
+    }
+    if (!replaceRunTrackSegments(runId, target, false)) return QStringLiteral("The project cannot be changed right now.");
+    if (undo) m_segmentEditHistory.commitUndo();
+    else m_segmentEditHistory.commitRedo();
+    emit segmentReviewChanged();
+    return {};
+}
+
+QString AppController::undoSegmentEdit()
+{
+    return applySegmentHistoryStep(true);
+}
+
+QString AppController::redoSegmentEdit()
+{
+    return applySegmentHistoryStep(false);
+}
+
+QVariantMap AppController::segmentReviewProgressAt(const double x, const double y) const
+{
+    if (m_segmentReviewState != "ready" || !m_segmentReviewAxis.valid || !m_outingLapDetailSession)
+        return {{"error", QStringLiteral("Open the segment review first.")}};
+    const double length = m_segmentReviewAxis.lengthMeters;
+    if (m_segmentReviewPickTraceDirty) {
+        m_segmentReviewPickTraceDirty = false;
+        m_segmentReviewPickTrace.clear();
+        const double step = std::max(1.0, m_segmentReviewAxis.spacingMeters);
+        for (double progress = 0.0; progress < length; progress += step) {
+            const auto time = timeAtProgress(m_segmentReviewLapTrace, progress);
+            const auto point = time
+                ? FlappedEar::currentTrackPoint(*m_outingLapDetailSession, *time, m_outingLapDetailGeometry) : std::nullopt;
+            if (point) m_segmentReviewPickTrace.append({progress, *point});
+        }
+    }
+    // Normalized map units: within 3% of the map; a second branch of the track
+    // within 1% of that distance and 30 m away along the lap is ambiguous.
+    const auto pick = pickProgressAt(m_segmentReviewPickTrace, {x, y}, 0.03, 0.01, 30.0, length);
+    if (pick.progressMeters) return {{"progressMeters", *pick.progressMeters}};
+    if (pick.reason == "ambiguous")
+        return {{"error", QStringLiteral("Another part of the track passes close by here. Enter the distance instead.")}};
+    if (pick.reason == "farFromTrack") return {{"error", QStringLiteral("Click on the lap's track line.")}};
+    return {{"error", QStringLiteral("The lap trace is not available for picking.")}};
 }
