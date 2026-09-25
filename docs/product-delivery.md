@@ -50,7 +50,7 @@ work, not evidence that a future capability already works. Ranges are inclusive.
 | --- | --- | --- |
 | F00 | Partial: transactional multi-file import, portable event projects, day metadata, automatic track identity and persistent decisions | Folder/drop, reusable profiles and existing-run alternatives: [KAN-87]–[KAN-90]; whole-product acceptance remains in M5/M6 |
 | F01 | Partial: inspectable OUT/LAP/IN, stable references, exclusions and compatible best-run/day rankings; automatic GPS layout/direction grouping | Independent A/B, shared progress and delta: [KAN-29]–[KAN-42] |
-| F02 | Partial: versioned, validated segment data model (KAN-43); smoothed heading/curvature feature derivation on the shared axis (KAN-44) | Automatic proposal, review/editing and boundaries: [KAN-45]–[KAN-50]; acceptance: [KAN-58] |
+| F02 | Partial: versioned, validated segment data model (KAN-43); smoothed heading/curvature feature derivation on the shared axis (KAN-44); automatic straight/corner proposals with boundary uncertainty (KAN-45) | Corner phases, review/editing and persistence: [KAN-46]–[KAN-50]; acceptance: [KAN-58] |
 | F03 | Missing | Non-overlapping ranked losses and evidence navigation: [KAN-59]–[KAN-61]; acceptance: [KAN-74] |
 | F04 | Missing | Sector theoretical and donor provenance: [KAN-50], [KAN-51], [KAN-56]–[KAN-58]; separately validated realistic potential: [KAN-94]–[KAN-96] |
 | F05 | Partial: single-lap trace and independent cursor, readable channel selector | Shared progress, paired traces/cursor: [KAN-31], [KAN-33], [KAN-37]–[KAN-42]; available-channel map layers: [KAN-97]; interval/map UX: [KAN-114] |

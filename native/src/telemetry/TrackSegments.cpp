@@ -32,6 +32,7 @@ QString trackSegmentTypeName(const TrackSegmentType type)
     switch (type) {
     case TrackSegmentType::Sector: return "sector";
     case TrackSegmentType::Corner: return "corner";
+    case TrackSegmentType::Straight: return "straight";
     }
     return {};
 }
@@ -51,7 +52,7 @@ bool validTrackSegment(const QJsonObject &segment)
     if (segment.size() != 6) return false;
     if (!validSegmentText(segment.value("id"), maximumTrackSegmentIdCharacters)) return false;
     const auto type = segment.value("type");
-    if (!type.isString() || !QStringList{"sector", "corner"}.contains(type.toString())) return false;
+    if (!type.isString() || !QStringList{"sector", "corner", "straight"}.contains(type.toString())) return false;
     if (!validSegmentText(segment.value("name"), maximumTrackSegmentNameCharacters)) return false;
     const auto start = segment.value("startProgressMeters");
     const auto end = segment.value("endProgressMeters");

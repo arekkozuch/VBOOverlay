@@ -62,6 +62,9 @@ void TrackSegmentsTests::makesValidSegmentWithStableId()
     QVERIFY(validTrackSegment(another));
     QVERIFY(another.value("id").toString() != id);
     QCOMPARE(another.value("type").toString(), QString("sector"));
+    const auto straight = makeTrackSegment(TrackSegmentType::Straight, "Straight 1", 260.0, 500.0, reference);
+    QVERIFY(validTrackSegment(straight));
+    QCOMPARE(straight.value("type").toString(), QString("straight"));
 }
 
 void TrackSegmentsTests::rejectsMalformedSegments()
@@ -76,8 +79,10 @@ void TrackSegmentsTests::rejectsMalformedSegments()
     auto emptyId = valid; emptyId.insert("id", "");
     QVERIFY(!validTrackSegment(emptyId));
 
-    auto badType = valid; badType.insert("type", "straight");
+    auto badType = valid; badType.insert("type", "apex");
     QVERIFY(!validTrackSegment(badType));
+    auto straightType = valid; straightType.insert("type", "straight"); // accepted since track-segment-v2
+    QVERIFY(validTrackSegment(straightType));
 
     auto emptyName = valid; emptyName.insert("name", "   ");
     QVERIFY(!validTrackSegment(emptyName));
