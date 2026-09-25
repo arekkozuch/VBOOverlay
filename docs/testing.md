@@ -92,6 +92,40 @@ with a known, uniform 10% time rescale.
 slot (gated to the active run's open lap, KAN-39) and the two comparison
 slots cannot disturb each other's state while both are populated/open at once.
 
+## Versioned sector and corner model (KAN-43)
+
+`flappedear_track_segments_tests` is a new standalone CTest registration for
+`native/src/telemetry/TrackSegments.h/.cpp` (M3's first ticket): a plain-JSON
+segment model, following this codebase's established pattern of validating
+project-document data as `QJsonObject`/`QJsonArray` rather than persisting a
+deserialized C++ struct (mirroring `OutingLaps`' lap references and
+`EventProjectCodec`'s `comparisonRange`/`comparisonChannels`).
+
+Each segment carries a stable `QUuid`-minted `id`, a `type` (`"sector"` or
+`"corner"`), a `name`, `startProgressMeters`/`endProgressMeters` against the
+existing shared `ProgressAxis` (KAN-31), and a `trackConfigurationReference`
+in the exact `lapCompatibilityGroupId()` format -- validated for shape only,
+not liveness, so a stale reference is a later runtime concern rather than a
+load-time document rejection (the same principle stale lap references
+already follow). No `ProgressAxis` sample data is ever persisted.
+
+A run's segment array (`run.trackSegments`) must be listed in non-decreasing
+start-progress order, bounded to `maximumTrackSegments` (64) entries, with
+unique IDs; only the final (highest-start) segment may wrap across the
+start/finish line (`endProgressMeters < startProgressMeters`), the one
+physically meaningful case -- a segment covering the timing gate itself.
+`trackSegmentSetRevision()` is a pure, never-persisted content hash a future
+consumer recomputes and compares to detect any add/remove/reorder/edit --
+"versioning" without a separate counter to keep in sync, the same
+content-addressed approach `gateRevision`/`lapCompatibilityGroupId`/
+`lapDerivationKey` already use.
+
+`EventProjectCodec::validate()` now rejects a document whose `trackSegments`
+array is malformed, unordered, or exceeds the bound. Automatic corner
+detection (KAN-44), review/editing UI (KAN-45+) and Corner Analyzer metrics
+(KAN-46, KAN-51-55) are separate, later tickets -- this task is the data
+model and its validation only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
