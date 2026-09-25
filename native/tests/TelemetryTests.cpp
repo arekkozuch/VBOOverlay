@@ -154,6 +154,7 @@ private slots:
     void opensTheoreticalBestDonorFromAnotherRun();
     void opensTheoreticalBestSectorThroughQml();
     void acceptsM3SegmentationCornerAndTheoreticalBestWorkflow();
+    void derivesTimeLossObservationsForComparisonPair();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -4500,6 +4501,72 @@ void TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow()
         QTRY_VERIFY(reopened.outingTheoreticalBest().value("state") != "loading");
         QCOMPARE(reopened.outingTheoreticalBest().value("state").toString(), QString("unavailable"));
     }
+}
+
+void TelemetryTests::derivesTimeLossObservationsForComparisonPair()
+{
+    // KAN-59: one loss window per approved segment for the comparison pair.
+    // Both runs lap in 48 s but are quick in opposite halves, so windows show
+    // real losses and gains that net to the lap-time difference, and the
+    // running delta is reported separately from each window's increment.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("fastfirst.vbo"), second = directory.filePath("fastsecond.vbo");
+    QVERIFY(writeBytes(first, warpedRouteVbo(true)));
+    QVERIFY(writeBytes(second, warpedRouteVbo(false)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Losses", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    QVERIFY(!approveAllSegmentsOnRun(controller, "fastfirst").isEmpty());
+    QVERIFY(!controller.comparisonTimeLossObservations().value("valid").toBool()); // no pair yet
+
+    // A pair from different runs, measured against the canonical segments.
+    controller.requestOutingTheoreticalBest();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingTheoreticalBest().value("state").toString(), QString("ready"), 30000);
+    const auto best = controller.outingTheoreticalBest();
+    const auto actualRun = best.value("actualBest").toMap().value("label").toString().section(" · ", 0, 0);
+    QString crossRunSector;
+    for (const auto &value : best.value("sectors").toList()) {
+        const auto sector = value.toMap();
+        if (crossRunSector.isEmpty() && sector.contains("seconds")
+            && sector.value("sourceLapLabel").toString().section(" · ", 0, 0) != actualRun)
+            crossRunSector = sector.value("segmentId").toString();
+    }
+    QVERIFY(!crossRunSector.isEmpty());
+    QVERIFY(controller.openTheoreticalBestSector(crossRunSector));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    const auto losses = controller.comparisonTimeLossObservations();
+    QVERIFY(losses.value("valid").toBool());
+    QCOMPARE(losses.value("algorithm").toString(), QString("time-loss-windows-v1"));
+    const auto windows = losses.value("windows").toList();
+    QCOMPARE(windows.size(), controller.comparisonApprovedSegments().size());
+    QVERIFY(losses.value("allWindowsTimed").toBool());
+    QVERIFY2(std::abs(losses.value("timedIncrementSumSeconds").toDouble() - losses.value("lapDeltaSeconds").toDouble()) < 0.01,
+        qPrintable(QString("%1 vs %2").arg(losses.value("timedIncrementSumSeconds").toDouble())
+            .arg(losses.value("lapDeltaSeconds").toDouble())));
+    bool lost = false, gained = false;
+    double previousEnd = 0.0, previousCumulative = 0.0;
+    for (qsizetype i = 0; i < windows.size(); ++i) {
+        const auto window = windows[i].toMap();
+        const auto increment = window.value("incrementSeconds").toDouble();
+        lost |= increment > 0.5;
+        gained |= increment < -0.5;
+        QVERIFY(std::abs(increment - (window.value("cumulativeAtEndSeconds").toDouble()
+            - window.value("cumulativeAtStartSeconds").toDouble())) < 1e-6);
+        // Windows are in track order and never overlap; the running delta carries over.
+        if (i > 0) {
+            QVERIFY(window.value("startMeters").toDouble() >= previousEnd - 1e-6);
+            QVERIFY(std::abs(window.value("cumulativeAtStartSeconds").toDouble() - previousCumulative) < 0.01);
+        }
+        previousEnd = window.value("endMeters").toDouble();
+        previousCumulative = window.value("cumulativeAtEndSeconds").toDouble();
+        if (window.value("role") == "continuation")
+            QVERIFY(!window.value("cornerSegmentId").toString().isEmpty());
+    }
+    QVERIFY(lost && gained);
 }
 
 void TelemetryTests::selectsCornerAnalyzerSegmentThroughQml()

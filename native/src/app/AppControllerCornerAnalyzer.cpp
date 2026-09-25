@@ -244,3 +244,38 @@ QVariantMap AppController::comparisonSegmentMetrics(const QString &segmentId) co
 
     return result;
 }
+
+QVariantMap AppController::comparisonTimeLossObservations() const
+{
+    const auto shared = comparisonSharedSegmentation();
+    if (!shared) return {{"valid", false}};
+    ensureComparisonProgressAxis();
+    if (!m_comparisonProgressAxis.valid) return {{"valid", false}};
+    const auto &slotA = m_comparisonSlots[0];
+    const auto &slotB = m_comparisonSlots[1];
+    const auto startA = slotA.row.value("startTime").toDouble(), endA = slotA.row.value("endTime").toDouble();
+    const auto startB = slotB.row.value("startTime").toDouble(), endB = slotB.row.value("endTime").toDouble();
+    const auto timesA = computeLapSectorTimes(*shared, m_comparisonProgressAxis.lengthMeters,
+        m_comparisonProgressTraceCache[0], startA, endA, QJsonObject::fromVariantMap(slotA.row.value("reference").toMap()));
+    const auto timesB = computeLapSectorTimes(*shared, m_comparisonProgressAxis.lengthMeters,
+        m_comparisonProgressTraceCache[1], startB, endB, QJsonObject::fromVariantMap(slotB.row.value("reference").toMap()));
+    const auto observations = computeTimeLossObservations(
+        *shared, m_comparisonProgressAxis.lengthMeters, timesA, startA, timesB, startB);
+    if (!observations.valid) return {{"valid", false}, {"unavailableReason", observations.unavailableReason}};
+    QVariantList windows;
+    for (const auto &window : observations.windows) {
+        QVariantMap row{{"segmentId", window.segmentId}, {"name", window.name}, {"type", window.type},
+            {"role", window.role}, {"startMeters", window.startProgressMeters}, {"endMeters", window.endProgressMeters}};
+        if (!window.cornerSegmentId.isEmpty()) row.insert("cornerSegmentId", window.cornerSegmentId);
+        if (window.incrementSeconds) row.insert("incrementSeconds", *window.incrementSeconds);
+        else row.insert("unavailableReason", window.unavailableReason);
+        if (window.cumulativeAtStartSeconds) row.insert("cumulativeAtStartSeconds", *window.cumulativeAtStartSeconds);
+        if (window.cumulativeAtEndSeconds) row.insert("cumulativeAtEndSeconds", *window.cumulativeAtEndSeconds);
+        windows.append(row);
+    }
+    return {{"valid", true}, {"algorithm", QString::fromLatin1(timeLossAlgorithm)},
+        {"revision", observations.stamp.revision}, {"windows", windows},
+        {"allWindowsTimed", observations.allWindowsTimed},
+        {"timedIncrementSumSeconds", observations.timedIncrementSumSeconds},
+        {"lapDeltaSeconds", (endA - startA) - (endB - startB)}};
+}

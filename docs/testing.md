@@ -637,6 +637,48 @@ after a segment split, a missing speed sensor and a layout change. The
 acceptance matrix, measured values and outstanding real-track feedback are in
 `docs/kan58-m3-acceptance.md`. Synthetic only.
 
+## Time-loss observations (KAN-59)
+
+`computeTimeLossObservations` (`native/src/telemetry/TimeLoss.h/.cpp`, tag
+`time-loss-windows-v1`) makes one loss window per approved segment for an
+A/B pair, from both laps' `LapSectorTimes` on one shared axis:
+
+- **Increment**: A's time through the window minus B's. This is exactly how
+  much the A-minus-B delta changes across the window. Positive means A lost
+  time there, negative means A gained.
+- **Cumulative**: the running A-minus-B delta at the window's entry and exit
+  (crossing time minus each lap's timed start), reported separately. A
+  window can have a negative increment while the cumulative delta is still
+  positive.
+- **No double counting**: approved segments never overlap, so a stretch of
+  track belongs to at most one window. Unsegmented stretches belong to none.
+  With a complete partition and every window timed, the increments sum to
+  the lap-time difference.
+- **Corner vs continuation**: a straight that starts where a corner ends
+  (within 0.5 m, including a corner ending at the gate) has the role
+  `continuation` and names the corner. A loss carried onto the straight
+  stays out of the corner's window. Other straights are `straight`, sectors
+  are `sector`.
+- A window where either lap has no complete time (coverage gap,
+  gate-crossing segment) is `untimed` and is never bridged. Laps timed
+  against another revision or configuration are rejected.
+
+`AppController::comparisonTimeLossObservations()` returns these for the
+current comparison pair. It uses the Corner Analyzer's segmentation,
+including the canonical fallback when the pair was opened from a
+theoretical-best sector (KAN-57). Ranking and UI are KAN-60 and KAN-61.
+
+`TimeLossTests` builds laps from explicit time-at-progress functions. It
+checks exact increments, continuity of the running delta, a sum equal to the
+lap delta, continuation roles (including at the gate), a lap that gains in a
+window while still behind overall, a gap leaving one window untimed, and
+rejection of another revision.
+`TelemetryTests::derivesTimeLossObservationsForComparisonPair` compares laps
+from the two opposite-quick-half runs of the KAN-58 fixture. It checks that
+windows both lose and gain more than 0.5 s, that increments sum to the lap
+delta within 10 ms, and that windows are in order, do not overlap and have a
+continuous running delta. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

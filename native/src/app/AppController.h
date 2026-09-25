@@ -12,6 +12,7 @@
 #include "telemetry/TrackSegmentEditing.h"
 #include "telemetry/SectorTiming.h"
 #include "telemetry/TheoreticalBest.h"
+#include "telemetry/TimeLoss.h"
 #include "telemetry/CornerSpeeds.h"
 #include "telemetry/BrakingMetrics.h"
 #include "telemetry/ExitMetrics.h"
@@ -319,6 +320,8 @@ public:
     Q_INVOKABLE QVariantList comparisonApprovedSegments() const;
     Q_INVOKABLE QVariantMap comparisonSegmentMetrics(const QString &segmentId) const;
     Q_INVOKABLE QString comparisonSegmentationNote() const;
+    // KAN-59: one loss window per approved segment for the current pair.
+    Q_INVOKABLE QVariantMap comparisonTimeLossObservations() const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
