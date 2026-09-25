@@ -124,6 +124,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TrackSegmentEditing.h
     src/telemetry/SectorTiming.cpp
     src/telemetry/SectorTiming.h
+    src/telemetry/TheoreticalBest.cpp
+    src/telemetry/TheoreticalBest.h
     src/telemetry/CornerSpeeds.cpp
     src/telemetry/CornerSpeeds.h
     src/telemetry/BrakingMetrics.cpp
@@ -178,6 +180,7 @@ qt_add_executable(flappedear_native MACOSX_BUNDLE
     src/app/AppControllerOuting.cpp
     src/app/AppControllerSegmentReview.cpp
     src/app/AppControllerCornerAnalyzer.cpp
+    src/app/AppControllerTheoreticalBest.cpp
     src/app/AppController.cpp
     src/app/AppController.h
     src/main.cpp

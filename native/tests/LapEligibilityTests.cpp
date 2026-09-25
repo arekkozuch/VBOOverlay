@@ -45,6 +45,7 @@ private slots:
     void progressionPreservesOrderContextAndGaps();
     void ranksCompatibleLapsDeterministically();
     void rankingReportsAllAppliedExclusions();
+    void exposesEligiblePopulationMatchingRanking();
     void separatesCompatibilityGroups_data();
     void separatesCompatibilityGroups();
     void preservesIndependentCompatibilityReasons();
@@ -213,6 +214,46 @@ void LapEligibilityTests::rankingReportsAllAppliedExclusions()
     QVERIFY(ranked.value("excludedLaps").toArray().first().toObject().value("reasons").toArray().contains("invalid-reference"));
     QVector<OutingLapRow> tooMany(maximumOutingLapRows + 1);
     QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(rankOutingLaps(tooMany, group, configs, {})));
+}
+
+// KAN-56: eligibleOutingLaps must return exactly rankOutingLaps' own eligible
+// set (same reasons, same exclusions, same stale/group filtering) -- a second
+// population consumer (theoretical best) can never silently drift from
+// ranking's definition of "eligible".
+void LapEligibilityTests::exposesEligiblePopulationMatchingRanking()
+{
+    const QJsonObject config{{"layoutId", "Full"}, {"direction", "clockwise"}, {"gateRevision", "gates-v1:" + QString(64, 'a')}};
+    const auto group = lapCompatibilityGroupId(config);
+    auto otherGroupConfig = config; otherGroupConfig.insert("layoutId", "Short");
+    QHash<QString, QJsonObject> configs{{"a", config}, {"b", config}, {"stale", config}, {"other", otherGroupConfig}};
+    OutingLapRow a; a.runId = "a"; a.runName = "Morning"; a.type = LapSectionType::Lap;
+    a.start = 0; a.end = 4; a.lapNumber = 1; a.referenceEligible = true;
+    a.reference = makeLapReference(a, "event", "a-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    auto b = a; b.runId = "b"; b.runName = "Afternoon"; b.end = 5; b.lapNumber = 1;
+    b.reference = makeLapReference(b, "event", "b-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    auto excluded = a; excluded.runId = "a"; excluded.end = 6; excluded.lapNumber = 2;
+    excluded.reference = makeLapReference(excluded, "event", "a-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    auto staleLap = a; staleLap.runId = "stale"; staleLap.end = 7; staleLap.lapNumber = 1;
+    staleLap.reference = makeLapReference(staleLap, "event", "stale-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    auto otherGroup = a; otherGroup.runId = "other"; otherGroup.end = 1; otherGroup.lapNumber = 1;
+    otherGroup.reference = makeLapReference(otherGroup, "event", "other-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    auto ineligible = a; ineligible.runId = "b"; ineligible.end = 8; ineligible.lapNumber = 2;
+    ineligible.referenceEligible = false; ineligible.referenceIssue = LapReferenceIssue::GpsGap;
+    ineligible.reference = makeLapReference(ineligible, "event", "b-source", QByteArray(64, 'a'), QByteArray(64, 'b'));
+    const QVector<OutingLapRow> rows{a, b, excluded, staleLap, otherGroup, ineligible};
+    const QJsonArray exclusions{QJsonObject{{"reference", excluded.reference}, {"reason", "Traffic"}}};
+    const QSet<QString> staleRunIds{"stale"};
+
+    const auto ranking = rankOutingLaps(rows, group, configs, exclusions, staleRunIds);
+    const auto eligible = eligibleOutingLaps(rows, group, configs, exclusions, staleRunIds);
+    QCOMPARE(eligible.size(), ranking.value("eligibleLapCount").toInt());
+    QCOMPARE(eligible.size(), 2); // only a and b: excluded/stale/other-group/ineligible all withheld
+    QVERIFY(std::any_of(eligible.cbegin(), eligible.cend(), [&](const auto *row) { return row->reference == a.reference; }));
+    QVERIFY(std::any_of(eligible.cbegin(), eligible.cend(), [&](const auto *row) { return row->reference == b.reference; }));
+
+    QVERIFY(eligibleOutingLaps(rows, "", configs, exclusions, staleRunIds).isEmpty());
+    QVector<OutingLapRow> tooMany(maximumOutingLapRows + 1);
+    QVERIFY_THROWS_EXCEPTION(ResourceLimitError, static_cast<void>(eligibleOutingLaps(tooMany, group, configs, {})));
 }
 
 void LapEligibilityTests::separatesCompatibilityGroups_data()

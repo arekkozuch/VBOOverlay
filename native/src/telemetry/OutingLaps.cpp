@@ -123,6 +123,45 @@ QString lapCompatibilityReasonText(const QString &reason)
     return reason;
 }
 
+namespace {
+// The compatibility/eligibility reasons one lap row has within its group
+// (empty when eligible). Shared by rankOutingLaps and eligibleOutingLaps so a
+// second population consumer can never drift out of sync with ranking's own
+// definition of "eligible".
+QStringList outingLapEligibilityReasons(const OutingLapRow &row, const QJsonObject &configuration,
+    const QString &userExclusionReason, const bool staleSource)
+{
+    auto reasons = lapCompatibilityReasons(configuration, {}, row.referenceIssue, !userExclusionReason.isEmpty());
+    if (!row.layoutIssue.isEmpty()) reasons.append(row.layoutIssue);
+    if (staleSource) reasons.append("stale-source");
+    if (!row.referenceEligible && reasons.isEmpty()) reasons.append("ineligible-lap");
+    if (!validLapReference(row.reference) || row.reference.value("algorithm") != lapReferenceAlgorithm
+        || row.reference.value("type") != "LAP" || row.reference.value("runId") != row.runId
+        || row.reference.value("startTime").toDouble() != row.start || row.reference.value("endTime").toDouble() != row.end)
+        reasons.append("invalid-reference");
+    return reasons;
+}
+}
+
+QVector<const OutingLapRow *> eligibleOutingLaps(const QVector<OutingLapRow> &rows, const QString &groupId,
+    const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
+    const QSet<QString> &staleRunIds)
+{
+    QVector<const OutingLapRow *> eligible;
+    if (groupId.isEmpty()) return eligible;
+    if (rows.size() > maximumOutingLapRows || exclusions.size() > maximumOutingLapRows)
+        throw ResourceLimitError("Too many laps or exclusions to rank this outing.");
+    const auto reasonsByReference = lapExclusionReasons(exclusions);
+    for (const auto &row : rows) {
+        if (row.type != LapSectionType::Lap) continue;
+        if (lapCompatibilityGroupId(configurations.value(row.runId)) != groupId) continue;
+        const auto reason = reasonsByReference.value(lapReferenceKey(row.reference));
+        if (outingLapEligibilityReasons(row, configurations.value(row.runId), reason, staleRunIds.contains(row.runId)).isEmpty())
+            eligible.append(&row);
+    }
+    return eligible;
+}
+
 QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &groupId,
     const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
     const QSet<QString> &staleRunIds)
@@ -164,14 +203,7 @@ QJsonObject rankOutingLaps(const QVector<OutingLapRow> &rows, const QString &gro
         if (row.type != LapSectionType::Lap) continue;
         ++run.count;
         const auto reason = reasonsByReference.value(lapReferenceKey(row.reference));
-        auto reasons = lapCompatibilityReasons(configurations.value(row.runId), {}, row.referenceIssue, !reason.isEmpty());
-        if (!row.layoutIssue.isEmpty()) reasons.append(row.layoutIssue);
-        if (staleRunIds.contains(row.runId)) reasons.append("stale-source");
-        if (!row.referenceEligible && reasons.isEmpty()) reasons.append("ineligible-lap");
-        if (!validLapReference(row.reference) || row.reference.value("algorithm") != lapReferenceAlgorithm
-            || row.reference.value("type") != "LAP" || row.reference.value("runId") != row.runId
-            || row.reference.value("startTime").toDouble() != row.start || row.reference.value("endTime").toDouble() != row.end)
-            reasons.append("invalid-reference");
+        auto reasons = outingLapEligibilityReasons(row, configurations.value(row.runId), reason, staleRunIds.contains(row.runId));
         if (reasons.isEmpty()) { eligible.append(&row); run.eligible.append(&row); }
         else {
             auto item = record(row); QStringList labels;

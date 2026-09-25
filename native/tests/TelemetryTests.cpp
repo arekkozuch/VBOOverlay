@@ -149,6 +149,7 @@ private slots:
     void overlaysComparisonLapsOnASharedProgressAxis();
     void showsCornerAnalyzerSegmentMetricsForBothLaps();
     void selectsCornerAnalyzerSegmentThroughQml();
+    void calculatesOutingTheoreticalBestAcrossPopulation();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -4085,6 +4086,77 @@ void TelemetryTests::showsCornerAnalyzerSegmentMetricsForBothLaps()
 
     // An unknown segment id is never fabricated into a result.
     QVERIFY(controller.comparisonSegmentMetrics("not-a-real-id").isEmpty());
+}
+
+void TelemetryTests::calculatesOutingTheoreticalBestAcrossPopulation()
+{
+    // KAN-56: the fastest valid time per approved sector across every
+    // eligible lap of the current comparison group's population (here, one
+    // run's several laps -- routeVbo() has more than the two laps the
+    // comparison feature uses), not just a sum of each lap's own best.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Theoretical Best", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+
+    // No run has approved segments yet: unavailable, not silently empty-but-ready.
+    controller.requestOutingTheoreticalBest();
+    QTRY_COMPARE(controller.outingTheoreticalBest().value("state").toString(), QString("unavailable"));
+    QVERIFY(!controller.outingTheoreticalBest().value("message").toString().isEmpty());
+
+    // Approve every proposal on one lap's underlying run.
+    int lapIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+    }
+    QVERIFY(lapIndex >= 0);
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    controller.requestSegmentReview();
+    QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    const auto count = controller.segmentReviewItems().size();
+    for (int i = 0; i < count; ++i) QCOMPARE(controller.approveSegmentProposal(i), QString());
+    QString wrappingId;
+    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
+        const auto segment = value.toObject();
+        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble())
+            wrappingId = segment.value("id").toString();
+    }
+    if (!wrappingId.isEmpty())
+        QCOMPARE(controller.splitApprovedSegment(wrappingId, controller.segmentReviewAxisLength()), QString());
+    const auto approvedSegments = controller.storedRunTrackSegments(runId).toArray();
+    QVERIFY(!approvedSegments.isEmpty());
+    controller.closeOutingLap();
+
+    controller.requestOutingTheoreticalBest();
+    QTRY_COMPARE(controller.outingTheoreticalBest().value("state").toString(), QString("ready"));
+    const auto best = controller.outingTheoreticalBest();
+    const auto sectors = best.value("sectors").toList();
+    QCOMPARE(sectors.size(), approvedSegments.size());
+    bool anyTimed = false;
+    bool allTimed = true;
+    for (const auto &value : sectors) {
+        const auto sector = value.toMap();
+        QVERIFY(!sector.value("segmentId").toString().isEmpty());
+        if (sector.contains("seconds")) {
+            anyTimed = true;
+            QVERIFY(sector.value("seconds").toDouble() > 0.0);
+            QVERIFY(!sector.value("sourceLapLabel").toString().isEmpty());
+        } else {
+            allTimed = false;
+            QVERIFY(!sector.value("unavailableReason").toString().isEmpty());
+        }
+    }
+    QVERIFY(anyTimed);
+    QCOMPARE(best.contains("totalSeconds"), allTimed);
 }
 
 void TelemetryTests::selectsCornerAnalyzerSegmentThroughQml()
