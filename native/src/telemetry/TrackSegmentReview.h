@@ -58,14 +58,36 @@ struct ApprovedSegmentation {
 [[nodiscard]] ApprovedSegmentation approvedSegmentation(
     const QJsonValue &storedSegments, const QString &trackConfigurationReference);
 
+// What a derived result records so it can be checked later (KAN-50). It is
+// current only while the track configuration (layout, direction, timing gate),
+// the approved segment set and the result's own calculation algorithm are all
+// unchanged; a result without an approved revision is never current.
 struct SegmentationResultStamp {
     QString trackConfigurationReference;
     QString revision;
+    QString calculationAlgorithm;
 };
 
-[[nodiscard]] SegmentationResultStamp segmentationResultStamp(const ApprovedSegmentation &approved);
-[[nodiscard]] bool segmentationResultCurrent(
-    const SegmentationResultStamp &stamp, const ApprovedSegmentation &approved);
+[[nodiscard]] SegmentationResultStamp segmentationResultStamp(
+    const ApprovedSegmentation &approved, const QString &calculationAlgorithm = {});
+[[nodiscard]] bool segmentationResultCurrent(const SegmentationResultStamp &stamp,
+    const ApprovedSegmentation &approved, const QString &calculationAlgorithm = {});
+
+// Persisted form of a stamp, for results saved in a project or report.
+[[nodiscard]] QJsonObject segmentationResultStampToJson(const SegmentationResultStamp &stamp);
+[[nodiscard]] std::optional<SegmentationResultStamp> segmentationResultStampFromJson(const QJsonValue &value);
+
+// Review decisions persisted per run in "trackSegmentReview" (KAN-50). Only
+// rejections are stored: approval is the presence of a segment in
+// "trackSegments". Decisions identify a proposal by type and exact bounds and
+// apply only to the same track configuration and proposal algorithm;
+// otherwise they are ignored rather than guessed onto new proposals.
+inline constexpr qsizetype maximumSegmentReviewDecisions = 64;
+[[nodiscard]] bool validTrackSegmentReview(const QJsonValue &value);
+[[nodiscard]] QJsonObject makeTrackSegmentReview(
+    const QString &trackConfigurationReference, const QVector<TrackSegmentProposal> &rejected);
+[[nodiscard]] QSet<int> rejectedProposalIndexes(const QJsonValue &storedReview,
+    const QString &trackConfigurationReference, const QVector<TrackSegmentProposal> &proposals);
 
 // True when two progress intervals (end < start wraps the gate on a loop of
 // `lengthMeters`) share more than a boundary point.

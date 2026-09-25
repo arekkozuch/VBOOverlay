@@ -315,8 +315,8 @@ drives the controller on the synthetic elliptical route. It covers an
 unavailable non-lap section, stale-result rejection after closing the lap,
 finite map layers, QML panel/map loading, approve/reject/edit/supersede/revoke,
 dirty state, revision changes, and save/reopen matching of the approved segment.
-Synthetic only; no real track has been reviewed. Rejections and edits are not
-persisted, and the approval state beyond the stored segments belongs to KAN-50.
+Synthetic only; no real track has been reviewed. Proposal edits are not
+persisted; rejections are persisted since KAN-50.
 
 ## Editing approved segments (KAN-49)
 
@@ -364,6 +364,38 @@ refused overlap and empty edits, split and merge with stable IDs, the editor
 list in QML, six-step undo and redo, and refusal to undo over a change made
 outside the history. Synthetic only; the map pick has not been exercised
 interactively, and no real track has been edited.
+
+## Persisted segmentation and calculation revisions (KAN-50)
+
+Approved segments already lived in the run's `trackSegments`, which the
+existing atomic save and recovery snapshot carry unchanged. KAN-50 adds:
+
+- `trackSegmentReview` on the run (validated by `EventProjectCodec`): the
+  review's rejections, stored by segment type and exact bounds together with
+  the track configuration reference and the proposal algorithm tag. On review,
+  rejections are restored only when both still match; a recomputed proposal
+  with different bounds is not treated as the rejected one. At most 64
+  decisions; an empty set removes the key. Approval itself remains the
+  presence of a segment in `trackSegments`; proposal edits are session-only.
+- `SegmentationResultStamp` now carries the result's `calculationAlgorithm`
+  and has a strict JSON round trip (`segmentationResultStampToJson` /
+  `segmentationResultStampFromJson`). A result is current only while the
+  configuration reference (layout, direction and timing gate), the approved
+  segment revision and the calculation algorithm all match; with no approved
+  revision it is never current. No sector, theoretical-lap or report result
+  is persisted yet; later tickets must store and check this stamp.
+
+`TrackSegmentReviewTests` covers rejection round trips per configuration and
+algorithm, moved bounds, malformed and oversized decisions, stamp JSON round
+trip and rejection of malformed stamps, and staleness on algorithm,
+configuration and segment changes.
+`TelemetryTests::persistsSegmentationAcrossSaveRecoveryAndReopen` drives the
+controller through save and reopen (IDs, names, bounds, a rejected proposal and
+a still-current stamp), an unsaved approval restored from the recovery
+snapshot (earlier stamp now stale), and a layout change that keeps the stored
+segments and their IDs but applies none of them, so no stamp stays current.
+The timing gate cannot be edited directly; it changes the same configuration
+reference when telemetry is replaced. Synthetic only.
 
 ## Video-free day-result states (KAN-27)
 

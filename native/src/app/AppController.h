@@ -36,6 +36,7 @@
 #include <QUrl>
 #include <QVariant>
 #include <QSet>
+#include <functional>
 #include <array>
 #include <atomic>
 #include <memory>
@@ -681,6 +682,9 @@ private:
     [[nodiscard]] QVector<FlappedEar::SegmentReviewItem> currentSegmentReviewItems() const;
     bool replaceRunTrackSegments(const QString &runId, const QJsonArray &segments, bool recordHistory = true);
     [[nodiscard]] QJsonValue storedRunTrackSegments(const QString &runId) const;
+    [[nodiscard]] QJsonValue storedRunValue(const QString &runId, const QString &key) const;
+    bool replaceRunField(const QString &runId, const QString &key, const QJsonValue &value,
+        const std::function<void()> &beforeNotify = {});
     QString applySegmentEdit(const std::optional<QJsonArray> &next, const QString &error);
     QString applySegmentHistoryStep(bool undo);
     [[nodiscard]] QVariantList mapPolylines(double startMeters, double endMeters) const;

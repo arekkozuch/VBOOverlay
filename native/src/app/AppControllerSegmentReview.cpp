@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <limits>
 
@@ -99,6 +100,10 @@ void AppController::initializeSegmentReview()
             m_segmentProposals = std::move(result.proposals.proposals);
             m_segmentProposalPhases = std::move(result.phases);
             m_segmentReviewLapTrace = std::move(result.lapTrace);
+            // KAN-50: restore persisted rejections for this configuration and proposal algorithm.
+            m_rejectedSegmentProposals = rejectedProposalIndexes(
+                storedRunValue(m_selectedOutingLap.value("runId").toString(), QStringLiteral("trackSegmentReview")),
+                segmentReviewConfiguration(), m_segmentProposals);
         }
         m_segmentReviewLayersDirty = true;
         m_segmentReviewPickTraceDirty = true;
@@ -358,7 +363,8 @@ QVariantList AppController::segmentReviewMapLayers() const
     return m_segmentReviewLayerCache;
 }
 
-bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArray &segments, const bool recordHistory)
+bool AppController::replaceRunField(const QString &runId, const QString &key, const QJsonValue &value,
+    const std::function<void()> &beforeNotify)
 {
     if (!EventProjectCodec::isEvent(m_projectTemplate) || projectLoading() || exporting()
         || recoveryPending() || m_batchPending
@@ -367,13 +373,15 @@ bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArr
     auto project = currentProjectObject();
     auto event = project.value("event").toObject();
     auto runs = event.value("runs").toArray();
+    // An empty array or object is stored as an absent key.
+    const bool remove = value.isUndefined() || value.isNull() || (value.isArray() && value.toArray().isEmpty())
+        || (value.isObject() && value.toObject().isEmpty());
     for (qsizetype i = 0; i < runs.size(); ++i) {
         auto run = runs[i].toObject();
         if (run.value("id").toString() != runId) continue;
-        const auto before = run.value("trackSegments").toArray();
-        if (before == segments) return true;
-        if (segments.isEmpty()) run.remove("trackSegments");
-        else run.insert("trackSegments", segments);
+        if (remove ? !run.contains(key) : run.value(key) == value) return true;
+        if (remove) run.remove(key);
+        else run.insert(key, value);
         runs[i] = run;
         event.insert("runs", runs);
         project.insert("event", event);
@@ -381,12 +389,20 @@ bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArr
         if (!ProjectLimits::validateProject(project, &error)) return false;
         m_projectTemplate = project;
         markPersistentChange();
-        if (recordHistory) m_segmentEditHistory.record(runId, before, segments);
+        if (beforeNotify) beforeNotify();
         m_segmentReviewLayersDirty = true;
         emit segmentReviewChanged();
         return true;
     }
     return false;
+}
+
+bool AppController::replaceRunTrackSegments(const QString &runId, const QJsonArray &segments, const bool recordHistory)
+{
+    const auto before = storedRunTrackSegments(runId).toArray();
+    return replaceRunField(runId, QStringLiteral("trackSegments"), segments, [&] {
+        if (recordHistory) m_segmentEditHistory.record(runId, before, segments);
+    });
 }
 
 QString AppController::approveSegmentProposal(const int index)
@@ -442,8 +458,22 @@ bool AppController::setSegmentProposalRejected(const int index, const bool rejec
     if (index < 0 || index >= items.size()) return false;
     const auto state = items[index].state;
     if (state != SegmentReviewState::Proposed && state != SegmentReviewState::Rejected) return false;
+    const auto previous = m_rejectedSegmentProposals;
     if (rejected) m_rejectedSegmentProposals.insert(index);
     else m_rejectedSegmentProposals.remove(index);
+    // KAN-50: rejections are saved with the run so save, recovery and reopen keep them.
+    QList<int> ordered(m_rejectedSegmentProposals.cbegin(), m_rejectedSegmentProposals.cend());
+    std::sort(ordered.begin(), ordered.end());
+    QVector<TrackSegmentProposal> rejectedProposals;
+    for (const int rejectedIndex : ordered)
+        if (rejectedIndex >= 0 && rejectedIndex < m_segmentProposals.size()) rejectedProposals.append(m_segmentProposals[rejectedIndex]);
+    const auto review = rejectedProposals.isEmpty() ? QJsonObject{}
+        : makeTrackSegmentReview(segmentReviewConfiguration(), rejectedProposals);
+    if ((!rejectedProposals.isEmpty() && review.isEmpty())
+        || !replaceRunField(m_selectedOutingLap.value("runId").toString(), QStringLiteral("trackSegmentReview"), review)) {
+        m_rejectedSegmentProposals = previous;
+        return false;
+    }
     m_segmentReviewLayersDirty = true;
     emit segmentReviewChanged();
     return true;
@@ -504,11 +534,16 @@ bool AppController::discardOtherConfigurationSegments()
     return false;
 }
 
-QJsonValue AppController::storedRunTrackSegments(const QString &runId) const
+QJsonValue AppController::storedRunValue(const QString &runId, const QString &key) const
 {
     for (const auto &value : currentProjectObject().value("event").toObject().value("runs").toArray())
-        if (value.toObject().value("id").toString() == runId) return value.toObject().value("trackSegments");
+        if (value.toObject().value("id").toString() == runId) return value.toObject().value(key);
     return {};
+}
+
+QJsonValue AppController::storedRunTrackSegments(const QString &runId) const
+{
+    return storedRunValue(runId, QStringLiteral("trackSegments"));
 }
 
 QString AppController::applySegmentEdit(const std::optional<QJsonArray> &next, const QString &error)
