@@ -69,7 +69,7 @@ QVector<ProgressSegment> projectedLap(const double holeFrom = -1.0, const double
     for (int k = 0; k < sampleCount; ++k) {
         const double time = k * dt;
         if (time > holeFrom && time < holeTo) {
-            if (!lap.last().samples.isEmpty()) lap.append({});
+            if (!lap.last().samples.isEmpty()) lap.append(ProgressSegment{});
             continue;
         }
         lap.last().samples.append({time, 20.0 * time, true});
