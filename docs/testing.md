@@ -627,6 +627,16 @@ achievability text, activates a sector row with the keyboard and checks that
 the dialog closes, the Corner Analyzer selects that segment and no QML warnings
 are logged. Synthetic only.
 
+## M3 acceptance workflow (KAN-58)
+
+`TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow` runs
+proposal, review, correction, save, reopen, corner comparison and donor-sector
+navigation on a known-time fixture (`warpedRouteVbo`: two runs lapping in
+exactly 48 s with opposite quick halves). It also checks cache invalidation
+after a segment split, a missing speed sensor and a layout change. The
+acceptance matrix, measured values and outstanding real-track feedback are in
+`docs/kan58-m3-acceptance.md`. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
