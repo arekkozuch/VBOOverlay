@@ -106,7 +106,7 @@ void BrakingMetricsTests::measuresBrakingPointDistanceAndDeceleration()
     const auto approved = cornerAt(500.0, 600.0);
     const auto session = sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))},
         {"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}});
-    const auto metrics = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), session);
+    const auto metrics = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), session, std::nullopt, std::nullopt);
     QVERIFY(metrics.valid);
     QVERIFY2(metrics.unavailableReason.isEmpty(), qPrintable(metrics.unavailableReason));
     QCOMPARE(metrics.intervalStartMeters, 300.0);
@@ -134,7 +134,7 @@ void BrakingMetricsTests::labelsDecelerationBasedBrakingAsInferred()
 {
     const auto approved = cornerAt(500.0, 600.0);
     const auto session = sessionWith({{"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}});
-    const auto metrics = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), session);
+    const auto metrics = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), session, std::nullopt, std::nullopt);
     QVERIFY(metrics.brakingPointMeters);
     QCOMPARE(metrics.method, QString(brakingMethodInferred));
     QCOMPARE(metrics.provenance, QString(brakingProvenanceInferred));
@@ -144,7 +144,7 @@ void BrakingMetricsTests::labelsDecelerationBasedBrakingAsInferred()
 
     // A measured brake without an acceleration channel has no deceleration values.
     const auto brakeOnly = sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))}});
-    const auto noDeceleration = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), brakeOnly);
+    const auto noDeceleration = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), brakeOnly, std::nullopt, std::nullopt);
     QVERIFY(noDeceleration.brakingPointMeters);
     QVERIFY(!noDeceleration.peakDeceleration && !noDeceleration.meanDeceleration);
     QCOMPARE(noDeceleration.decelerationUnavailableReason, QString(brakingDecelerationChannelMissing));
@@ -157,20 +157,20 @@ void BrakingMetricsTests::missingCoverageCreatesNoDistanceOrPeak()
         {"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}});
 
     // A projection hole inside the braking episode: the point stays, the distance does not.
-    const auto holed = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(23.0, 23.5), session);
+    const auto holed = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(23.0, 23.5), session, std::nullopt, std::nullopt);
     QVERIFY(holed.brakingPointMeters);
     QVERIFY(holed.brakingSeconds);
     QVERIFY(!holed.brakingDistanceMeters);
 
     // A hole at the interval start: nothing is measured at all.
-    const auto noStart = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(14.5, 15.5), session);
+    const auto noStart = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(14.5, 15.5), session, std::nullopt, std::nullopt);
     QCOMPARE(noStart.unavailableReason, QString(brakingIncompleteCoverage));
     QVERIFY(!noStart.brakingPointMeters);
 
     // A missing acceleration sample inside the episode: no peak or mean.
     const auto gappedG = sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))},
         {"longitudinalAcceleration", makeChannel("longacc", "g", [](int k) { return k == 470 ? noData : deceleration(k); })}});
-    const auto noPeak = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), gappedG);
+    const auto noPeak = computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), gappedG, std::nullopt, std::nullopt);
     QVERIFY(noPeak.brakingPointMeters);
     QVERIFY(!noPeak.peakDeceleration && !noPeak.meanDeceleration);
     QCOMPARE(noPeak.decelerationUnavailableReason, QString(brakingIncompleteCoverage));
@@ -180,26 +180,45 @@ void BrakingMetricsTests::reportsWhyNoBrakingPointExists()
 {
     const auto approved = cornerAt(500.0, 600.0);
     const auto idle = sessionWith({{"brake", makeChannel("brake_pos", "%", [](int k) { return k >= 100 && k < 110 ? 60.0 : 0.0; })}});
-    QCOMPARE(computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), idle).unavailableReason,
+    QCOMPARE(computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), idle, std::nullopt, std::nullopt).unavailableReason,
         QString(brakingNoneDetected)); // the 5 s application lies outside the interval
 
-    QCOMPARE(computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), sessionWith({})).unavailableReason,
+    QCOMPARE(computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), sessionWith({}), std::nullopt, std::nullopt).unavailableReason,
         QString(brakingNoChannel));
 
     const auto wrapping = cornerAt(900.0, 100.0);
-    QCOMPARE(computeBrakingMetrics(lapLength, wrapping, idOf(wrapping), projectedLap(), idle).unavailableReason,
+    QCOMPARE(computeBrakingMetrics(lapLength, wrapping, idOf(wrapping), projectedLap(), idle, std::nullopt, std::nullopt).unavailableReason,
         QString(brakingSegmentCrossesGate));
 
     // An approach that would start before the gate is clipped and says so.
     const auto early = cornerAt(100.0, 200.0);
-    const auto clipped = computeBrakingMetrics(lapLength, early, idOf(early), projectedLap(), idle);
+    const auto clipped = computeBrakingMetrics(lapLength, early, idOf(early), projectedLap(), idle, std::nullopt, std::nullopt);
     QCOMPARE(clipped.intervalStartMeters, 0.0);
     QVERIFY(clipped.limitations.contains(brakingApproachClipped));
 
-    QVERIFY(!computeBrakingMetrics(lapLength, approved, "missing", projectedLap(), idle).valid);
+    // A real lap's projection never lands on the gate exactly: without the lap's
+    // timed start or end a gate-bounded interval has no coverage; with it, it has.
+    const auto offGate = projectedLap(-1.0, 0.3);   // first projected sample at 6 m
+    const auto shortEnd = projectedLap(49.7, 51.0); // last projected sample at 994 m
+    QCOMPARE(computeBrakingMetrics(lapLength, early, idOf(early), offGate, idle, std::nullopt, std::nullopt).unavailableReason,
+        QString(brakingIncompleteCoverage));
+    const auto gateStart = computeBrakingMetrics(lapLength, early, idOf(early), offGate, idle, 0.0, 50.0);
+    QVERIFY2(gateStart.unavailableReason.isEmpty(), qPrintable(gateStart.unavailableReason));
+    QVERIFY(gateStart.brakingPointMeters); // the 5 s application at 100 m lies inside 0-200 m
+    const auto last = cornerAt(900.0, 1000.0);
+    QCOMPARE(computeBrakingMetrics(lapLength, last, idOf(last), shortEnd, idle, std::nullopt, std::nullopt).unavailableReason,
+        QString(brakingIncompleteCoverage));
+    QCOMPARE(computeBrakingMetrics(lapLength, last, idOf(last), shortEnd, idle, 0.0, 50.0).unavailableReason,
+        QString(brakingNoneDetected));
+    // The missing channel is reported ahead of coverage.
+    QCOMPARE(computeBrakingMetrics(lapLength, early, idOf(early), offGate, sessionWith({}), std::nullopt, std::nullopt)
+                 .unavailableReason,
+        QString(brakingNoChannel));
+
+    QVERIFY(!computeBrakingMetrics(lapLength, approved, "missing", projectedLap(), idle, std::nullopt, std::nullopt).valid);
     BrakingMetricsOptions negative;
     negative.approachMeters = -1.0;
-    QVERIFY(!computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), idle, negative).valid);
+    QVERIFY(!computeBrakingMetrics(lapLength, approved, idOf(approved), projectedLap(), idle, std::nullopt, std::nullopt, negative).valid);
 }
 
 void BrakingMetricsTests::comparesOnlyLikeWithLike()
@@ -208,10 +227,10 @@ void BrakingMetricsTests::comparesOnlyLikeWithLike()
     const auto lap = projectedLap();
     const auto measuredA = computeBrakingMetrics(lapLength, approved, idOf(approved), lap,
         sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))},
-            {"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}}));
+            {"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}}), std::nullopt, std::nullopt);
     const auto measuredB = computeBrakingMetrics(lapLength, approved, idOf(approved), lap,
         sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(460))},
-            {"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}}));
+            {"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}}), std::nullopt, std::nullopt);
     const auto comparison = compareBrakingMetrics(measuredA, measuredB);
     QVERIFY(comparison.valid);
     QVERIFY(comparison.unavailableReason.isEmpty());
@@ -220,7 +239,7 @@ void BrakingMetricsTests::comparesOnlyLikeWithLike()
     QVERIFY(comparison.brakingSecondsDelta);
 
     const auto inferredB = computeBrakingMetrics(lapLength, approved, idOf(approved), lap,
-        sessionWith({{"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}}));
+        sessionWith({{"longitudinalAcceleration", makeChannel("longacc", "g", deceleration)}}), std::nullopt, std::nullopt);
     const auto mixed = compareBrakingMetrics(measuredA, inferredB);
     QVERIFY(mixed.valid);
     QCOMPARE(mixed.unavailableReason, QString(brakingMixedProvenance));
@@ -228,7 +247,7 @@ void BrakingMetricsTests::comparesOnlyLikeWithLike()
 
     const auto otherRevision = cornerAt(500.0, 610.0);
     const auto other = computeBrakingMetrics(lapLength, otherRevision, idOf(otherRevision), lap,
-        sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))}}));
+        sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))}}), std::nullopt, std::nullopt);
     QVERIFY(!compareBrakingMetrics(measuredA, other).valid);
 }
 

@@ -7,10 +7,15 @@
 #include <iterator>
 
 namespace FlappedEar {
+namespace {
+
+constexpr double gateEpsilon = 1e-6;
+
+} // namespace
 
 BrakingMetrics computeBrakingMetrics(const double axisLengthMeters, const ApprovedSegmentation &approved,
     const QString &segmentId, const QVector<ProgressSegment> &lapTrace, const TelemetrySession &session,
-    const BrakingMetricsOptions &options)
+    const std::optional<double> lapStartTime, const std::optional<double> lapEndTime, const BrakingMetricsOptions &options)
 {
     BrakingMetrics result;
     if (!approved.valid || !std::isfinite(axisLengthMeters) || axisLengthMeters <= 0.0
@@ -36,8 +41,20 @@ BrakingMetrics computeBrakingMetrics(const double axisLengthMeters, const Approv
     result.intervalEndMeters = end;
     if (start - options.approachMeters < 0.0) result.limitations.append(brakingApproachClipped);
 
-    const auto fromTime = timeAtProgress(lapTrace, result.intervalStartMeters);
-    const auto toTime = timeAtProgress(lapTrace, result.intervalEndMeters);
+    // Without a brake or deceleration channel no coverage makes a braking point possible.
+    const auto hasChannel = [&session](const char *alias) {
+        const QString name = session.aliases.value(QString::fromLatin1(alias));
+        return !name.isEmpty() && session.channels.contains(name);
+    };
+    if (!hasChannel("brake") && !hasChannel("longitudinalAcceleration")) {
+        result.unavailableReason = brakingNoChannel;
+        return result;
+    }
+
+    const auto fromTime = result.intervalStartMeters <= gateEpsilon && lapStartTime
+        ? lapStartTime : timeAtProgress(lapTrace, result.intervalStartMeters);
+    const auto toTime = result.intervalEndMeters >= axisLengthMeters - gateEpsilon && lapEndTime
+        ? lapEndTime : timeAtProgress(lapTrace, result.intervalEndMeters);
     if (!fromTime || !toTime || !(*toTime > *fromTime)) {
         result.unavailableReason = brakingIncompleteCoverage;
         return result;

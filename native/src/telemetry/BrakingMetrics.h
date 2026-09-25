@@ -18,7 +18,10 @@ namespace FlappedEar {
 // to its end boundary. The braking point is the first braking-onset candidate
 // (KAN-47) inside that interval; its time and distance run from the onset to
 // the end of that braking episode. Deceleration is read only from the recorded
-// longitudinal-acceleration channel over the same episode.
+// longitudinal-acceleration channel over the same episode. An interval bound
+// that lies on the gate (a clipped approach, or a segment ending at the lap
+// length) takes the lap's timed start or end: a lap's projection never lands
+// on the gate exactly.
 inline constexpr auto brakingMetricsAlgorithm = "braking-metrics-v1";
 
 inline constexpr auto brakingNoneDetected = "noBrakingDetected";
@@ -66,7 +69,7 @@ struct BrakingMetrics {
 
 [[nodiscard]] BrakingMetrics computeBrakingMetrics(double axisLengthMeters, const ApprovedSegmentation &approved,
     const QString &segmentId, const QVector<ProgressSegment> &lapTrace, const TelemetrySession &session,
-    const BrakingMetricsOptions &options = {});
+    std::optional<double> lapStartTime, std::optional<double> lapEndTime, const BrakingMetricsOptions &options = {});
 
 // A minus B for the same segment and approved revision. A braking-point delta
 // is positive when A starts braking further along the lap (later). Values

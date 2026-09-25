@@ -136,7 +136,11 @@ Braking metrics (KAN-53) use shared-axis progress with an explicit interval
 (200 m before the segment start through its end). Measured and inferred braking
 points keep their provenance and are never compared with each other; distance
 and deceleration are reported only with continuous coverage of the braking
-episode.
+episode. An interval bound on the gate (an approach clipped at the gate, or a
+segment ending at the lap length) uses the lap's timed start or end, because a
+lap's projection never lands on the gate exactly. A missing brake and
+deceleration channel is reported (`noBrakeOrDecelerationChannel`) before
+coverage is checked.
 
 ## Synchronization transforms and numeric bounds
 

@@ -717,7 +717,8 @@ QVariantList AppController::outingLapBrakingMetrics() const
         const auto segment = value.toObject();
         if (segment.value("type").toString() != trackSegmentTypeName(TrackSegmentType::Corner)) continue;
         const auto metrics = computeBrakingMetrics(m_segmentReviewAxis.lengthMeters, approved,
-            segment.value("id").toString(), m_segmentReviewLapTrace, *m_outingLapDetailSession);
+            segment.value("id").toString(), m_segmentReviewLapTrace, *m_outingLapDetailSession,
+            m_selectedOutingLap.value("startTime").toDouble(), m_selectedOutingLap.value("endTime").toDouble());
         if (!metrics.valid) continue;
         QVariantMap row{{"segmentId", metrics.segmentId}, {"name", segment.value("name").toString()},
             {"intervalStartMeters", metrics.intervalStartMeters}, {"intervalEndMeters", metrics.intervalEndMeters},
