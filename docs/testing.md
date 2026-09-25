@@ -65,6 +65,33 @@ test and installed-startup evidence is recorded in
 and lifecycle tests do not establish process RSS, private-recording throughput,
 physical Mac acceptance or private GoPro validation. Windows remains paused.
 
+## M2 acceptance and reforecast (KAN-42)
+
+The [KAN-42 M2 acceptance record](kan42-m2-acceptance.md) maps crossings, gaps,
+different-lines and known-delta fixture coverage (already established by
+KAN-31 through KAN-34) against KAN-42's acceptance criteria, adds the one
+disclosed gap (a comparison pair where one recording lacks a channel the
+other has) and a two-run-comparison/optional-video editor-independence
+exercise, and reforecasts remaining backlog using measured M2 cycle time. It
+also documents that dual, side-by-side comparison video is not implemented
+by this task (see KAN-104 through KAN-107).
+
+`excludesChannelMissingFromOneComparisonSlot` appends a synthetic channel
+column to one recording's VBO text and confirms `comparisonAvailableChannels()`
+excludes it while the recording that has it still serves real data, and the
+recording that lacks it reports `channelMissing` rather than fabricated or
+borrowed values.
+
+`comparesKnownDeltaThroughFullComparisonPipeline` elevates the existing
+`TrackProgressTests::knownDelayHasCorrectSignAndFinishLineMagnitude` unit-level
+guarantee to the full AppController import → comparison-slot → shared-axis
+pipeline, using two separately imported runs of the identical physical path
+with a known, uniform 10% time rescale.
+
+`keepsComparisonAndOutingLapVideoIndependent` proves the single central video
+slot (gated to the active run's open lap, KAN-39) and the two comparison
+slots cannot disturb each other's state while both are populated/open at once.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

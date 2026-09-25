@@ -146,6 +146,9 @@ private slots:
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
     void cancelsSupersededComparisonWaitingForCache();
+    void excludesChannelMissingFromOneComparisonSlot();
+    void comparesKnownDeltaThroughFullComparisonPipeline();
+    void keepsComparisonAndOutingLapVideoIndependent();
     void groupsOnlyDatedUnambiguousAlternatives();
     void prefersRaceChronoCalculatedAcceleration();
     void presentsBrakingUpInGForceWidgets();
@@ -466,6 +469,58 @@ QByteArray readBytes(const QString &path)
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) return {};
     return file.readAll();
+}
+
+// KAN-42: EventProjectFixture::routeVbo() never has more than time/latitude/
+// longitude columns, so a "missing sensor" comparison fixture (one recording
+// has a channel the other lacks) needs a real extra column appended to its
+// text, not just a differently-shaped session -- the actual VBO parser must
+// see and name the column the same way a real logger's extra channel would.
+QByteArray withSyntheticSpeedChannel(const QByteArray &vbo)
+{
+    QString text = QString::fromUtf8(vbo);
+    text.replace(QStringLiteral("[column names]\ntime latitude longitude\n[data]\n"),
+        QStringLiteral("[column names]\ntime latitude longitude speed\n[data]\n"));
+    const QStringList lines = text.split('\n');
+    QStringList result;
+    result.reserve(lines.size());
+    bool inData = false;
+    int index = 0;
+    for (const QString &line : lines) {
+        if (line == QStringLiteral("[data]")) { inData = true; result.append(line); continue; }
+        if (inData && !line.isEmpty())
+            result.append(line + QString(" %1").arg(40.0 + 5.0 * std::sin(index++ * 0.3), 0, 'f', 3));
+        else
+            result.append(line);
+    }
+    return result.join('\n').toUtf8();
+}
+
+// KAN-42: a known, deterministic pace difference between two SEPARATE
+// imported runs of the identical physical path (same coordinates, only time
+// uniformly rescaled) -- the full-pipeline equivalent of
+// TrackProgressTests::knownDelayHasCorrectSignAndFinishLineMagnitude, which
+// exercises the same guarantee directly against buildProgressAxis/
+// computeDeltaSeries without import, comparison-slot selection or the shared
+// progress axis built through AppController.
+QByteArray routeVboWithTimeScale(const double scale, const QByteArray &vbo)
+{
+    const QStringList lines = QString::fromUtf8(vbo).split('\n');
+    QStringList result;
+    result.reserve(lines.size());
+    bool inData = false;
+    for (const QString &line : lines) {
+        if (line == QStringLiteral("[data]")) { inData = true; result.append(line); continue; }
+        if (inData && !line.isEmpty()) {
+            const QStringList parts = line.split(' ');
+            if (parts.size() >= 3) {
+                result.append(QString("%1 %2 %3").arg(parts[0].toDouble() * scale, 0, 'f', 6).arg(parts[1]).arg(parts[2]));
+                continue;
+            }
+        }
+        result.append(line);
+    }
+    return result.join('\n').toUtf8();
 }
 
 QJsonObject testProject(const double offset, const QJsonObject &extra = {})
@@ -3521,6 +3576,209 @@ void TelemetryTests::cancelsSupersededComparisonWaitingForCache()
     QCOMPARE(controller.m_comparisonSlots[1].state, QString("empty"));
     QVERIFY(controller.m_comparisonSlots[0].error.isEmpty());
     QVERIFY(controller.m_analysisSourceCache->usedBytes() <= controller.m_analysisSourceCache->limitBytes());
+}
+
+void TelemetryTests::excludesChannelMissingFromOneComparisonSlot()
+{
+    // KAN-42: a comparison pair where only one lap's recording has a given
+    // channel (e.g. one logger was wired up for speed, the other was not)
+    // must never fabricate or borrow the missing side's values.
+    // comparisonAvailableChannels() excludes it, and requesting it directly
+    // on the lacking slot reports "channelMissing" rather than empty-but-silent
+    // or interpolated data.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("morning.vbo"), second = directory.filePath("afternoon.vbo");
+    QVERIFY(writeBytes(first, withSyntheticSpeedChannel(EventProjectFixture::routeVbo())));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2))); // no "speed" column
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Missing sensor", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    QVariantMap a, b;
+    for (const auto &value : candidates) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (b.isEmpty() && row.value("runId") != a.value("runId")
+            && row.value("compatibilityGroupId") == a.value("compatibilityGroupId")) b = row;
+    }
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    QVERIFY(controller.m_comparisonSlots[0].session->channels.contains("speed"));
+    QVERIFY(!controller.m_comparisonSlots[1].session->channels.contains("speed"));
+    const auto available = controller.comparisonAvailableChannels();
+    QVERIFY(available.contains("latitude"));
+    QVERIFY2(!available.contains("speed"), "a channel missing from one recording must not appear as shared");
+
+    const double axisLength = controller.comparisonProgressAxisLength();
+    QVERIFY(axisLength > 0.0);
+    const auto presentSide = controller.comparisonChannelSeriesByProgress(0, "speed", 0, axisLength, 50);
+    QVERIFY2(!presentSide.value("segments").toList().isEmpty(), "the recording that has speed must still serve it");
+    const auto missingSide = controller.comparisonChannelSeriesByProgress(1, "speed", 0, axisLength, 50);
+    QCOMPARE(missingSide.value("reason").toString(), QString("channelMissing"));
+    QVERIFY2(!missingSide.contains("segments"), "a missing channel must report a reason, not fabricated/borrowed segments");
+}
+
+void TelemetryTests::comparesKnownDeltaThroughFullComparisonPipeline()
+{
+    // KAN-42: elevate the known-delta guarantee already proven at the
+    // TrackProgress unit level (knownDelayHasCorrectSignAndFinishLineMagnitude)
+    // to the full AppController import -> comparison pipeline: two SEPARATE
+    // imported runs of the identical physical path, one uniformly 10% slower,
+    // must produce a comparison delta with the correct sign throughout and a
+    // finish-line magnitude approximating the true known lap-time difference.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto fastPath = directory.filePath("fast.vbo"), slowPath = directory.filePath("slow.vbo");
+    // Default turns (4) is required, not incidental: inferTrack() needs at
+    // least 2 complete laps to resolve a route (TelemetryTests::
+    // infersRoutesFromOrderedCompleteLaps asserts turns=1 is unsupported),
+    // and every other comparison test in this file relies on that default.
+    const auto fastBytes = EventProjectFixture::routeVbo(240, -1.0, 0, false, 300);
+    constexpr double slowdownFactor = 1.10;
+    QVERIFY(writeBytes(fastPath, fastBytes));
+    QVERIFY(writeBytes(slowPath, routeVboWithTimeScale(slowdownFactor, fastBytes)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Known delta", {QUrl::fromLocalFile(fastPath), QUrl::fromLocalFile(slowPath)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto runFast = controller.eventRuns()[0].toMap().value("id").toString();
+    QVariantMap a, b;
+    for (const auto &value : controller.comparisonLaps()) {
+        const auto row = value.toMap();
+        if (row.value("runId").toString() == runFast) { if (a.isEmpty()) a = row; }
+        else if (b.isEmpty()) b = row;
+    }
+    QVERIFY2(!a.isEmpty() && !b.isEmpty(), "fixture must resolve one lap from each run");
+    QCOMPARE(b.value("compatibilityGroupId"), a.value("compatibilityGroupId"));
+    const double durationA = a.value("durationSeconds").toDouble();
+    const double durationB = b.value("durationSeconds").toDouble();
+    QVERIFY2(std::abs(durationB - durationA * slowdownFactor) < 0.05,
+        "the slow run's lap must be the known 10% slower duration");
+
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    const double axisLength = controller.comparisonProgressAxisLength();
+    QVERIFY(axisLength > 0.0);
+    const auto deltaSeries = controller.comparisonDeltaSeriesByProgress(0, axisLength, 50);
+    QVERIFY2(!deltaSeries.value("segments").toList().isEmpty(), "time delta series should not be empty");
+    double lastDelta = 0.0;
+    bool sawClearlyAhead = false;
+    for (const auto &segmentValue : deltaSeries.value("segments").toList()) {
+        for (const auto &pointValue : segmentValue.toList()) {
+            const double delta = pointValue.toPointF().y();
+            // A (the fixed-pace run) must never read as meaningfully behind
+            // the known 10%-slower B.
+            QVERIFY(delta < 0.5);
+            if (delta < -0.2) sawClearlyAhead = true;
+            lastDelta = delta;
+        }
+    }
+    QVERIFY2(sawClearlyAhead, "A should read as clearly ahead of the known-slower B somewhere along the lap");
+    const double actualDurationDifference = durationA - durationB; // A - B, negative since B is slower
+    QVERIFY2(std::abs(lastDelta - actualDurationDifference) < 1.0,
+        "the delta near the finish line should approximate the true known lap-time difference");
+}
+
+void TelemetryTests::keepsComparisonAndOutingLapVideoIndependent()
+{
+    // KAN-42: "exercise two-run comparison with optional video" (M2 editor
+    // independence). This app has exactly one central video slot
+    // (m_videoSource/m_sync/m_exportSourceInfo, gated to the currently open
+    // outing lap's run per KAN-39) and, separately, the two comparison slots
+    // populated by selectComparisonLap. Neither production surface reads the
+    // other's state (ComparisonDetailPanel.qml/AppControllerComparison.cpp
+    // have no video code at all today) -- prove that opening/advancing video
+    // on the outing-lap side, and selecting/clearing A/B on the comparison
+    // side, cannot disturb each other while both are open at once. Dual,
+    // side-by-side comparison video remains separate backlog scope (KAN-104
+    // through KAN-107 per the delivery ledger), not implemented here.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("first.vbo"), second = directory.filePath("second.vbo");
+    QVERIFY(writeBytes(first, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(second, EventProjectFixture::routeVbo(130, -2, 2)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Comparison and video", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto active = controller.activeRunId();
+    QVariantMap sameRunLap, a, b;
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("type") == "LAP" && row.value("runId").toString() == active) { sameRunLap = row; break; }
+    }
+    for (const auto &value : controller.comparisonLaps()) {
+        const auto row = value.toMap();
+        if (a.isEmpty()) a = row;
+        else if (b.isEmpty() && row.value("runId") != a.value("runId")
+            && row.value("compatibilityGroupId") == a.value("compatibilityGroupId")) b = row;
+    }
+    QVERIFY(!sameRunLap.isEmpty() && !a.isEmpty() && !b.isEmpty());
+
+    // Populate the A/B comparison pair first.
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    const auto sessionA = controller.m_comparisonSlots[0].session;
+    const auto sessionB = controller.m_comparisonSlots[1].session;
+    const auto axisLength = controller.comparisonProgressAxisLength();
+    const auto deltaBefore = controller.comparisonDeltaSeriesByProgress(0, axisLength, 50);
+
+    // Open the single-lap outing detail on the active run and attach a
+    // synthetic video, exactly as KAN-39's linksOutingLapVideoToActiveRunOnly does.
+    QVERIFY(controller.selectOutingLapReference(sameRunLap.value("reference").toMap()));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto start = sameRunLap.value("startTime").toDouble(), end = sameRunLap.value("endTime").toDouble();
+    const auto midpoint = (start + end) / 2.0;
+    controller.m_videoSource = QUrl::fromLocalFile(QStringLiteral("/synthetic/video.mp4"));
+    MediaInfo info;
+    info.frameRate = {30, 1};
+    info.averageFrameRate = {30, 1};
+    info.videoFrameCount = qRound64((end + 5.0) * 30.0);
+    info.timeBase = {1, 30};
+    info.videoDurationTicks = info.videoFrameCount;
+    controller.m_exportSourceInfo = info;
+    controller.m_sync = {0.0, 1.0};
+    controller.setOutingLapCursor(midpoint);
+    QVERIFY(controller.outingLapVideoAvailable());
+    QCOMPARE(controller.outingLapVideoPositionMilliseconds(), qRound64(midpoint * 1000.0));
+
+    // The comparison pair must not have moved at all while video state changed.
+    QCOMPARE(controller.m_comparisonSlots[0].session, sessionA);
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionB);
+    QVERIFY(controller.comparisonPairReady());
+    QCOMPARE(controller.comparisonDeltaSeriesByProgress(0, axisLength, 50), deltaBefore);
+
+    // Advancing the video-driven cursor further must still not touch the
+    // comparison slots.
+    QVERIFY(controller.followOutingLapVideoPosition(qRound64((midpoint + 1.0) * 1000.0)));
+    QCOMPARE(controller.m_comparisonSlots[0].session, sessionA);
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionB);
+
+    // Conversely, clearing/reselecting a comparison slot must not disturb the
+    // still-open outing lap's video availability or cursor.
+    const auto cursorBeforeClear = controller.outingLapCursor();
+    controller.clearComparisonLap(1);
+    QVERIFY(controller.outingLapVideoAvailable());
+    QCOMPARE(controller.outingLapCursor(), cursorBeforeClear);
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+    QVERIFY(controller.outingLapVideoAvailable());
+    QCOMPARE(controller.outingLapCursor(), cursorBeforeClear);
+
+    // Closing the outing lap detail (and its video) leaves the comparison
+    // pair fully intact.
+    controller.closeOutingLap();
+    QCOMPARE(controller.m_comparisonSlots[0].session, sessionA);
+    QCOMPARE(controller.m_comparisonSlots[1].session, sessionB);
+    QVERIFY(controller.comparisonPairReady());
 }
 
 void TelemetryTests::presentsDayResultStatesWithoutVideo()
