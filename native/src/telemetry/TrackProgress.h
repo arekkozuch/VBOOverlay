@@ -31,6 +31,33 @@ struct ProgressAxis {
     const LapTrace &referenceTrace, const GeoCoordinate &origin, const TimingGate &gate,
     const CancellationCheck &cancelled = {});
 
+struct TrackFeatureSample {
+    double progressMeters = 0.0;
+    double headingRadians = 0.0;    // smoothed direction of travel, atan2(north,east) convention
+    double curvaturePerMeter = 0.0; // signed rate of heading change per meter; positive turns left
+};
+
+// Heading and curvature computed once from the axis's own geometry, never
+// from a per-lap projection. buildProgressAxis's input is always a single
+// referenceEligible (gap-free, continuous) lap trace, so there is no per-lap
+// gap concept to preserve here; "preserved gaps" is satisfied by this being a
+// pure function of `axis` that never modifies axis.points or any telemetry
+// channel -- only ever reads them.
+struct TrackFeatures {
+    QVector<TrackFeatureSample> samples; // one entry per axis.points index, same order/count
+    double smoothingMeters = 0.0;
+    bool valid = false;
+};
+
+// `smoothingMeters` is the averaging window's radius: heading at each axis
+// point is the circular mean (mean of unit tangent vectors, never a naive
+// mean of raw angles, which breaks across the +-pi wrap) of the axis's
+// direction of travel within that many meters on each side, wrapping around
+// the closed loop. Curvature is the signed angular change between adjacent
+// smoothed headings divided by the axis's uniform point spacing. Requires a
+// positive, finite smoothingMeters and a valid axis with at least 4 points.
+[[nodiscard]] TrackFeatures computeTrackFeatures(const ProgressAxis &axis, double smoothingMeters);
+
 // Rolling state carried between successive projectSample calls for one lap's
 // trace. Re-create (default-construct) after a real gap so the next sample
 // is treated as a cold start rather than assuming continuity across it.

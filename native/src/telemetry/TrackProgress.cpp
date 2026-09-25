@@ -138,6 +138,13 @@ bool headingAgrees(const ProgressAxis &axis, const int index, const QPointF &mov
     return cosine >= minimumCosine;
 }
 
+// Signed shortest angular distance from `from` to `to`, in (-pi, pi] -- never
+// a naive subtraction, which breaks across the +-pi wrap.
+double angularDifference(const double to, const double from)
+{
+    return std::atan2(std::sin(to - from), std::cos(to - from));
+}
+
 } // namespace
 
 ProgressAxis buildProgressAxis(
@@ -195,6 +202,42 @@ ProgressAxis buildProgressAxis(
     axis.origin = origin;
     axis.valid = true;
     return axis;
+}
+
+TrackFeatures computeTrackFeatures(const ProgressAxis &axis, const double smoothingMeters)
+{
+    TrackFeatures features;
+    if (!axis.valid || axis.points.size() < 4 || !(axis.spacingMeters > 0.0)
+        || !std::isfinite(smoothingMeters) || smoothingMeters <= 0.0)
+        return features;
+
+    const int n = static_cast<int>(axis.points.size());
+    const int radius = std::clamp(
+        static_cast<int>(std::lround(smoothingMeters / axis.spacingMeters)), 1, n / 2 - 1);
+
+    // Smooth by averaging unit tangent vectors, not raw angles: naively
+    // averaging e.g. +179 degrees and -179 degrees gives 0, not +-180.
+    QVector<double> heading(n, 0.0);
+    for (int i = 0; i < n; ++i) {
+        double sumEast = 0.0, sumNorth = 0.0;
+        for (int offset = -radius; offset <= radius; ++offset) {
+            const int index = ((i + offset) % n + n) % n;
+            const QPointF tangent = axisTangent(axis, index);
+            sumEast += tangent.x();
+            sumNorth += tangent.y();
+        }
+        heading[i] = std::atan2(sumNorth, sumEast);
+    }
+
+    features.samples.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const int next = (i + 1) % n;
+        const double curvature = angularDifference(heading[next], heading[i]) / axis.spacingMeters;
+        features.samples.append({axis.cumulative[i], heading[i], curvature});
+    }
+    features.smoothingMeters = smoothingMeters;
+    features.valid = true;
+    return features;
 }
 
 ProjectedSample projectSample(const ProgressAxis &axis, const QPointF &localPoint, const double telemetryTime,
