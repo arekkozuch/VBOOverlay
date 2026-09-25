@@ -1,6 +1,7 @@
 #include "project/EventProjectCodec.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackSegments.h"
+#include "telemetry/TrackSegmentReview.h"
 #include "project/ProjectLimits.h"
 
 #include <QCryptographicHash>
@@ -217,6 +218,9 @@ bool EventProjectCodec::validate(const QJsonObject &project, QString *error)
         }
         if (!validTrackSegments(run.value("trackSegments"))) {
             return fail(error, QStringLiteral("Track segments are invalid, out of order, or exceed the bound."));
+        }
+        if (!validTrackSegmentReview(run.value("trackSegmentReview"))) {
+            return fail(error, QStringLiteral("Track segment review decisions are invalid or exceed the bound."));
         }
         if (run.contains("trackInference")) {
             const auto value = run.value("trackInference"); const auto inference = value.toObject();

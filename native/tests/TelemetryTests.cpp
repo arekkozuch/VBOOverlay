@@ -145,6 +145,7 @@ private slots:
     void overlaysComparisonLapsOnASharedProgressAxis();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
+    void persistsSegmentationAcrossSaveRecoveryAndReopen();
     void showsComparisonSlotCompatibilityAndCoverageContext();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
@@ -3625,6 +3626,125 @@ void TelemetryTests::editsApprovedSegmentsWithUndo()
     QVERIFY(controller.undoSegmentEdit().contains("changed outside"));
     QVERIFY(stored().isEmpty());
     QVERIFY(!controller.segmentReviewApproved().value("canUndo").toBool());
+}
+
+void TelemetryTests::persistsSegmentationAcrossSaveRecoveryAndReopen()
+{
+    // KAN-50: save, recovery and reopen keep segment IDs, bounds and review
+    // decisions; a result stamp stays current across them and goes stale on a
+    // segment edit, a calculation change or a layout change.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    const auto projectPath = directory.filePath("segments.fetproject");
+    const auto recoveryPath = directory.filePath("recovery-after-reopen.json");
+    const QString calculation = "sector-times-test-v1";
+    const auto openReview = [](AppController &controller, const int lapIndex) {
+        QTRY_VERIFY(controller.selectOutingLap(lapIndex));
+        QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+        controller.requestSegmentReview();
+        QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+    };
+    int lapIndex = -1;
+    QString runId, configuration, firstId, firstName;
+    double firstStart = 0.0, firstEnd = 0.0;
+    SegmentationResultStamp stamp;
+    {
+        AppController controller(nullptr, directory.filePath("recovery-first.json"));
+        QVERIFY(controller.importAnalysisRuns("Persistence", {QUrl::fromLocalFile(path)}));
+        QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+        QTRY_VERIFY(!controller.outingLapsLoading());
+        const auto rows = controller.outingLaps();
+        for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+            const auto row = rows[i].toMap();
+            if (row.value("type") == "LAP" && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+        }
+        QVERIFY(lapIndex >= 0);
+        openReview(controller, lapIndex);
+        QVERIFY(controller.segmentReviewItems().size() >= 3);
+        runId = controller.selectedOutingLap().value("runId").toString();
+        configuration = controller.selectedOutingLap().value("compatibilityGroupId").toString();
+        QCOMPARE(controller.approveSegmentProposal(0), QString());
+        QVERIFY(controller.setSegmentProposalRejected(1, true));
+        QVERIFY(validTrackSegmentReview(controller.storedRunValue(runId, "trackSegmentReview")));
+        QVERIFY(controller.storedRunValue(runId, "trackSegmentReview").isObject());
+        const auto first = controller.storedRunTrackSegments(runId).toArray().first().toObject();
+        firstId = first.value("id").toString();
+        firstStart = first.value("startProgressMeters").toDouble();
+        firstEnd = first.value("endProgressMeters").toDouble();
+        firstName = QStringLiteral("Turn A");
+        QCOMPARE(controller.editApprovedSegment(firstId, firstName, first.value("type").toString(), firstStart, firstEnd, true),
+            QString());
+        stamp = segmentationResultStamp(controller.currentApprovedSegmentation(), calculation);
+        QVERIFY(segmentationResultCurrent(stamp, controller.currentApprovedSegmentation(), calculation));
+        // Restoring a rejection removes it from the document; rejecting again stores it.
+        QVERIFY(controller.setSegmentProposalRejected(1, false));
+        QVERIFY(controller.storedRunValue(runId, "trackSegmentReview").isUndefined());
+        QVERIFY(controller.setSegmentProposalRejected(1, true));
+        QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectPath)));
+        QVERIFY(!controller.dirty());
+    }
+    {
+        AppController reopened(nullptr, recoveryPath);
+        reopened.requestOpenProject(QUrl::fromLocalFile(projectPath));
+        QTRY_COMPARE(reopened.vboLoadState(), QString("ready"));
+        QTRY_VERIFY(!reopened.outingLapsLoading());
+        openReview(reopened, lapIndex);
+        auto items = reopened.segmentReviewItems();
+        QCOMPARE(items[0].toMap().value("state").toString(), QString("approved"));
+        QCOMPARE(items[0].toMap().value("approvedSegmentId").toString(), firstId);
+        QCOMPARE(items[1].toMap().value("state").toString(), QString("rejected"));
+        const auto reopenedFirst = reopened.storedRunTrackSegments(runId).toArray().first().toObject();
+        QCOMPARE(reopenedFirst.value("name").toString(), firstName);
+        QCOMPARE(reopenedFirst.value("startProgressMeters").toDouble(), firstStart);
+        QCOMPARE(reopenedFirst.value("endProgressMeters").toDouble(), firstEnd);
+        QVERIFY(segmentationResultCurrent(stamp, reopened.currentApprovedSegmentation(), calculation));
+        QVERIFY(!segmentationResultCurrent(stamp, reopened.currentApprovedSegmentation(), "sector-times-test-v2"));
+
+        // Unsaved changes survive through the recovery snapshot, not the saved file.
+        QCOMPARE(reopened.approveSegmentProposal(2), QString());
+        QVERIFY(reopened.dirty());
+        reopened.writeRecoverySnapshot();
+        QVERIFY(QFileInfo::exists(recoveryPath));
+    }
+    {
+        AppController recovered(nullptr, recoveryPath);
+        QVERIFY(recovered.recoveryPending());
+        recovered.resolveStartupRecovery("recover");
+        QTRY_COMPARE(recovered.vboLoadState(), QString("ready"));
+        QTRY_VERIFY(!recovered.outingLapsLoading());
+        QVERIFY(recovered.dirty());
+        openReview(recovered, lapIndex);
+        const auto items = recovered.segmentReviewItems();
+        QCOMPARE(items[0].toMap().value("approvedSegmentId").toString(), firstId);
+        QCOMPARE(items[1].toMap().value("state").toString(), QString("rejected"));
+        QCOMPARE(items[2].toMap().value("state").toString(), QString("approved"));
+        QCOMPARE(recovered.storedRunTrackSegments(runId).toArray().size(), 2);
+        // The unsaved approval is a segment edit: the earlier stamp is stale.
+        QVERIFY(!segmentationResultCurrent(stamp, recovered.currentApprovedSegmentation(), calculation));
+        const auto recoveredStamp = segmentationResultStamp(recovered.currentApprovedSegmentation(), calculation);
+        QVERIFY(segmentationResultCurrent(recoveredStamp, recovered.currentApprovedSegmentation(), calculation));
+
+        // A layout change produces a different configuration: the stored segments are
+        // kept (IDs intact) but no longer apply, so no result stays current.
+        QVERIFY(recovered.setRunTrackConfiguration(runId, "Changed", "clockwise"));
+        QTRY_VERIFY(!recovered.outingLapsLoading() && recovered.m_outingLapRequestedKey == recovered.outingLapKey());
+        QString changedConfiguration;
+        for (const auto &row : recovered.outingLaps()) {
+            const auto map = row.toMap();
+            if (map.value("runId").toString() == runId && map.value("type") == "LAP")
+                changedConfiguration = map.value("compatibilityGroupId").toString();
+        }
+        QVERIFY(changedConfiguration != configuration);
+        const auto stored = recovered.storedRunTrackSegments(runId);
+        QCOMPARE(stored.toArray().size(), 2);
+        QCOMPARE(stored.toArray().first().toObject().value("id").toString(), firstId);
+        const auto afterLayout = approvedSegmentation(stored, changedConfiguration);
+        QCOMPARE(afterLayout.otherConfigurationSegments, 2);
+        QVERIFY(afterLayout.segments.isEmpty());
+        QVERIFY(!segmentationResultCurrent(recoveredStamp, afterLayout, calculation));
+    }
 }
 
 void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()

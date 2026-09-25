@@ -42,6 +42,9 @@ private slots:
     void rejectsMalformedEdits();
     void treatsMalformedStoredSegmentsAsInvalid();
     void approvingEveryStadiumProposalYieldsAValidSet();
+    void persistsRejectionsForTheSameConfigurationOnly();
+    void rejectsMalformedReviewDecisions();
+    void stampsRoundTripAndGoStaleOnAnyInputChange();
 };
 
 void TrackSegmentReviewTests::derivesProposalStatesFromTheApprovedSet()
@@ -245,6 +248,102 @@ void TrackSegmentReviewTests::approvingEveryStadiumProposalYieldsAValidSet()
     QCOMPARE(approved.segments.size(), 4);
     for (const auto &item : reviewSegmentProposals(proposals.proposals, {}, {}, approved, axis.lengthMeters))
         QVERIFY(item.state == SegmentReviewState::Approved);
+}
+
+void TrackSegmentReviewTests::persistsRejectionsForTheSameConfigurationOnly()
+{
+    // KAN-50: rejections are stored by type and exact bounds and apply only to the
+    // same configuration and proposal algorithm.
+    const auto proposals = stadiumProposals().proposals;
+    QCOMPARE(proposals.size(), 4);
+    const auto review = makeTrackSegmentReview(configuration(), {proposals[1], proposals[3]});
+    QVERIFY(!review.isEmpty());
+    QVERIFY(validTrackSegmentReview(review));
+    QVERIFY(rejectedProposalIndexes(review, configuration(), proposals) == QSet<int>({1, 3}));
+    QVERIFY(rejectedProposalIndexes(review, configuration('b'), proposals).isEmpty());
+
+    auto otherAlgorithm = review;
+    otherAlgorithm.insert("proposalAlgorithm", "track-segment-proposal-v0");
+    QVERIFY(validTrackSegmentReview(otherAlgorithm));
+    QVERIFY(rejectedProposalIndexes(otherAlgorithm, configuration(), proposals).isEmpty());
+
+    auto moved = proposals;
+    moved[1].start.progressMeters += 1.0; // a recomputed proposal with different bounds is not the rejected one
+    QVERIFY(rejectedProposalIndexes(review, configuration(), moved) == QSet<int>({3}));
+
+    QVERIFY(rejectedProposalIndexes(QJsonValue(), configuration(), proposals).isEmpty());
+    QVERIFY(makeTrackSegmentReview("not-a-reference", {proposals[1]}).isEmpty());
+}
+
+void TrackSegmentReviewTests::rejectsMalformedReviewDecisions()
+{
+    const auto proposals = stadiumProposals().proposals;
+    const auto review = makeTrackSegmentReview(configuration(), {proposals[1]});
+    QVERIFY(validTrackSegmentReview(QJsonValue()));
+    QVERIFY(validTrackSegmentReview(QJsonValue(QJsonValue::Null)));
+    QVERIFY(!validTrackSegmentReview(QJsonArray{}));
+
+    auto extra = review; extra.insert("note", "x");
+    QVERIFY(!validTrackSegmentReview(extra));
+    auto version = review; version.insert("version", "track-segment-review-v0");
+    QVERIFY(!validTrackSegmentReview(version));
+    auto reference = review; reference.insert("trackConfigurationReference", "compatibility-v1:xyz");
+    QVERIFY(!validTrackSegmentReview(reference));
+    auto algorithm = review; algorithm.insert("proposalAlgorithm", " ");
+    QVERIFY(!validTrackSegmentReview(algorithm));
+
+    const auto withDecision = [&review](const QJsonObject &decision) {
+        auto copy = review;
+        copy.insert("rejected", QJsonArray{decision});
+        return copy;
+    };
+    QVERIFY(validTrackSegmentReview(withDecision({{"type", "corner"}, {"startProgressMeters", 10.0}, {"endProgressMeters", 20.0}})));
+    QVERIFY(!validTrackSegmentReview(withDecision({{"type", "chicane"}, {"startProgressMeters", 10.0}, {"endProgressMeters", 20.0}})));
+    QVERIFY(!validTrackSegmentReview(withDecision({{"type", "corner"}, {"startProgressMeters", 10.0}, {"endProgressMeters", 10.0}})));
+    QVERIFY(!validTrackSegmentReview(withDecision({{"type", "corner"}, {"startProgressMeters", -1.0}, {"endProgressMeters", 10.0}})));
+    QVERIFY(!validTrackSegmentReview(withDecision({{"type", "corner"}, {"startProgressMeters", "10"}, {"endProgressMeters", 20.0}})));
+    QVERIFY(!validTrackSegmentReview(withDecision({{"type", "corner"}, {"startProgressMeters", 10.0}})));
+
+    QJsonArray tooMany;
+    for (qsizetype i = 0; i <= maximumSegmentReviewDecisions; ++i)
+        tooMany.append(QJsonObject{{"type", "sector"}, {"startProgressMeters", double(i)}, {"endProgressMeters", double(i) + 0.5}});
+    auto bounded = review; bounded.insert("rejected", tooMany);
+    QVERIFY(!validTrackSegmentReview(bounded));
+}
+
+void TrackSegmentReviewTests::stampsRoundTripAndGoStaleOnAnyInputChange()
+{
+    ProgressAxis axis;
+    const auto proposals = stadiumProposals(&axis).proposals;
+    const auto stored = withApprovedSegment(QJsonValue(), segmentFor(proposals[0]), axis.lengthMeters);
+    QVERIFY(stored);
+    const auto approved = approvedSegmentation(*stored, configuration());
+    const auto stamp = segmentationResultStamp(approved, "sector-times-v1");
+    QVERIFY(segmentationResultCurrent(stamp, approved, "sector-times-v1"));
+
+    const auto restored = segmentationResultStampFromJson(segmentationResultStampToJson(stamp));
+    QVERIFY(restored);
+    QCOMPARE(restored->trackConfigurationReference, stamp.trackConfigurationReference);
+    QCOMPARE(restored->revision, stamp.revision);
+    QCOMPARE(restored->calculationAlgorithm, stamp.calculationAlgorithm);
+    QVERIFY(segmentationResultCurrent(*restored, approved, "sector-times-v1"));
+
+    // A changed calculation algorithm, a layout/direction/gate change (a different
+    // configuration reference) or a segment edit each make the result stale.
+    QVERIFY(!segmentationResultCurrent(stamp, approved, "sector-times-v2"));
+    QVERIFY(!segmentationResultCurrent(stamp, approvedSegmentation(*stored, configuration('b')), "sector-times-v1"));
+    const auto more = withApprovedSegment(*stored, segmentFor(proposals[1]), axis.lengthMeters);
+    QVERIFY(more);
+    QVERIFY(!segmentationResultCurrent(stamp, approvedSegmentation(*more, configuration()), "sector-times-v1"));
+
+    auto json = segmentationResultStampToJson(stamp);
+    QVERIFY(!segmentationResultStampFromJson(QJsonValue("stamp")));
+    auto badRevision = json; badRevision.insert("revision", "track-segments-v1:zz");
+    QVERIFY(!segmentationResultStampFromJson(badRevision));
+    auto extra = json; extra.insert("note", "x");
+    QVERIFY(!segmentationResultStampFromJson(extra));
+    auto missing = json; missing.remove("calculationAlgorithm");
+    QVERIFY(!segmentationResultStampFromJson(missing));
 }
 
 QTEST_GUILESS_MAIN(TrackSegmentReviewTests)

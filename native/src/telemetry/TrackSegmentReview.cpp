@@ -1,5 +1,8 @@
 #include "telemetry/TrackSegmentReview.h"
 
+#include <QRegularExpression>
+#include <QStringList>
+
 #include <algorithm>
 #include <cmath>
 
@@ -44,6 +47,21 @@ bool fail(QString *error, const QString &reason)
     return false;
 }
 
+constexpr qsizetype maximumAlgorithmTagCharacters = 64;
+// Matches TrackSegments' progress bound for imported or edited documents.
+constexpr double maximumDecisionProgressMeters = 1'000'000.0;
+
+bool validConfigurationReference(const QString &reference)
+{
+    static const QRegularExpression pattern("^compatibility-v1:[0-9a-f]{64}$");
+    return pattern.match(reference).hasMatch();
+}
+
+bool validDecisionBound(const double meters)
+{
+    return std::isfinite(meters) && meters >= 0.0 && meters <= maximumDecisionProgressMeters;
+}
+
 } // namespace
 
 QString segmentReviewStateName(const SegmentReviewState state)
@@ -74,15 +92,102 @@ ApprovedSegmentation approvedSegmentation(const QJsonValue &storedSegments, cons
     return result;
 }
 
-SegmentationResultStamp segmentationResultStamp(const ApprovedSegmentation &approved)
+SegmentationResultStamp segmentationResultStamp(const ApprovedSegmentation &approved, const QString &calculationAlgorithm)
 {
-    return {approved.trackConfigurationReference, approved.revision};
+    return {approved.trackConfigurationReference, approved.revision, calculationAlgorithm};
 }
 
-bool segmentationResultCurrent(const SegmentationResultStamp &stamp, const ApprovedSegmentation &approved)
+bool segmentationResultCurrent(const SegmentationResultStamp &stamp, const ApprovedSegmentation &approved,
+    const QString &calculationAlgorithm)
 {
     return approved.valid && !stamp.revision.isEmpty() && stamp.revision == approved.revision
-        && stamp.trackConfigurationReference == approved.trackConfigurationReference;
+        && stamp.trackConfigurationReference == approved.trackConfigurationReference
+        && stamp.calculationAlgorithm == calculationAlgorithm;
+}
+
+QJsonObject segmentationResultStampToJson(const SegmentationResultStamp &stamp)
+{
+    return {{"trackConfigurationReference", stamp.trackConfigurationReference}, {"revision", stamp.revision},
+        {"calculationAlgorithm", stamp.calculationAlgorithm}};
+}
+
+std::optional<SegmentationResultStamp> segmentationResultStampFromJson(const QJsonValue &value)
+{
+    static const QRegularExpression revisionPattern("^track-segments-v1:[0-9a-f]{64}$");
+    const auto object = value.toObject();
+    if (!value.isObject() || object.size() != 3) return std::nullopt;
+    const auto reference = object.value("trackConfigurationReference");
+    const auto revision = object.value("revision");
+    const auto algorithm = object.value("calculationAlgorithm");
+    if (!reference.isString() || !validConfigurationReference(reference.toString()) || !revision.isString()
+        || !revisionPattern.match(revision.toString()).hasMatch() || !algorithm.isString()
+        || algorithm.toString().size() > maximumAlgorithmTagCharacters || algorithm.toString().contains(QChar::Null))
+        return std::nullopt;
+    return SegmentationResultStamp{reference.toString(), revision.toString(), algorithm.toString()};
+}
+
+bool validTrackSegmentReview(const QJsonValue &value)
+{
+    if (value.isUndefined() || value.isNull()) return true;
+    if (!value.isObject()) return false;
+    const auto review = value.toObject();
+    if (review.size() != 4 || review.value("version") != QJsonValue(trackSegmentReviewAlgorithm)) return false;
+    const auto reference = review.value("trackConfigurationReference");
+    const auto algorithm = review.value("proposalAlgorithm");
+    if (!reference.isString() || !validConfigurationReference(reference.toString()) || !algorithm.isString()
+        || algorithm.toString().trimmed().isEmpty() || algorithm.toString().size() > maximumAlgorithmTagCharacters
+        || algorithm.toString().contains(QChar::Null))
+        return false;
+    const auto rejected = review.value("rejected");
+    if (!rejected.isArray() || rejected.toArray().size() > maximumSegmentReviewDecisions) return false;
+    for (const auto &item : rejected.toArray()) {
+        const auto decision = item.toObject();
+        if (!item.isObject() || decision.size() != 3) return false;
+        const auto type = decision.value("type");
+        if (!type.isString() || !QStringList{"sector", "corner", "straight"}.contains(type.toString())) return false;
+        const auto start = decision.value("startProgressMeters");
+        const auto end = decision.value("endProgressMeters");
+        if (!start.isDouble() || !end.isDouble() || !validDecisionBound(start.toDouble())
+            || !validDecisionBound(end.toDouble()) || start.toDouble() == end.toDouble())
+            return false;
+    }
+    return true;
+}
+
+QJsonObject makeTrackSegmentReview(const QString &trackConfigurationReference, const QVector<TrackSegmentProposal> &rejected)
+{
+    QJsonArray decisions;
+    for (const auto &proposal : rejected) {
+        if (decisions.size() >= maximumSegmentReviewDecisions) break;
+        decisions.append(QJsonObject{{"type", trackSegmentTypeName(proposal.type)},
+            {"startProgressMeters", proposal.start.progressMeters}, {"endProgressMeters", proposal.end.progressMeters}});
+    }
+    const QJsonObject review{{"version", trackSegmentReviewAlgorithm},
+        {"trackConfigurationReference", trackConfigurationReference},
+        {"proposalAlgorithm", trackSegmentProposalAlgorithm}, {"rejected", decisions}};
+    return validTrackSegmentReview(review) ? review : QJsonObject{};
+}
+
+QSet<int> rejectedProposalIndexes(const QJsonValue &storedReview, const QString &trackConfigurationReference,
+    const QVector<TrackSegmentProposal> &proposals)
+{
+    QSet<int> indexes;
+    if (!storedReview.isObject() || !validTrackSegmentReview(storedReview)) return indexes;
+    const auto review = storedReview.toObject();
+    if (review.value("trackConfigurationReference").toString() != trackConfigurationReference
+        || review.value("proposalAlgorithm").toString() != QString(trackSegmentProposalAlgorithm))
+        return indexes;
+    for (const auto &item : review.value("rejected").toArray()) {
+        const auto decision = item.toObject();
+        for (int index = 0; index < proposals.size(); ++index) {
+            const auto &proposal = proposals[index];
+            if (decision.value("type").toString() == trackSegmentTypeName(proposal.type)
+                && std::abs(decision.value("startProgressMeters").toDouble() - proposal.start.progressMeters) <= boundaryMatchMeters
+                && std::abs(decision.value("endProgressMeters").toDouble() - proposal.end.progressMeters) <= boundaryMatchMeters)
+                indexes.insert(index);
+        }
+    }
+    return indexes;
 }
 
 bool progressRangesOverlap(const ProgressRange &a, const ProgressRange &b, const double lengthMeters)

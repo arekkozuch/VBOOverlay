@@ -113,6 +113,14 @@ first part and a merge keeps the earlier segment's ID. Every edit, split,
 merge, approval or revocation changes the revision, so dependent results must
 be recomputed. Approved segments never overlap and are never empty.
 
+Results record `segmentationResultStamp(approved, calculationAlgorithm)`
+(configuration reference, segment revision and their own algorithm tag) and
+persist it with `segmentationResultStampToJson`. A layout, direction or
+timing-gate change alters the configuration reference, so previously approved
+segments stop applying and every stamped result becomes stale. Review
+rejections are persisted in `trackSegmentReview` and never change the
+revision.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;
