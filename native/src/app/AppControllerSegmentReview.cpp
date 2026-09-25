@@ -672,3 +672,38 @@ QVariantMap AppController::outingLapSectorTimes() const
     if (times.partitionErrorSeconds) result.insert("partitionErrorSeconds", *times.partitionErrorSeconds);
     return result;
 }
+
+namespace {
+
+QVariantMap cornerSpeedValueMap(const CornerSpeedValue &value)
+{
+    QVariantMap map{{"progressMeters", value.progressMeters}, {"limitations", value.limitations}};
+    if (value.value) map.insert("value", *value.value);
+    else map.insert("unavailableReason", value.unavailableReason);
+    if (value.telemetryTime) map.insert("telemetryTime", *value.telemetryTime);
+    return map;
+}
+
+} // namespace
+
+QVariantList AppController::outingLapCornerSpeeds() const
+{
+    if (m_segmentReviewState != "ready" || !m_segmentReviewAxis.valid || !m_outingLapDetailSession) return {};
+    const auto features = computeTrackFeatures(m_segmentReviewAxis, segmentReviewSmoothingMeters);
+    const auto approved = currentApprovedSegmentation();
+    QVariantList rows;
+    for (const auto &value : approved.segments) {
+        const auto segment = value.toObject();
+        if (segment.value("type").toString() != trackSegmentTypeName(TrackSegmentType::Corner)) continue;
+        const auto speeds = computeCornerSpeeds(m_segmentReviewAxis, features, approved, segment.value("id").toString(),
+            m_segmentReviewLapTrace, *m_outingLapDetailSession);
+        if (!speeds.valid) continue;
+        rows.append(QVariantMap{{"segmentId", speeds.segmentId}, {"name", speeds.name}, {"channel", speeds.channel},
+            {"unit", speeds.unit}, {"provenance", speeds.provenance}, {"entry", cornerSpeedValueMap(speeds.entry)},
+            {"apex", cornerSpeedValueMap(speeds.apex)}, {"minimum", cornerSpeedValueMap(speeds.minimum)},
+            {"exit", cornerSpeedValueMap(speeds.exit)}, {"lengthMeters", speeds.lengthMeters},
+            {"coveredMeters", speeds.coveredMeters}, {"meanSampleSpacingMeters", speeds.meanSampleSpacingMeters},
+            {"revision", speeds.stamp.revision}, {"calculationAlgorithm", speeds.stamp.calculationAlgorithm}});
+    }
+    return rows;
+}

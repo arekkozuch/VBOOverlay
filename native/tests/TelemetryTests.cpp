@@ -35,6 +35,7 @@
 #include "EventProjectFixture.h"
 #include "telemetry/TrackSegmentReview.h"
 #include "telemetry/SectorTiming.h"
+#include "telemetry/CornerSpeeds.h"
 #include "project/EventProjectCodec.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -3813,6 +3814,20 @@ void TelemetryTests::timesApprovedSectorsForTheOpenLap()
         - controller.selectedOutingLap().value("startTime").toDouble();
     QVERIFY(std::abs(times.value("lapSeconds").toDouble() - lapSeconds) < 1e-9);
     QVERIFY(times.value("partitionErrorSeconds").toDouble() <= sectorSumToleranceSeconds);
+
+    // KAN-52: the route has no recorded speed channel, so corner speeds are
+    // explicitly unavailable rather than derived from GPS positions.
+    const auto corners = controller.outingLapCornerSpeeds();
+    QVERIFY(!corners.isEmpty());
+    for (const auto &value : corners) {
+        const auto corner = value.toMap();
+        QCOMPARE(corner.value("provenance").toString(), QString("unavailable"));
+        QCOMPARE(corner.value("calculationAlgorithm").toString(), QString(cornerSpeedsAlgorithm));
+        for (const auto *phase : {"entry", "apex", "minimum", "exit"}) {
+            QVERIFY(!corner.value(phase).toMap().contains("value"));
+            QCOMPARE(corner.value(phase).toMap().value("unavailableReason").toString(), QString(cornerPhaseSpeedChannelMissing));
+        }
+    }
 }
 
 void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()

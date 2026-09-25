@@ -127,6 +127,11 @@ continuous projected coverage, or one that crosses the gate, has no numeric
 time. For a complete partition the sector times sum to the lap time within
 1 ms.
 
+Corner speeds (KAN-52) are read only from the recorded speed channel: entry
+and exit at the segment boundaries, the apex speed at the geometric apex and
+the minimum where the lap was slowest. The apex is never taken as the minimum,
+and no speed is derived from GPS positions.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;

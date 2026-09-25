@@ -76,4 +76,11 @@ struct CornerPhaseOptions {
 
 inline constexpr int maximumMinimumSpeedSamples = 100'000;
 
+// The geometric view of an approved segment on an axis (KAN-52): a Corner
+// proposal with the segment's exact bounds (no automatic uncertainty) and its
+// turn and peak curvature measured from `features`, for use with the phase
+// functions above. Returns an invalid-type (Straight) proposal on bad input.
+[[nodiscard]] TrackSegmentProposal cornerFromSegment(const ProgressAxis &axis, const TrackFeatures &features,
+    const QJsonObject &segment);
+
 } // namespace FlappedEar

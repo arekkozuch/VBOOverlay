@@ -59,4 +59,9 @@ struct LapSectorTimes {
 [[nodiscard]] LapSectorTimes computeLapSectorTimes(const ApprovedSegmentation &approved, double axisLengthMeters,
     const QVector<ProgressSegment> &lapTrace, double lapStartTime, double lapEndTime, const QJsonObject &lapReference);
 
+// Metres of [fromMeters, toMeters] (from <= to) covered by the lap's projection,
+// with the same gate tolerance as sector timing.
+[[nodiscard]] double projectedCoverageMeters(
+    const QVector<ProgressSegment> &lapTrace, double fromMeters, double toMeters, double axisLengthMeters);
+
 } // namespace FlappedEar

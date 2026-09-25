@@ -4,6 +4,8 @@
 
 #include "SyntheticLoopFixture.h"
 #include "telemetry/CornerPhases.h"
+#include "telemetry/CornerSpeeds.h"
+#include "telemetry/TrackSegmentReview.h"
 #include "telemetry/TrackSegmentProposals.h"
 
 #include <QtTest>
@@ -110,6 +112,17 @@ Lap driveLap(const QVector<Step> &half, const std::function<double(double)> &spe
 // Minimum 12 m/s at path distance 185 m, 30 m/s elsewhere.
 double speedDipAt185(const double s) { return 30.0 - 18.0 * std::exp(-std::pow((s - 185.0) / 15.0, 2.0)); }
 
+QString speedConfiguration() { return "compatibility-v1:" + QString(64, 'c'); }
+
+ApprovedSegmentation approvedAs(const TrackSegmentProposal &proposal, const TrackSegmentType type = TrackSegmentType::Corner)
+{
+    const QJsonArray segments{makeTrackSegment(type, proposal.name, proposal.start.progressMeters,
+        proposal.end.progressMeters, speedConfiguration())};
+    return approvedSegmentation(segments, speedConfiguration());
+}
+
+QString onlyId(const ApprovedSegmentation &approved) { return approved.segments.first().toObject().value("id").toString(); }
+
 } // namespace
 
 class CornerPhaseTests final : public QObject {
@@ -122,6 +135,9 @@ private slots:
     void locatesMinimumSpeedSeparatelyFromTheApex();
     void leavesMinimumSpeedUnresolvedOnIncompleteData();
     void rejectsInvalidInputs();
+    void reportsEntryApexMinimumAndExitSpeedsSeparately();
+    void limitsOrWithholdsCornerSpeedsOnPoorData();
+    void cornerSpeedsHandleOtherSegmentShapes();
 };
 
 void CornerPhaseTests::entryAndExitReuseCornerBoundaries()
@@ -272,6 +288,121 @@ void CornerPhaseTests::rejectsInvalidInputs()
         QString(cornerPhaseInvalidInput));
     QCOMPARE(locateMinimumSpeed(corner.axis, straightProposal, trace, lap.session, 1.0).unresolvedReason,
         QString(cornerPhaseInvalidInput));
+}
+
+void CornerPhaseTests::reportsEntryApexMinimumAndExitSpeedsSeparately()
+{
+    // KAN-52: four separate values; the apex speed is read at the geometric apex,
+    // the minimum is where this lap was slowest, ~28 m later.
+    const auto corner = firstCorner(singleApexHalf());
+    const auto approved = approvedAs(corner.proposal);
+    const auto lap = driveLap(singleApexHalf(), speedDipAt185);
+    const auto trace = projectLapTrace(corner.axis, lap.session, 0.0, lap.endTime);
+    const auto speeds = computeCornerSpeeds(corner.axis, corner.features, approved, onlyId(approved), trace, lap.session);
+    QVERIFY(speeds.valid);
+    QCOMPARE(speeds.provenance, QString("measured"));
+    QCOMPARE(speeds.channel, QString("velocity"));
+    QCOMPARE(speeds.unit, QString("km/h"));
+    QCOMPARE(speeds.stamp.calculationAlgorithm, QString(cornerSpeedsAlgorithm));
+    QVERIFY(segmentationResultCurrent(speeds.stamp, approved, cornerSpeedsAlgorithm));
+    for (const auto *value : {&speeds.entry, &speeds.apex, &speeds.minimum, &speeds.exit}) {
+        QVERIFY2(value->value, qPrintable(value->unavailableReason));
+        QVERIFY(value->telemetryTime);
+        QVERIFY(value->limitations.isEmpty());
+    }
+    QCOMPARE(speeds.entry.progressMeters, corner.proposal.start.progressMeters);
+    QCOMPARE(speeds.exit.progressMeters, corner.proposal.end.progressMeters);
+    QVERIFY(*speeds.entry.value > 100.0);
+    QVERIFY(*speeds.exit.value > 100.0);
+    QVERIFY(std::abs(*speeds.minimum.value - 12.0 * 3.6) < 1.0);
+    QVERIFY(std::abs(speeds.minimum.progressMeters - 185.0) < 5.0);
+    QVERIFY(std::abs(speeds.apex.progressMeters - speeds.minimum.progressMeters) > 20.0);
+    QVERIFY(*speeds.apex.value - *speeds.minimum.value > 50.0);
+    QVERIFY(std::abs(speeds.coveredMeters - speeds.lengthMeters) < 1e-6);
+    QVERIFY(speeds.meanSampleSpacingMeters > 0.0 && speeds.meanSampleSpacingMeters <= sparseSampleSpacingMeters);
+}
+
+void CornerPhaseTests::limitsOrWithholdsCornerSpeedsOnPoorData()
+{
+    const auto corner = firstCorner(singleApexHalf());
+    const auto approved = approvedAs(corner.proposal);
+    const auto id = onlyId(approved);
+
+    // A GPS gap inside the corner: no minimum, but boundary speeds outside the gap remain.
+    const auto gapped = driveLap(singleApexHalf(), speedDipAt185, {170.0, 200.0});
+    const auto gapTrace = projectLapTrace(corner.axis, gapped.session, 0.0, gapped.endTime);
+    const auto withGap = computeCornerSpeeds(corner.axis, corner.features, approved, id, gapTrace, gapped.session);
+    QVERIFY(!withGap.minimum.value);
+    QCOMPARE(withGap.minimum.unavailableReason, QString(cornerPhaseIncompleteCoverage));
+    QVERIFY(withGap.entry.value && withGap.exit.value);
+    QVERIFY(withGap.coveredMeters < withGap.lengthMeters - 20.0);
+
+    // Sparse speed samples: values are kept but explicitly limited.
+    auto sparse = driveLap(singleApexHalf(), speedDipAt185);
+    auto &velocity = sparse.session.channels["velocity"];
+    TelemetryChannel thinned;
+    thinned.name = velocity.name;
+    thinned.unit = velocity.unit;
+    for (qsizetype i = 0; i < velocity.timestamps.size(); i += 40) {
+        thinned.timestamps.append(velocity.timestamps[i]);
+        thinned.values.append(velocity.values[i]);
+    }
+    velocity = thinned;
+    const auto sparseTrace = projectLapTrace(corner.axis, sparse.session, 0.0, sparse.endTime);
+    const auto limited = computeCornerSpeeds(corner.axis, corner.features, approved, id, sparseTrace, sparse.session);
+    QVERIFY(limited.meanSampleSpacingMeters > sparseSampleSpacingMeters);
+    QVERIFY(limited.entry.value);
+    QVERIFY(limited.entry.limitations.contains(cornerSpeedSparseSamples));
+    QVERIFY(limited.exit.limitations.contains(cornerSpeedSparseSamples));
+
+    // No speed channel: nothing is derived from GPS positions instead.
+    auto noSpeed = driveLap(singleApexHalf(), speedDipAt185);
+    const auto noSpeedTrace = projectLapTrace(corner.axis, noSpeed.session, 0.0, noSpeed.endTime);
+    noSpeed.session.aliases.remove("speed");
+    const auto missing = computeCornerSpeeds(corner.axis, corner.features, approved, id, noSpeedTrace, noSpeed.session);
+    QVERIFY(missing.valid);
+    QCOMPARE(missing.provenance, QString("unavailable"));
+    for (const auto *value : {&missing.entry, &missing.apex, &missing.minimum, &missing.exit}) {
+        QVERIFY(!value->value);
+        QCOMPARE(value->unavailableReason, QString(cornerPhaseSpeedChannelMissing));
+    }
+}
+
+void CornerPhaseTests::cornerSpeedsHandleOtherSegmentShapes()
+{
+    // Two separate apexes: no apex speed, the minimum is still measured.
+    const auto doubleCorner = firstCorner(doubleApexHalf());
+    const auto doubleApproved = approvedAs(doubleCorner.proposal);
+    const auto doubleLap = driveLap(doubleApexHalf(), speedDipAt185);
+    const auto doubleTrace = projectLapTrace(doubleCorner.axis, doubleLap.session, 0.0, doubleLap.endTime);
+    const auto twoApexes = computeCornerSpeeds(doubleCorner.axis, doubleCorner.features, doubleApproved,
+        onlyId(doubleApproved), doubleTrace, doubleLap.session);
+    QVERIFY(!twoApexes.apex.value);
+    QCOMPARE(twoApexes.apex.unavailableReason, QString(cornerPhaseMultipleApexes));
+    QVERIFY(twoApexes.minimum.value);
+
+    const auto corner = firstCorner(singleApexHalf());
+    const auto lap = driveLap(singleApexHalf(), speedDipAt185);
+    const auto trace = projectLapTrace(corner.axis, lap.session, 0.0, lap.endTime);
+
+    // A straight segment has no apex, but its minimum speed is still measured.
+    const auto straight = approvedAs(corner.proposal, TrackSegmentType::Straight);
+    const auto straightSpeeds = computeCornerSpeeds(corner.axis, corner.features, straight, onlyId(straight), trace, lap.session);
+    QCOMPARE(straightSpeeds.apex.unavailableReason, QString(cornerSpeedNotACorner));
+    QVERIFY(straightSpeeds.minimum.value);
+
+    // A segment across the gate cannot be measured within one lap.
+    auto wrapping = corner.proposal;
+    wrapping.start.progressMeters = corner.axis.lengthMeters - 30.0;
+    wrapping.end.progressMeters = 30.0;
+    const auto wrapped = approvedAs(wrapping);
+    const auto acrossGate = computeCornerSpeeds(corner.axis, corner.features, wrapped, onlyId(wrapped), trace, lap.session);
+    QVERIFY(acrossGate.valid);
+    for (const auto *value : {&acrossGate.entry, &acrossGate.apex, &acrossGate.minimum, &acrossGate.exit})
+        QCOMPARE(value->unavailableReason, QString(cornerPhaseCrossesGate));
+
+    QVERIFY(!computeCornerSpeeds(corner.axis, corner.features, approvedAs(corner.proposal), "missing", trace, lap.session).valid);
+    QVERIFY(!computeCornerSpeeds(ProgressAxis{}, corner.features, approvedAs(corner.proposal), "x", trace, lap.session).valid);
 }
 
 QTEST_GUILESS_MAIN(CornerPhaseTests)
