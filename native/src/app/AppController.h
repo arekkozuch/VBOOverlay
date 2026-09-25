@@ -265,6 +265,12 @@ public:
     [[nodiscard]] QVariantMap outingTimeLossRanking() const;
     Q_INVOKABLE void requestOutingTheoreticalBest();
     Q_INVOKABLE bool openTheoreticalBestSector(const QString &segmentId);
+    // KAN-61: loss evidence. Opens the ranked loss's lap (A) against the
+    // ranking's reference (B), focused on the loss window.
+    Q_INVOKABLE bool openTimeLoss(const QVariantMap &loss);
+    // Opens one comparison lap in the lap view with its cursor where it
+    // reaches `progressMeters`, so the run's video (if any) follows.
+    Q_INVOKABLE bool openComparisonLapAtProgress(int slot, double progressMeters);
     [[nodiscard]] QString comparisonFocusSegmentId() const { return m_comparisonFocusSegmentId; }
     Q_INVOKABLE void clearComparisonFocusSegment();
     [[nodiscard]] QVariantList outingCompatibilityGroups() const;
@@ -720,6 +726,7 @@ private:
         const std::shared_ptr<std::atomic_bool> &cancellation);
     void initializeOutingTheoreticalBest();
     [[nodiscard]] QString outingLapLabel(const QJsonObject &reference) const;
+    bool openComparisonEvidence(const QVariantMap &lapA, const QVariantMap &lapB, const QString &segmentId);
     QFutureWatcher<TheoreticalBestResult> m_theoreticalBestWatcher;
     std::shared_ptr<std::atomic_bool> m_theoreticalBestCancellation;
     quint64 m_theoreticalBestRequest = 0;

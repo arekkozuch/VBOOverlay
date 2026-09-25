@@ -18,7 +18,25 @@ Rectangle {
     ComparisonLapDialog { id: comparisonLapDialog }
     OutingProgressionDialog { id: progressionDialog }
     TheoreticalBestDialog { id: theoreticalBestDialog }
-    TimeLossDialog { id: timeLossDialog }
+    TimeLossDialog {
+        id: timeLossDialog
+        onLossSelected: loss => {
+            if (!appController.openTimeLoss(loss)) return;
+            timeLossDialog.returnKey = timeLossDialog.lossKey(loss);
+            root.returnToLosses = true;
+            timeLossDialog.close();
+        }
+    }
+    // KAN-61: returning from a loss's evidence reopens the ranking where it was.
+    property bool returnToLosses: false
+    Connections {
+        target: appController
+        function onComparisonViewOpenChanged() {
+            if (appController.comparisonViewOpen || !root.returnToLosses) return;
+            root.returnToLosses = false;
+            Qt.callLater(() => timeLossDialog.open());
+        }
+    }
     Dialog {
         id: rankingDialog
         objectName: "outingRankingDialog"

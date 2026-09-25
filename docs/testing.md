@@ -708,6 +708,38 @@ the reference label and the disclaimer. It then excludes the top loss's lap
 and checks that the open dialog recalculates without it, with no QML
 warnings. Synthetic only.
 
+## From a ranked loss to corner evidence (KAN-61)
+
+Selecting a row in **Time losses…** calls `openTimeLoss(loss)`. The loss's
+lap becomes comparison A and the ranking's reference lap becomes B. The
+comparison view opens with the canonical segments the ranking used, focused
+on the loss window. The Corner Analyzer selects that segment and sets the
+shared zoom to the window, so the delta, map and channel charts show the same
+range when switching to **← Channels**.
+
+In the Corner Analyzer, **Lap A here…** and **Lap B here…**
+(`openComparisonLapAtProgress`) open that lap in the lap view. The cursor is
+placed where the lap reaches the segment start on the comparison axis. The
+lap view's video follows the cursor through the run's existing
+synchronization (KAN-39) when the lap belongs to the loaded run. Otherwise
+the video pane shows that no video is available and the lap still opens. If
+the lap has no projected time at that point, it opens at its start. Missing
+channels only affect the metrics shown and never block navigation.
+
+Returning keeps the ranking context. **← All laps** in the lap view goes
+back to the comparison. Closing the comparison reopens **Time losses…** with
+the same loss selected, matched by lap and segment because a recalculation
+can reorder the list.
+
+`TelemetryTests::navigatesFromRankedLossToCornerEvidence` hosts
+`OutingLapPanel` and `ComparisonDetailPanel` and drives the flow with the
+keyboard: open the ranking, select a loss, check A, B, the selected segment,
+the zoom range and the cleared focus request, then open lap A at the window
+(no video in the fixture, which does not block it) with the cursor inside
+the lap. Finally it goes back twice and checks that the ranking reopens with
+the same row selected, with no QML warnings. Synthetic only; no video-bearing
+fixture exercises the seek.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

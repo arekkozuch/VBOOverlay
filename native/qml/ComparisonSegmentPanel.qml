@@ -97,6 +97,36 @@ Rectangle {
             font.pixelSize: 11
         }
         RowLayout {
+            id: openLaps
+            objectName: "cornerAnalyzerOpenLaps"
+            visible: root.selectedSegmentId.length > 0
+            Layout.fillWidth: true
+            spacing: 6
+            // KAN-61: the lap view shows the run's video when the lap belongs
+            // to the loaded run; otherwise it opens without video.
+            function openLap(slot) {
+                const segment = root.segments.find(candidate => candidate.id === root.selectedSegmentId);
+                if (segment) appController.openComparisonLapAtProgress(slot, segment.startMeters);
+            }
+            FeButton {
+                objectName: "cornerAnalyzerOpenLapA"
+                compact: true
+                text: qsTr("Lap A here…")
+                onClicked: openLaps.openLap(0)
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Open lap A at the start of this segment, with its video when available")
+            }
+            FeButton {
+                objectName: "cornerAnalyzerOpenLapB"
+                compact: true
+                text: qsTr("Lap B here…")
+                onClicked: openLaps.openLap(1)
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Open lap B at the start of this segment, with its video when available")
+            }
+            Item { Layout.fillWidth: true }
+        }
+        RowLayout {
             visible: root.segments.length > 0
             Layout.fillWidth: true
             Layout.fillHeight: true

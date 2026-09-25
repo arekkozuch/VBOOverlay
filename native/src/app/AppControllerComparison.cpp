@@ -436,6 +436,23 @@ QVariantMap AppController::comparisonPositionAtProgress(const int slot, const do
     return {{"x", point->x()}, {"y", point->y()}};
 }
 
+bool AppController::openComparisonLapAtProgress(const int slot, const double progressMeters)
+{
+    if (slot < 0 || slot > 1 || !comparisonPairReady()) return false;
+    ensureComparisonProgressAxis();
+    const auto time = m_comparisonProgressAxis.valid
+        ? timeAtProgress(m_comparisonProgressTraceCache[slot], progressMeters) : std::nullopt;
+    const auto row = m_comparisonSlots[slot].row;
+    if (!selectOutingLapReference(row.value("reference").toMap())) return false;
+    // Without a projected time here the lap still opens, at its start.
+    if (time) {
+        m_outingLapCursor = std::clamp(*time, row.value("startTime").toDouble(), row.value("endTime").toDouble());
+        emit outingLapCursorChanged();
+        emit outingLapVideoChanged();
+    }
+    return true;
+}
+
 double AppController::comparisonProgressAxisLength() const
 {
     ensureComparisonProgressAxis();

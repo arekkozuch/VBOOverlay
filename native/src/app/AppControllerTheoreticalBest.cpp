@@ -185,10 +185,26 @@ bool AppController::openTheoreticalBestSector(const QString &segmentId)
         [&segmentId](const TheoreticalBestSector &candidate) { return candidate.segmentId == segmentId; });
     if (sector == m_theoreticalBestBest.sectors.cend() || !sector->seconds) return false;
     // Donor lap as A against the group's actual best as B.
-    const auto donor = sector->sourceLapReference.toVariantMap();
-    const auto best = m_theoreticalBestActual->lapReference.toVariantMap();
+    return openComparisonEvidence(sector->sourceLapReference.toVariantMap(),
+        m_theoreticalBestActual->lapReference.toVariantMap(), segmentId);
+}
+
+bool AppController::openTimeLoss(const QVariantMap &loss)
+{
+    if (m_theoreticalBestState != "ready" || !m_theoreticalBestActual) return false;
+    const auto segmentId = loss.value("segmentId").toString();
+    const auto known = std::any_of(m_theoreticalBestBest.sectors.cbegin(), m_theoreticalBestBest.sectors.cend(),
+        [&segmentId](const TheoreticalBestSector &sector) { return sector.segmentId == segmentId; });
+    if (!known) return false;
+    return openComparisonEvidence(loss.value("lapReference").toMap(),
+        m_theoreticalBestActual->lapReference.toVariantMap(), segmentId);
+}
+
+bool AppController::openComparisonEvidence(const QVariantMap &lapA, const QVariantMap &lapB, const QString &segmentId)
+{
     closeOutingLap();
-    if (!selectComparisonLap(0, donor) || !selectComparisonLap(1, best)) return false;
+    if (!selectComparisonLap(0, lapA) || !selectComparisonLap(1, lapB)) return false;
+    // Measured against the same canonical segments as the result that led here.
     m_comparisonSegmentationRunId = m_theoreticalBestCanonicalRunId;
     if (m_comparisonFocusSegmentId != segmentId) {
         m_comparisonFocusSegmentId = segmentId;
