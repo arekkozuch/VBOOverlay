@@ -744,3 +744,37 @@ QVariantList AppController::outingLapBrakingMetrics() const
     }
     return rows;
 }
+
+QVariantList AppController::outingLapExitMetrics() const
+{
+    if (m_segmentReviewState != "ready" || !m_segmentReviewAxis.valid || !m_outingLapDetailSession) return {};
+    const auto approved = currentApprovedSegmentation();
+    const double lapEnd = m_selectedOutingLap.value("endTime").toDouble();
+    QVariantList rows;
+    for (const auto &value : approved.segments) {
+        const auto segment = value.toObject();
+        if (segment.value("type").toString() != trackSegmentTypeName(TrackSegmentType::Corner)) continue;
+        const auto metrics = computeExitMetrics(m_segmentReviewAxis.lengthMeters, approved, segment.value("id").toString(),
+            m_segmentReviewLapTrace, *m_outingLapDetailSession, lapEnd);
+        if (!metrics.valid) continue;
+        QVariantMap pickup{{"method", metrics.pickup.method}, {"provenance", metrics.pickup.provenance},
+            {"channel", metrics.pickup.channel}, {"unit", metrics.pickup.unit},
+            {"onThreshold", metrics.pickup.threshold.on}, {"thresholdUnit", metrics.pickup.threshold.unit},
+            {"limitations", metrics.pickup.limitations}};
+        if (metrics.pickup.progressMeters) pickup.insert("progressMeters", *metrics.pickup.progressMeters);
+        if (metrics.pickup.telemetryTime) pickup.insert("telemetryTime", *metrics.pickup.telemetryTime);
+        if (!metrics.pickup.unavailableReason.isEmpty()) pickup.insert("unavailableReason", metrics.pickup.unavailableReason);
+        QVariantMap row{{"segmentId", metrics.segmentId}, {"name", segment.value("name").toString()}, {"pickup", pickup},
+            {"intervalSource", metrics.intervalSource}, {"intervalStartMeters", metrics.intervalStartMeters},
+            {"intervalEndMeters", metrics.intervalEndMeters}, {"speedChannel", metrics.speedChannel},
+            {"speedUnit", metrics.speedUnit}, {"revision", metrics.stamp.revision},
+            {"calculationAlgorithm", metrics.stamp.calculationAlgorithm}};
+        if (metrics.exitSpeed) row.insert("exitSpeed", *metrics.exitSpeed);
+        if (metrics.intervalEndSpeed) row.insert("intervalEndSpeed", *metrics.intervalEndSpeed);
+        if (metrics.elapsedSeconds) row.insert("elapsedSeconds", *metrics.elapsedSeconds);
+        if (!metrics.downstreamUnavailableReason.isEmpty())
+            row.insert("downstreamUnavailableReason", metrics.downstreamUnavailableReason);
+        rows.append(row);
+    }
+    return rows;
+}

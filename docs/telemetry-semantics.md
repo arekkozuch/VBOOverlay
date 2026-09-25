@@ -142,6 +142,12 @@ lap's projection never lands on the gate exactly. A missing brake and
 deceleration channel is reported (`noBrakeOrDecelerationChannel`) before
 coverage is checked.
 
+Throttle pickup (KAN-54) is measured only from the recorded throttle channel;
+without one, a positive longitudinal-acceleration onset is reported and
+labelled inferred. Exit effects are compared over an explicit interval (the
+adjoining approved straight, or 200 m after the segment) and no cause is
+attributed to a difference.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;

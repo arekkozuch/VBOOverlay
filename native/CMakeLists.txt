@@ -128,6 +128,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/CornerSpeeds.h
     src/telemetry/BrakingMetrics.cpp
     src/telemetry/BrakingMetrics.h
+    src/telemetry/ExitMetrics.cpp
+    src/telemetry/ExitMetrics.h
     src/telemetry/CornerPhases.cpp
     src/telemetry/CornerPhases.h
     src/telemetry/BrakingOnset.cpp

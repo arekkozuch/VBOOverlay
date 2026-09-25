@@ -503,6 +503,46 @@ provenance and different revisions. `TelemetryTests` checks that the synthetic
 route, with no brake or acceleration channel, yields no braking values. The
 KAN-51 axis limitation applies. Synthetic only; no real brake sensor.
 
+## Throttle pickup and downstream exit effects (KAN-54)
+
+`computeExitMetrics` (`native/src/telemetry/ExitMetrics.h/.cpp`, tag
+`exit-metrics-v1`) defines its intervals explicitly:
+
+- Pickup is searched inside the segment ([start, end] on shared-axis
+  progress): the first rise to the on-threshold after the channel was at or
+  below the off-threshold, held at or above the off-threshold for 0.2 s. It is
+  measured from the recorded `throttle` channel (`measuredThrottle`, 20 / 10 %)
+  whenever one exists; only without it is a positive longitudinal-acceleration
+  onset reported (`inferredAcceleration`, 0.10 / 0.05 g), labelled inferred.
+  A throttle never lifted is `noLift`; lifted but never reapplied is
+  `noPickupDetected`; brief blips are ignored; a rise right after missing
+  samples is reported where data resumes with `followsGap`; declared units
+  must match (`unitMismatch`), undeclared ones are flagged.
+- The downstream interval starts at the segment's end boundary and ends at the
+  end of the adjoining approved straight (`followingStraight`) or 200 m later
+  (`fixedDistance`). Exit speed (at the end boundary) and speed at the
+  interval end come only from the recorded speed channel; elapsed time needs
+  continuous projected coverage of the whole interval, and an interval ending
+  at the gate uses the lap's timed end. An interval continuing past the gate
+  is `crossesGate`.
+- `compareExitMetrics` gives A minus B (pickup positive when A picks up later)
+  for the same segment, revision and interval. Pickups from different methods
+  are not compared; speeds and elapsed time are compared as numbers only. No
+  cause is attributed to any difference.
+- `AppController::outingLapExitMetrics()` returns single-lap values for the
+  reviewed lap's approved corners; A/B wiring and UI land with the Corner
+  Analyzer.
+
+`ExitMetricsTests` uses a constant-speed projected lap and 20 Hz channels:
+interpolated measured pickup at 26.9875 s (539.75 m), the following straight
+(exit 80 km/h, end 90 km/h, 10 s), the inferred path, no channels, no speed
+channel, no lift, no pickup, a blip, missing samples, unit mismatch and
+undeclared units, fixed-distance and gate-ending intervals, a gate-crossing
+interval and segment, a projection hole, invalid options, and A/B comparison
+including mixed provenance and a different revision. `TelemetryTests` checks
+that the synthetic route yields no pickup and no speeds, while following
+intervals are still timed. The KAN-51 axis limitation applies. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
