@@ -24,7 +24,7 @@ QVector<ProgressSegment> projectedLap(const double holeFrom = -1.0, const double
     QVector<ProgressSegment> lap(1);
     for (double progress = 2.0; progress <= 998.0 + 1e-9; progress += 10.0) {
         if (progress > holeFrom && progress < holeTo) {
-            if (!lap.last().samples.isEmpty()) lap.append({});
+            if (!lap.last().samples.isEmpty()) lap.append(ProgressSegment{});
             continue;
         }
         lap.last().samples.append({lapStart + progress / 20.0, progress, true});
