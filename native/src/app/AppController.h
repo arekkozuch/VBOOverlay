@@ -12,6 +12,7 @@
 #include "telemetry/TrackSegmentEditing.h"
 #include "telemetry/SectorTiming.h"
 #include "telemetry/CornerSpeeds.h"
+#include "telemetry/BrakingMetrics.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -319,6 +320,8 @@ public:
     Q_INVOKABLE QVariantMap outingLapSectorTimes() const;
     // KAN-52: entry/apex/minimum/exit speeds of the reviewed lap per approved corner.
     Q_INVOKABLE QVariantList outingLapCornerSpeeds() const;
+    // KAN-53: braking point, time, distance and deceleration per approved corner.
+    Q_INVOKABLE QVariantList outingLapBrakingMetrics() const;
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QVariantMap outingLapSeries(
         const QString &channel, double startTime, double endTime, int maximumPoints) const;

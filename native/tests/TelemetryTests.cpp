@@ -36,6 +36,7 @@
 #include "telemetry/TrackSegmentReview.h"
 #include "telemetry/SectorTiming.h"
 #include "telemetry/CornerSpeeds.h"
+#include "telemetry/BrakingMetrics.h"
 #include "project/EventProjectCodec.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -3827,6 +3828,19 @@ void TelemetryTests::timesApprovedSectorsForTheOpenLap()
             QVERIFY(!corner.value(phase).toMap().contains("value"));
             QCOMPARE(corner.value(phase).toMap().value("unavailableReason").toString(), QString(cornerPhaseSpeedChannelMissing));
         }
+    }
+
+    // KAN-53: without brake or acceleration channels there is no braking point,
+    // and no distance or deceleration is invented.
+    const auto braking = controller.outingLapBrakingMetrics();
+    QCOMPARE(braking.size(), corners.size());
+    for (const auto &value : braking) {
+        const auto metrics = value.toMap();
+        QCOMPARE(metrics.value("unavailableReason").toString(), QString(brakingNoChannel));
+        QVERIFY(!metrics.contains("brakingPointMeters"));
+        QVERIFY(!metrics.contains("brakingDistanceMeters"));
+        QVERIFY(!metrics.contains("peakDeceleration"));
+        QCOMPARE(metrics.value("calculationAlgorithm").toString(), QString(brakingMetricsAlgorithm));
     }
 }
 

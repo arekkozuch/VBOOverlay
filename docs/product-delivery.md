@@ -54,7 +54,7 @@ work, not evidence that a future capability already works. Ranges are inclusive.
 | F03 | Missing | Non-overlapping ranked losses and evidence navigation: [KAN-59]–[KAN-61]; acceptance: [KAN-74] |
 | F04 | Missing | Sector theoretical and donor provenance: [KAN-50], [KAN-51], [KAN-56]–[KAN-58]; separately validated realistic potential: [KAN-94]–[KAN-96] |
 | F05 | Partial: single-lap trace and independent cursor, readable channel selector | Shared progress, paired traces/cursor: [KAN-31], [KAN-33], [KAN-37]–[KAN-42]; available-channel map layers: [KAN-97]; interval/map UX: [KAN-114] |
-| F06 | Partial: per-lap minimum-speed location kept separate from the geometric apex (KAN-46); braking-onset candidates with measured/inferred provenance (KAN-47); per-lap sector times with coverage and revision (KAN-51); separate entry/apex/minimum/exit speeds with provenance (KAN-52) | Braking/throttle metrics and Corner Analyzer: [KAN-53]–[KAN-55]; acceptance: [KAN-58] |
+| F06 | Partial: per-lap minimum-speed location kept separate from the geometric apex (KAN-46); braking-onset candidates with measured/inferred provenance (KAN-47); per-lap sector times with coverage and revision (KAN-51); separate entry/apex/minimum/exit speeds with provenance (KAN-52); braking point/time/distance and deceleration with an explicit interval (KAN-53) | Throttle metrics and Corner Analyzer: [KAN-54], [KAN-55]; acceptance: [KAN-58] |
 | F07 | Missing | Measured/inferred coasting duration, distance and locations: [KAN-92] |
 | F08 | Missing | Overlapping driving states with prerequisites and provenance: [KAN-91] |
 | F09 | Missing | Braking/cornering overlap, with measured/inferred distinction: [KAN-93] |

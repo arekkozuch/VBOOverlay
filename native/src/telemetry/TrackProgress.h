@@ -109,6 +109,10 @@ struct ProgressSegment {
 // never bridged/guessed, matching how computeDeltaSeries treats coverage.
 [[nodiscard]] std::optional<double> timeAtProgress(const QVector<ProgressSegment> &lap, double progressMeters);
 
+// The inverse: interpolated progress at a telemetry time, or nullopt when no
+// segment's locked coverage spans that time (never bridged).
+[[nodiscard]] std::optional<double> progressAtTime(const QVector<ProgressSegment> &lap, double telemetryTime);
+
 struct DeltaPoint {
     double progressMeters = 0.0;
     double deltaSeconds = 0.0; // A minus B; positive means A is behind at this point
