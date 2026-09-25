@@ -6,13 +6,13 @@
 
 namespace FlappedEar {
 
-enum class TrackSegmentType { Sector, Corner };
+enum class TrackSegmentType { Sector, Corner, Straight };
 
 // Portable segments use exact progress bounds and a track-configuration
 // reference, never persisted sample geometry (ProgressAxis points/cumulative
 // stay in memory only). Algorithm changes that can alter validation must
-// bump this tag.
-inline constexpr auto trackSegmentAlgorithm = "track-segment-v1";
+// bump this tag. v2 accepts the "straight" type.
+inline constexpr auto trackSegmentAlgorithm = "track-segment-v2";
 
 [[nodiscard]] QString trackSegmentTypeName(TrackSegmentType type);
 

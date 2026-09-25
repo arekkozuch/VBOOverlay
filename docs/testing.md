@@ -159,6 +159,46 @@ features were derived from.
 Automatic corner/sector *proposals* built from this feature data, and any
 review/editing UI, remain separate, later M3 tickets (KAN-45 onward).
 
+## Automatic straight and corner proposals (KAN-45)
+
+`proposeTrackSegments` (`native/src/telemetry/TrackSegmentProposals.h/.cpp`,
+algorithm tag `track-segment-proposal-v1`) classifies each axis sample of the
+KAN-44 smoothed curvature as straight or left/right turning (explicit
+`cornerCurvaturePerMeter` threshold, default 1/250 m), folds turning runs below
+`minimumCornerTurnRadians` (default 0.35 rad) back into the straight as kinks,
+and emits alternating corner/straight proposals named `Corner N`/`Straight N`
+in progress order from the gate. Each boundary carries a tolerance (smoothing
+radius plus axis spacing) and zero or more uncertainty reasons:
+
+- `connectedCorners`: opposite-direction corners with no straight between
+  them, or corners separated by a straight shorter than
+  `connectedStraightMeters` (default 20 m). That straight is not proposed;
+  its two corners meet at its midpoint.
+- `shortStraight`: both ends of a straight shorter than
+  `certainStraightMeters` (default 40 m).
+- `gpsGap`: within tolerance of a caller-supplied progress range lacking GPS
+  coverage. The axis itself is built from a gap-free reference lap, so these
+  ranges describe the analysed lap(s), not the axis geometry.
+
+A loop with no boundary (e.g. a constant-radius circle) returns no proposals
+with `unresolvedReason` set rather than inventing one. Proposals carry no IDs
+or approval state; `proposalsToTrackSegments` converts them into ordinary
+editable track segments with fresh IDs. The segment model (`track-segment-v2`)
+now accepts a `straight` type. Uncertainty is not persisted in segments;
+review/approval (KAN-48), editing (KAN-49) and persistence (KAN-50) are
+separate tickets.
+
+`TrackSegmentProposalTests` builds exact line/arc loops through the real
+`buildProgressAxis` → `computeTrackFeatures` → `proposeTrackSegments` pipeline:
+a stadium (4 certain proposals, ~pi corner turns, wrap at the gate), the same
+stadium with a GPS-gap range, left-right chicanes (connected-corner
+boundaries), 44 m straights between 90-degree corners (short-straight
+boundaries), 10-degree kinks (folded into straights), a circle (unresolved),
+conversion/editing of proposals as segments, and invalid inputs. Expected
+values were checked beforehand with a line-for-line Python model of the same
+algorithm. These are synthetic fixtures only; no real VBO recording has been
+segmented yet.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
