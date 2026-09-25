@@ -24,6 +24,7 @@ qt_add_executable(flappedear_native_tests
     ../src/app/AppControllerComparison.cpp
     ../src/app/AppControllerOuting.cpp
     ../src/app/AppControllerSegmentReview.cpp
+    ../src/app/AppControllerCornerAnalyzer.cpp
     TelemetryTests.cpp
     ../src/app/AppController.cpp
     ../src/app/AppController.h

@@ -125,4 +125,27 @@ CornerSpeeds computeCornerSpeeds(const ProgressAxis &axis, const TrackFeatures &
     return result;
 }
 
+CornerSpeedsComparison compareCornerSpeeds(const CornerSpeeds &a, const CornerSpeeds &b)
+{
+    CornerSpeedsComparison comparison;
+    if (!a.valid || !b.valid || a.segmentId != b.segmentId || a.stamp.revision != b.stamp.revision
+        || a.stamp.trackConfigurationReference != b.stamp.trackConfigurationReference) {
+        comparison.unavailableReason = QString::fromLatin1(cornerSpeedDifferentSegmentOrRevision);
+        return comparison;
+    }
+    if (a.provenance != b.provenance || a.channel != b.channel || a.unit != b.unit) {
+        comparison.unavailableReason = QString::fromLatin1(cornerSpeedMixedProvenance);
+        return comparison;
+    }
+    comparison.valid = true;
+    const auto delta = [](const CornerSpeedValue &x, const CornerSpeedValue &y) -> std::optional<double> {
+        return x.value && y.value ? std::optional<double>(*x.value - *y.value) : std::nullopt;
+    };
+    comparison.entryDelta = delta(a.entry, b.entry);
+    comparison.apexDelta = delta(a.apex, b.apex);
+    comparison.minimumDelta = delta(a.minimum, b.minimum);
+    comparison.exitDelta = delta(a.exit, b.exit);
+    return comparison;
+}
+
 } // namespace FlappedEar

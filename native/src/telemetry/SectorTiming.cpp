@@ -131,4 +131,29 @@ double projectedCoverageMeters(const QVector<ProgressSegment> &lapTrace, const d
     return coveredWithin(coverage(lapTrace, axisLengthMeters), fromMeters, toMeters);
 }
 
+SectorTimeComparison compareSectorTimes(const LapSectorTimes &a, const LapSectorTimes &b, const QString &segmentId)
+{
+    SectorTimeComparison comparison;
+    if (!a.valid || !b.valid || a.stamp.revision != b.stamp.revision
+        || a.stamp.trackConfigurationReference != b.stamp.trackConfigurationReference) {
+        comparison.unavailableReason = QString::fromLatin1(sectorTimeDifferentSegmentOrRevision);
+        return comparison;
+    }
+    const auto find = [&segmentId](const QVector<SectorTime> &sectors) -> const SectorTime * {
+        for (const auto &sector : sectors)
+            if (sector.segmentId == segmentId) return &sector;
+        return nullptr;
+    };
+    const auto *sectorA = find(a.sectors);
+    const auto *sectorB = find(b.sectors);
+    if (!sectorA || !sectorB) {
+        comparison.unavailableReason = QString::fromLatin1(sectorTimeSegmentNotFound);
+        return comparison;
+    }
+    comparison.valid = true;
+    if (sectorA->seconds && sectorB->seconds) comparison.secondsDelta = *sectorA->seconds - *sectorB->seconds;
+    else comparison.unavailableReason = !sectorA->unavailableReason.isEmpty() ? sectorA->unavailableReason : sectorB->unavailableReason;
+    return comparison;
+}
+
 } // namespace FlappedEar

@@ -23,6 +23,8 @@ inline constexpr double sparseSampleSpacingMeters = 10.0;
 
 inline constexpr auto cornerSpeedNotACorner = "notACorner";
 inline constexpr auto cornerSpeedSparseSamples = "sparseSamples";
+inline constexpr auto cornerSpeedMixedProvenance = "mixedProvenance";
+inline constexpr auto cornerSpeedDifferentSegmentOrRevision = "differentSegmentOrRevision";
 
 struct CornerSpeedValue {
     std::optional<double> value; // in the speed channel's unit
@@ -55,5 +57,18 @@ struct CornerSpeeds {
 [[nodiscard]] CornerSpeeds computeCornerSpeeds(const ProgressAxis &axis, const TrackFeatures &features,
     const ApprovedSegmentation &approved, const QString &segmentId, const QVector<ProgressSegment> &lapTrace,
     const TelemetrySession &session);
+
+// A minus B for the same segment and approved revision (KAN-55). Values read
+// from different channels, units or provenance are never compared.
+struct CornerSpeedsComparison {
+    std::optional<double> entryDelta;
+    std::optional<double> apexDelta;
+    std::optional<double> minimumDelta;
+    std::optional<double> exitDelta;
+    QString unavailableReason;
+    bool valid = false;
+};
+
+[[nodiscard]] CornerSpeedsComparison compareCornerSpeeds(const CornerSpeeds &a, const CornerSpeeds &b);
 
 } // namespace FlappedEar

@@ -293,6 +293,15 @@ public:
     Q_INVOKABLE QStringList comparisonPersistedChannels() const;
     Q_INVOKABLE void persistComparisonRange(double startMeters, double endMeters);
     Q_INVOKABLE void persistComparisonChannels(const QStringList &channels);
+    // KAN-55 (Corner Analyzer): approved segments common to both compared
+    // laps (same id, same approved revision -- never a guessed correspondence
+    // between two independently-approved sets), and one segment's combined
+    // A/B/delta metrics (sector time; entry/apex/minimum/exit speeds, braking
+    // and exit effects when the segment is a corner). Reuses the shared
+    // comparison progress axis (ensureComparisonProgressAxis), never a second
+    // alignment.
+    Q_INVOKABLE QVariantList comparisonApprovedSegments() const;
+    Q_INVOKABLE QVariantMap comparisonSegmentMetrics(const QString &segmentId) const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
@@ -645,6 +654,10 @@ private:
     mutable quint64 m_comparisonProgressAxisRequestA = 0;
     mutable quint64 m_comparisonProgressAxisRequestB = 0;
     mutable std::array<QVector<FlappedEar::ProgressSegment>, 2> m_comparisonProgressTraceCache;
+    // KAN-55: the approved segments for one comparison slot's own run, same
+    // lookup as AppController::currentApprovedSegmentation() but parameterized
+    // by slot instead of the single open outing lap.
+    FlappedEar::ApprovedSegmentation comparisonApprovedSegmentation(int slot) const;
     bool m_comparisonRestoreAttempted = false;
     std::shared_ptr<TelemetrySessionCache> m_analysisSourceCache = std::make_shared<TelemetrySessionCache>();
     std::array<ComparisonSlot, 2> m_comparisonSlots;

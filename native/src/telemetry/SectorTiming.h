@@ -59,6 +59,20 @@ struct LapSectorTimes {
 [[nodiscard]] LapSectorTimes computeLapSectorTimes(const ApprovedSegmentation &approved, double axisLengthMeters,
     const QVector<ProgressSegment> &lapTrace, double lapStartTime, double lapEndTime, const QJsonObject &lapReference);
 
+inline constexpr auto sectorTimeDifferentSegmentOrRevision = "differentSegmentOrRevision";
+inline constexpr auto sectorTimeSegmentNotFound = "segmentNotFound";
+
+// A minus B for one segment, from two laps' whole-lap results for the same
+// approved revision (KAN-55).
+struct SectorTimeComparison {
+    std::optional<double> secondsDelta;
+    QString unavailableReason;
+    bool valid = false;
+};
+
+[[nodiscard]] SectorTimeComparison compareSectorTimes(
+    const LapSectorTimes &a, const LapSectorTimes &b, const QString &segmentId);
+
 // Metres of [fromMeters, toMeters] (from <= to) covered by the lap's projection,
 // with the same gate tolerance as sector timing.
 [[nodiscard]] double projectedCoverageMeters(
