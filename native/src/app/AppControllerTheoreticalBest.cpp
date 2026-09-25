@@ -18,23 +18,37 @@
 
 using namespace FlappedEar;
 
+namespace {
+QString theoreticalBestReasonText(const QString &reason)
+{
+    if (reason == theoreticalBestNoApprovedSegmentation)
+        return QStringLiteral("No approved segments to measure sectors against.");
+    if (reason == theoreticalBestIncompleteCoverage)
+        return QStringLiteral("At least one sector has no fully covered time on any eligible lap, so no total is shown.");
+    return reason;
+}
+}
+
 void AppController::initializeOutingTheoreticalBest()
 {
     connect(&m_theoreticalBestWatcher, &QFutureWatcher<TheoreticalBestResult>::finished, this, [this] {
         auto result = m_theoreticalBestWatcher.future().takeResult();
         if (result.request != m_theoreticalBestRequest) return; // stale: outing laps changed or a new request started
+        m_theoreticalBestBest = {};
+        m_theoreticalBestActual.reset();
         if (!result.error.isEmpty()) {
             m_theoreticalBestState = QStringLiteral("error");
             m_theoreticalBestMessage = result.error;
-            m_theoreticalBestBest = {};
         } else if (!result.best.valid) {
             m_theoreticalBestState = QStringLiteral("unavailable");
-            m_theoreticalBestMessage = result.best.unavailableReason;
-            m_theoreticalBestBest = {};
+            m_theoreticalBestMessage = theoreticalBestReasonText(result.best.unavailableReason);
         } else {
             m_theoreticalBestState = QStringLiteral("ready");
-            m_theoreticalBestMessage = result.best.totalSeconds ? QString() : result.best.unavailableReason;
+            m_theoreticalBestMessage = result.best.totalSeconds
+                ? QString() : theoreticalBestReasonText(result.best.unavailableReason);
             m_theoreticalBestBest = std::move(result.best);
+            m_theoreticalBestActual = std::move(result.actualBest);
+            m_theoreticalBestCanonicalRunId = result.canonicalRunId;
         }
         emit outingTheoreticalBestChanged();
     });
@@ -48,39 +62,96 @@ void AppController::initializeOutingTheoreticalBest()
         m_theoreticalBestState = QStringLiteral("idle");
         m_theoreticalBestMessage.clear();
         m_theoreticalBestBest = {};
+        m_theoreticalBestActual.reset();
         emit outingTheoreticalBestChanged();
     };
     connect(this, &AppController::outingLapsChanged, this, invalidate);
     connect(this, &AppController::documentStateChanged, this, invalidate);
 }
 
+QString AppController::outingLapLabel(const QJsonObject &reference) const
+{
+    const auto resolved = resolveOutingLapReference(reference.toVariantMap());
+    if (resolved.value("state") != "resolved") return {};
+    const auto row = m_outingLapRows[resolved.value("index").toInt()].toMap();
+    return QStringLiteral("%1 · LAP %2").arg(row.value("runName").toString()).arg(row.value("lapNumber").toInt());
+}
+
 QVariantMap AppController::outingTheoreticalBest() const
 {
     QVariantMap result{{"state", m_theoreticalBestState}, {"message", m_theoreticalBestMessage}};
     if (m_theoreticalBestState != "ready") return result;
+    result.insert("algorithm", QString::fromLatin1(theoreticalBestAlgorithm));
+    const auto *actual = m_theoreticalBestActual ? &*m_theoreticalBestActual : nullptr;
     QVariantList sectors;
+    double actualSum = 0.0;
+    bool actualComplete = actual != nullptr;
     for (const auto &sector : m_theoreticalBestBest.sectors) {
         QVariantMap row{{"segmentId", sector.segmentId}, {"name", sector.name}, {"type", sector.type}};
         if (sector.seconds) {
             row.insert("seconds", *sector.seconds);
-            QString label;
-            const auto resolved = resolveOutingLapReference(sector.sourceLapReference.toVariantMap());
-            if (resolved.value("state") == "resolved") {
-                const auto sourceRow = m_outingLapRows[resolved.value("index").toInt()].toMap();
-                label = QStringLiteral("%1 · Lap %2").arg(sourceRow.value("runName").toString())
-                    .arg(sourceRow.value("lapNumber").toInt());
-            }
-            row.insert("sourceLapLabel", label);
+            row.insert("sourceLapLabel", outingLapLabel(sector.sourceLapReference));
+            row.insert("sourceLapReference", sector.sourceLapReference.toVariantMap());
         } else {
-            row.insert("unavailableReason", sector.unavailableReason);
+            row.insert("unavailableReason", theoreticalBestReasonText(sector.unavailableReason));
+        }
+        std::optional<double> actualSeconds;
+        if (actual) {
+            for (const auto &candidate : actual->sectors)
+                if (candidate.segmentId == sector.segmentId) actualSeconds = candidate.seconds;
+        }
+        if (actualSeconds) {
+            row.insert("actualSeconds", *actualSeconds);
+            actualSum += *actualSeconds;
+            if (sector.seconds) row.insert("lossSeconds", *actualSeconds - *sector.seconds);
+        } else {
+            actualComplete = false;
         }
         sectors.append(row);
     }
     result.insert("sectors", sectors);
     if (m_theoreticalBestBest.totalSeconds) result.insert("totalSeconds", *m_theoreticalBestBest.totalSeconds);
+    if (actual) {
+        QVariantMap best{{"label", outingLapLabel(actual->lapReference)},
+            {"reference", actual->lapReference.toVariantMap()}, {"lapSeconds", actual->lapSeconds},
+            {"coversWholeLap", actual->completePartition}};
+        // Over the same sectors, so a partition with gaps or a gate-crossing
+        // segment still compares like with like.
+        if (actualComplete) best.insert("sectorSumSeconds", actualSum);
+        result.insert("actualBest", best);
+        if (actualComplete && m_theoreticalBestBest.totalSeconds)
+            result.insert("differenceSeconds", actualSum - *m_theoreticalBestBest.totalSeconds);
+    }
     result.insert("revision", m_theoreticalBestBest.stamp.revision);
     result.insert("trackConfigurationReference", m_theoreticalBestBest.stamp.trackConfigurationReference);
     return result;
+}
+
+bool AppController::openTheoreticalBestSector(const QString &segmentId)
+{
+    if (m_theoreticalBestState != "ready" || !m_theoreticalBestActual) return false;
+    const auto sector = std::find_if(m_theoreticalBestBest.sectors.cbegin(), m_theoreticalBestBest.sectors.cend(),
+        [&segmentId](const TheoreticalBestSector &candidate) { return candidate.segmentId == segmentId; });
+    if (sector == m_theoreticalBestBest.sectors.cend() || !sector->seconds) return false;
+    // Donor lap as A against the group's actual best as B.
+    const auto donor = sector->sourceLapReference.toVariantMap();
+    const auto best = m_theoreticalBestActual->lapReference.toVariantMap();
+    closeOutingLap();
+    if (!selectComparisonLap(0, donor) || !selectComparisonLap(1, best)) return false;
+    m_comparisonSegmentationRunId = m_theoreticalBestCanonicalRunId;
+    if (m_comparisonFocusSegmentId != segmentId) {
+        m_comparisonFocusSegmentId = segmentId;
+        emit comparisonFocusSegmentIdChanged();
+    }
+    setComparisonViewOpen(true);
+    return true;
+}
+
+void AppController::clearComparisonFocusSegment()
+{
+    if (m_comparisonFocusSegmentId.isEmpty()) return;
+    m_comparisonFocusSegmentId.clear();
+    emit comparisonFocusSegmentIdChanged();
 }
 
 void AppController::requestOutingTheoreticalBest()
@@ -147,20 +218,24 @@ void AppController::requestOutingTheoreticalBest()
     m_theoreticalBestState = QStringLiteral("loading");
     m_theoreticalBestMessage.clear();
     emit outingTheoreticalBestChanged();
+    const auto actualBestReference = QJsonObject::fromVariantMap(
+        m_outingRanking.value("bestOfDay").toMap().value("reference").toMap());
     m_theoreticalBestWatcher.setFuture(QtConcurrent::run(
         [population, sourcesByRunId, projectPath = m_documentState.projectPath(), approved, canonicalRunId,
-            request = m_theoreticalBestRequest, cancellation = m_theoreticalBestCancellation] {
-            return computeOutingTheoreticalBest(
-                population, sourcesByRunId, projectPath, approved, canonicalRunId, request, cancellation);
+            actualBestReference, request = m_theoreticalBestRequest, cancellation = m_theoreticalBestCancellation] {
+            return computeOutingTheoreticalBest(population, sourcesByRunId, projectPath, approved, canonicalRunId,
+                actualBestReference, request, cancellation);
         }));
 }
 
 AppController::TheoreticalBestResult AppController::computeOutingTheoreticalBest(QVector<OutingLapRow> population,
     const QHash<QString, QJsonObject> sourcesByRunId, const QString projectPath, const ApprovedSegmentation approved,
-    const QString canonicalRunId, const quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation)
+    const QString canonicalRunId, const QJsonObject actualBestReference, const quint64 request,
+    const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     TheoreticalBestResult result;
     result.request = request;
+    result.canonicalRunId = canonicalRunId;
     const auto cancelled = [cancellation] { return cancellation->load(); };
     try {
         // Grouped by run so the fresh, small cache below only ever needs to
@@ -203,6 +278,8 @@ AppController::TheoreticalBestResult AppController::computeOutingTheoreticalBest
             const auto trace = projectLapTrace(axis, *currentSession, row.start, row.end, cancelled);
             populationTimes.append(
                 computeLapSectorTimes(approved, axis.lengthMeters, trace, row.start, row.end, row.reference));
+            if (!actualBestReference.isEmpty() && row.reference == actualBestReference)
+                result.actualBest = populationTimes.last();
         }
         result.best = computeTheoreticalBest(approved, populationTimes);
     } catch (const OperationCancelled &) {

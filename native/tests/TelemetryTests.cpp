@@ -90,6 +90,7 @@ using namespace FlappedEar;
 class TelemetryTests final : public QObject {
     Q_OBJECT
 
+    static QJsonArray approveAllSegmentsOnRun(FlappedEar::AppController &controller, const QString &runName);
 private slots:
     void initTestCase();
     void preservesIdentityAcrossProductRename();
@@ -150,6 +151,8 @@ private slots:
     void showsCornerAnalyzerSegmentMetricsForBothLaps();
     void selectsCornerAnalyzerSegmentThroughQml();
     void calculatesOutingTheoreticalBestAcrossPopulation();
+    void opensTheoreticalBestDonorFromAnotherRun();
+    void opensTheoreticalBestSectorThroughQml();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -4157,6 +4160,189 @@ void TelemetryTests::calculatesOutingTheoreticalBestAcrossPopulation()
     }
     QVERIFY(anyTimed);
     QCOMPARE(best.contains("totalSeconds"), allTimed);
+}
+
+namespace {
+// A routeVbo() recording with every timestamp scaled: the same route and
+// gate (same compatibility group), uniformly faster when scale < 1.
+QByteArray scaledRouteVbo(const double scale)
+{
+    const auto lines = QString::fromUtf8(EventProjectFixture::routeVbo()).split('\n');
+    QStringList out;
+    bool data = false;
+    for (const auto &line : lines) {
+        if (!data || line.trimmed().isEmpty()) {
+            out << line;
+            data = data || line == "[data]";
+            continue;
+        }
+        auto fields = line.split(' ');
+        fields[0] = QString::number(fields[0].toDouble() * scale, 'f', 6);
+        out << fields.join(' ');
+    }
+    return out.join('\n').toUtf8();
+}
+
+} // namespace
+
+// Approves every proposal on the first eligible lap of `runName`'s run and
+// splits a gate-crossing segment, returning the stored segments.
+QJsonArray TelemetryTests::approveAllSegmentsOnRun(AppController &controller, const QString &runName)
+{
+    int lapIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && row.value("runName").toString() == runName
+            && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+    }
+    if (lapIndex < 0 || !controller.selectOutingLap(lapIndex)) return {};
+    if (!QTest::qWaitFor([&] { return controller.outingLapDetailState() == "ready"; }, 20000)) return {};
+    controller.requestSegmentReview();
+    if (!QTest::qWaitFor([&] { return controller.segmentReviewState() == "ready"; }, 20000)) return {};
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    const auto count = controller.segmentReviewItems().size();
+    for (int i = 0; i < count; ++i) if (!controller.approveSegmentProposal(i).isEmpty()) return {};
+    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
+        const auto segment = value.toObject();
+        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble()
+            && !controller.splitApprovedSegment(segment.value("id").toString(), controller.segmentReviewAxisLength()).isEmpty())
+            return {};
+    }
+    const auto approved = controller.storedRunTrackSegments(runId).toArray();
+    controller.closeOutingLap();
+    return approved;
+}
+
+void TelemetryTests::opensTheoreticalBestDonorFromAnotherRun()
+{
+    // KAN-57: segments approved only on the slower run; the other run is
+    // uniformly 10% faster, so every donor lap and the actual best come from
+    // a run with no approved segments of its own. The theoretical best still
+    // times them on the canonical axis, and opening a sector compares donor
+    // against actual best using that same, labelled segmentation.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto slow = directory.filePath("slow.vbo"), fast = directory.filePath("fast.vbo");
+    QVERIFY(writeBytes(slow, EventProjectFixture::routeVbo()));
+    QVERIFY(writeBytes(fast, scaledRouteVbo(0.9)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Donors", {QUrl::fromLocalFile(slow), QUrl::fromLocalFile(fast)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    QString slowName, fastName;
+    for (const auto &value : controller.outingLaps()) {
+        const auto row = value.toMap();
+        if (row.value("type") != "LAP") continue;
+        const auto seconds = row.value("endTime").toDouble() - row.value("startTime").toDouble();
+        (seconds > 45.0 ? slowName : fastName) = row.value("runName").toString();
+    }
+    QVERIFY(!slowName.isEmpty() && !fastName.isEmpty() && slowName != fastName);
+    const auto approved = approveAllSegmentsOnRun(controller, slowName);
+    QVERIFY(!approved.isEmpty());
+
+    controller.requestOutingTheoreticalBest();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingTheoreticalBest().value("state").toString(), QString("ready"), 30000);
+    const auto best = controller.outingTheoreticalBest();
+    QCOMPARE(best.value("algorithm").toString(), QString("theoretical-best-v1"));
+    const auto actual = best.value("actualBest").toMap();
+    QVERIFY(actual.value("label").toString().startsWith(fastName));
+    const auto sectors = best.value("sectors").toList();
+    QCOMPARE(sectors.size(), approved.size());
+    QString timedId;
+    for (const auto &value : sectors) {
+        const auto sector = value.toMap();
+        if (!sector.contains("seconds")) continue;
+        if (timedId.isEmpty()) timedId = sector.value("segmentId").toString();
+        QVERIFY2(sector.value("sourceLapLabel").toString().startsWith(fastName),
+            qPrintable(sector.value("sourceLapLabel").toString()));
+        // The actual best is itself in the population: never faster than the theoretical sector.
+        QVERIFY(sector.contains("actualSeconds"));
+        QVERIFY(sector.value("lossSeconds").toDouble() >= -1e-9);
+    }
+    QVERIFY(!timedId.isEmpty());
+    if (best.contains("totalSeconds")) QVERIFY(best.value("differenceSeconds").toDouble() >= -1e-9);
+
+    QVERIFY(!controller.openTheoreticalBestSector("not-a-real-id"));
+    QVERIFY(controller.openTheoreticalBestSector(timedId));
+    QVERIFY(controller.comparisonViewOpen());
+    QCOMPARE(controller.comparisonFocusSegmentId(), timedId);
+    QTRY_VERIFY(controller.comparisonPairReady());
+    // Neither lap's own run has approved segments: the canonical segmentation applies, with a note.
+    const auto segments = controller.comparisonApprovedSegments();
+    QCOMPARE(segments.size(), approved.size());
+    QVERIFY(!controller.comparisonSegmentationNote().isEmpty());
+    const auto metrics = controller.comparisonSegmentMetrics(timedId);
+    QVERIFY(metrics.value("sectorTime").toMap().value("a").toMap().contains("value"));
+    QVERIFY(metrics.value("sectorTime").toMap().value("b").toMap().contains("value"));
+
+    // Closing the view drops the borrowed segmentation and the focus request.
+    controller.setComparisonViewOpen(false);
+    QVERIFY(controller.comparisonFocusSegmentId().isEmpty());
+    QVERIFY(controller.comparisonApprovedSegments().isEmpty());
+    QVERIFY(controller.comparisonSegmentationNote().isEmpty());
+}
+
+void TelemetryTests::opensTheoreticalBestSectorThroughQml()
+{
+    // KAN-57: the dialog requests the calculation, shows actual best,
+    // theoretical total, their difference and the algorithm label, and a
+    // sector row opens the Corner Analyzer on that segment.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Theoretical Best QML", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    const auto runName = controller.outingLaps().first().toMap().value("runName").toString();
+    QVERIFY(!approveAllSegmentsOnRun(controller, runName).isEmpty());
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 1000; height: 700; visible: true; "
+        "ComparisonDetailPanel { objectName: \"comparisonRoot\"; anchors.fill: parent } "
+        "TheoreticalBestDialog { objectName: \"dialog\" } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    auto *dialog = window->findChild<QObject *>("dialog"); QVERIFY(dialog);
+    QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingTheoreticalBest().value("state").toString(), QString("ready"), 30000);
+    auto *total = window->findChild<QObject *>("theoreticalBestTotal"); QVERIFY(total);
+    auto *actual = window->findChild<QObject *>("theoreticalBestActual"); QVERIFY(actual);
+    auto *explanation = window->findChild<QObject *>("theoreticalBestExplanation"); QVERIFY(explanation);
+    QTRY_VERIFY(actual->property("text").toString().contains(runName));
+    QVERIFY(explanation->property("text").toString().contains("theoretical-best-v1"));
+    QVERIFY(explanation->property("text").toString().contains("does not show that the whole lap"));
+    if (controller.outingTheoreticalBest().contains("totalSeconds"))
+        QVERIFY(total->property("text").toString() != "—");
+
+    QString timedId;
+    int timedRow = -1;
+    const auto sectors = controller.outingTheoreticalBest().value("sectors").toList();
+    for (int i = 0; i < sectors.size() && timedRow < 0; ++i)
+        if (sectors[i].toMap().contains("seconds")) { timedRow = i; timedId = sectors[i].toMap().value("segmentId").toString(); }
+    QVERIFY(timedRow >= 0);
+    auto *list = window->findChild<QQuickItem *>("theoreticalBestSectors"); QVERIFY(list);
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, timedRow)) && row);
+    QVERIFY(row->isEnabled());
+    row->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QVERIFY(controller.comparisonViewOpen());
+    auto *panel = window->findChild<QObject *>("comparisonSegmentPanel"); QVERIFY(panel);
+    QTRY_VERIFY(panel->property("visible").toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(panel->property("selectedSegmentId").toString(), timedId, 20000);
+    QTRY_VERIFY(controller.comparisonFocusSegmentId().isEmpty());
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::selectsCornerAnalyzerSegmentThroughQml()

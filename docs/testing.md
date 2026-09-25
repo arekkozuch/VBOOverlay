@@ -581,6 +581,52 @@ checks that the result is unavailable before approval, then approves one
 run's segments and checks each timed segment's donor label and whether a
 total is present. Synthetic only.
 
+## Theoretical best view and donor navigation (KAN-57)
+
+Day results → **Theoretical best…** (`TheoreticalBestDialog.qml`) requests
+the KAN-56 calculation for the current comparison group. It shows:
+
+- **Actual best**: the group's best-of-day lap. The worker also times this
+  lap on the canonical axis. If the approved sectors cover the whole lap
+  (`completePartition`), its lap time is shown. Otherwise, the sum of its own
+  times over the same sectors is shown, and the dialog says so.
+- **Sector theoretical**: the KAN-56 total. **Difference** is actual best
+  minus theoretical over the same sectors. It is shown only when both are
+  complete.
+- The algorithm tag (`theoretical-best-v1`) and a statement that the sum
+  combines fragments of different laps and does not show that the whole lap
+  can be driven that fast.
+- One row per sector: best time, donor lap, the actual best lap's time and
+  the loss (actual minus best). The actual best is part of the population,
+  so a loss is never negative.
+
+Selecting a timed sector calls `openTheoreticalBestSector(segmentId)`. It
+loads the donor lap as comparison A and the actual best as B, opens the
+comparison view, and sets `comparisonFocusSegmentId`. The Corner Analyzer
+opens and selects that segment once the pair's segments load, then clears the
+request. Closing the comparison view also clears it.
+
+The Corner Analyzer normally requires both laps' own runs to have the same
+approved revision (KAN-55). Segments are often approved on only one run, so a
+donor and the actual best can both come from a run without approved segments.
+When the view is opened from a theoretical-best sector, and both laps are in
+the canonical segmentation's group, the Corner Analyzer uses the canonical
+run's approved segments. These are the same segments the theoretical best
+used. `comparisonSegmentationNote()` names that run and notes that boundaries
+are distances along its axis. This fallback is removed when the view closes.
+
+`TelemetryTests::opensTheoreticalBestDonorFromAnotherRun` imports the route
+twice, with the second recording uniformly 10% faster, and approves segments
+only on the slower run. Every donor and the actual best then come from the
+faster run. The test checks that losses and the difference are non-negative,
+that an unknown sector does not open, that the Corner Analyzer shows the
+canonical segments with the note and timed A/B sector values, and that closing
+the view removes the fallback. `TelemetryTests::opensTheoreticalBestSectorThroughQml`
+opens the dialog, checks the actual-best label and the algorithm and
+achievability text, activates a sector row with the keyboard and checks that
+the dialog closes, the Corner Analyzer selects that segment and no QML warnings
+are logged. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

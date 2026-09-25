@@ -17,6 +17,7 @@ Rectangle {
     RunDetailsDialog { id: runDetailsDialog }
     ComparisonLapDialog { id: comparisonLapDialog }
     OutingProgressionDialog { id: progressionDialog }
+    TheoreticalBestDialog { id: theoreticalBestDialog }
     Dialog {
         id: rankingDialog
         objectName: "outingRankingDialog"
@@ -390,6 +391,14 @@ Rectangle {
                 text: qsTr("Progression…")
                 enabled: ["available", "no-eligible-laps"].indexOf(root.ranking.state) >= 0
                 onClicked: progressionDialog.open()
+            }
+            FeButton {
+                objectName: "openTheoreticalBest"
+                text: qsTr("Theoretical best…")
+                enabled: root.ranking.state === "available"
+                onClicked: theoreticalBestDialog.open()
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Fastest recorded time per approved sector across this group, with the lap each came from")
             }
             FeButton {
                 objectName: "openOutingRankingDetails"

@@ -144,6 +144,10 @@ class AppController final : public QObject {
     // (those are cheap JSON aggregation; this decodes every eligible lap's
     // recording) and must be explicitly requested.
     Q_PROPERTY(QVariantMap outingTheoreticalBest READ outingTheoreticalBest NOTIFY outingTheoreticalBestChanged)
+    // KAN-57: a segment the comparison view should show in the Corner
+    // Analyzer once the requested pair is loaded; cleared when shown or when
+    // the comparison view closes.
+    Q_PROPERTY(QString comparisonFocusSegmentId READ comparisonFocusSegmentId NOTIFY comparisonFocusSegmentIdChanged)
     Q_PROPERTY(QVariantList outingCompatibilityGroups READ outingCompatibilityGroups NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonGroupId READ outingComparisonGroupId NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonSelectionState READ outingComparisonSelectionState NOTIFY outingLapsChanged)
@@ -255,6 +259,9 @@ public:
     [[nodiscard]] QVariantMap outingProgression() const;
     [[nodiscard]] QVariantMap outingTheoreticalBest() const;
     Q_INVOKABLE void requestOutingTheoreticalBest();
+    Q_INVOKABLE bool openTheoreticalBestSector(const QString &segmentId);
+    [[nodiscard]] QString comparisonFocusSegmentId() const { return m_comparisonFocusSegmentId; }
+    Q_INVOKABLE void clearComparisonFocusSegment();
     [[nodiscard]] QVariantList outingCompatibilityGroups() const;
     [[nodiscard]] QString outingComparisonGroupId() const;
     [[nodiscard]] QString outingComparisonSelectionState() const;
@@ -311,6 +318,7 @@ public:
     // alignment.
     Q_INVOKABLE QVariantList comparisonApprovedSegments() const;
     Q_INVOKABLE QVariantMap comparisonSegmentMetrics(const QString &segmentId) const;
+    Q_INVOKABLE QString comparisonSegmentationNote() const;
     Q_INVOKABLE bool selectOutingLap(int index);
     // Snapshot resolution: opening detail revalidates source content off-thread.
     Q_INVOKABLE QVariantMap resolveOutingLapReference(const QVariantMap &reference) const;
@@ -460,6 +468,7 @@ signals:
     void outingLapDetailChanged();
     void outingLapVideoChanged();
     void outingTheoreticalBestChanged();
+    void comparisonFocusSegmentIdChanged();
     void comparisonSlotsChanged();
     void comparisonViewOpenChanged();
     void outingLapCursorChanged();
@@ -688,17 +697,32 @@ private:
         quint64 request = 0;
         QString error;
         FlappedEar::TheoreticalBestLap best;
+        // KAN-57: the group's actual best lap timed on the same axis, so
+        // per-sector losses compare like with like.
+        std::optional<FlappedEar::LapSectorTimes> actualBest;
+        QString canonicalRunId;
     };
     static TheoreticalBestResult computeOutingTheoreticalBest(QVector<FlappedEar::OutingLapRow> population,
         QHash<QString, QJsonObject> sourcesByRunId, QString projectPath, FlappedEar::ApprovedSegmentation approved,
-        QString canonicalRunId, quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation);
+        QString canonicalRunId, QJsonObject actualBestReference, quint64 request,
+        const std::shared_ptr<std::atomic_bool> &cancellation);
     void initializeOutingTheoreticalBest();
+    [[nodiscard]] QString outingLapLabel(const QJsonObject &reference) const;
     QFutureWatcher<TheoreticalBestResult> m_theoreticalBestWatcher;
     std::shared_ptr<std::atomic_bool> m_theoreticalBestCancellation;
     quint64 m_theoreticalBestRequest = 0;
     QString m_theoreticalBestState = QStringLiteral("idle");
     QString m_theoreticalBestMessage;
     FlappedEar::TheoreticalBestLap m_theoreticalBestBest;
+    std::optional<FlappedEar::LapSectorTimes> m_theoreticalBestActual;
+    QString m_theoreticalBestCanonicalRunId;
+    QString m_comparisonFocusSegmentId;
+    // KAN-57: set when the comparison is opened from a theoretical-best
+    // sector. The pair is then measured against the canonical run's approved
+    // segments (the ones the theoretical best used), labelled as such, as long
+    // as both laps are in that segmentation's group. Cleared on close.
+    QString m_comparisonSegmentationRunId;
+    [[nodiscard]] std::optional<FlappedEar::ApprovedSegmentation> comparisonSharedSegmentation() const;
     void initializeOutingLapDetail();
     void loadOutingLapDetail();
     static QVariantMap sessionSeries(const TelemetrySession &session, const QString &channel,

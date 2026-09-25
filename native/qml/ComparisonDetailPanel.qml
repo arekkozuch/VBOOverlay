@@ -68,6 +68,9 @@ Rectangle {
     onZoomEndChanged: if (!root.pendingRangeRestore) Qt.callLater(() => appController.persistComparisonRange(root.zoomStart, root.zoomEnd))
     Connections {
         target: appController
+        function onComparisonFocusSegmentIdChanged() {
+            if (appController.comparisonFocusSegmentId.length > 0) root.showingCornerAnalyzer = true;
+        }
         function onComparisonViewOpenChanged() {
             if (!appController.comparisonViewOpen) {
                 root.pendingRangeRestore = true;
