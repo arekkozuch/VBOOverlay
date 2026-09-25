@@ -148,6 +148,9 @@ class AppController final : public QObject {
     // KAN-60: the day's largest observed losses of each eligible lap against
     // the group's actual best, from the same calculation.
     Q_PROPERTY(QVariantMap outingTimeLossRanking READ outingTimeLossRanking NOTIFY outingTheoreticalBestChanged)
+    // KAN-117: by default only each run's best lap is ranked; warm-up and
+    // traffic laps otherwise dominate the list.
+    Q_PROPERTY(bool outingTimeLossAllLaps READ outingTimeLossAllLaps WRITE setOutingTimeLossAllLaps NOTIFY outingTheoreticalBestChanged)
     // KAN-57: a segment the comparison view should show in the Corner
     // Analyzer once the requested pair is loaded; cleared when shown or when
     // the comparison view closes.
@@ -263,6 +266,8 @@ public:
     [[nodiscard]] QVariantMap outingProgression() const;
     [[nodiscard]] QVariantMap outingTheoreticalBest() const;
     [[nodiscard]] QVariantMap outingTimeLossRanking() const;
+    [[nodiscard]] bool outingTimeLossAllLaps() const { return m_timeLossAllLaps; }
+    void setOutingTimeLossAllLaps(bool allLaps);
     Q_INVOKABLE void requestOutingTheoreticalBest();
     Q_INVOKABLE bool openTheoreticalBestSector(const QString &segmentId);
     // KAN-61: loss evidence. Opens the ranked loss's lap (A) against the
@@ -330,6 +335,10 @@ public:
     Q_INVOKABLE QVariantList comparisonApprovedSegments() const;
     Q_INVOKABLE QVariantMap comparisonSegmentMetrics(const QString &segmentId) const;
     Q_INVOKABLE QString comparisonSegmentationNote() const;
+    Q_INVOKABLE QStringList comparisonPreferredChannels() const;
+    // "1:49.898" for anything a minute or longer, "28.662 s" below that; "—"
+    // when not finite. One formatter for every lap and segment time.
+    Q_INVOKABLE static QString formatElapsedTime(double seconds);
     // KAN-59: one loss window per approved segment for the current pair.
     Q_INVOKABLE QVariantMap comparisonTimeLossObservations() const;
     Q_INVOKABLE bool selectOutingLap(int index);
@@ -726,6 +735,12 @@ private:
         const std::shared_ptr<std::atomic_bool> &cancellation);
     void initializeOutingTheoreticalBest();
     [[nodiscard]] QString outingLapLabel(const QJsonObject &reference) const;
+    // What the theoretical best and loss ranking depend on; a document change
+    // that leaves this unchanged (e.g. persisting the comparison pair) keeps
+    // the result (KAN-117).
+    [[nodiscard]] QByteArray theoreticalBestInputKey() const;
+    QByteArray m_theoreticalBestKey;
+    bool m_timeLossAllLaps = false;
     bool openComparisonEvidence(const QVariantMap &lapA, const QVariantMap &lapB, const QString &segmentId);
     QFutureWatcher<TheoreticalBestResult> m_theoreticalBestWatcher;
     std::shared_ptr<std::atomic_bool> m_theoreticalBestCancellation;

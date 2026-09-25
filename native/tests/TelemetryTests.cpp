@@ -157,6 +157,8 @@ private slots:
     void derivesTimeLossObservationsForComparisonPair();
     void ranksTimeLossesAndRecalculatesOnExclusion();
     void navigatesFromRankedLossToCornerEvidence();
+    void formatsElapsedTimes();
+    void analyzesPrivateTrackDayCorners();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -4601,8 +4603,13 @@ void TelemetryTests::ranksTimeLossesAndRecalculatesOnExclusion()
     auto *dialog = window->findChild<QObject *>("dialog"); QVERIFY(dialog);
     QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
     QTRY_COMPARE_WITH_TIMEOUT(controller.outingTimeLossRanking().value("state").toString(), QString("ready"), 30000);
+    // By default only each run's best lap is compared (the other run's best here).
+    QCOMPARE(controller.outingTimeLossRanking().value("scope").toString(), QString("runBests"));
+    QCOMPARE(controller.outingTimeLossRanking().value("comparedLapCount").toInt(), 1);
+    controller.setOutingTimeLossAllLaps(true);
 
     auto ranking = controller.outingTimeLossRanking();
+    QCOMPARE(ranking.value("scope").toString(), QString("allLaps"));
     const auto reference = ranking.value("referenceLap").toMap();
     QCOMPARE(ranking.value("referenceLabel").toString(), controller.outingTheoreticalBest().value("actualBest").toMap().value("label").toString());
     QCOMPARE(ranking.value("algorithm").toString(), QString("time-loss-windows-v1"));
@@ -4672,6 +4679,7 @@ void TelemetryTests::navigatesFromRankedLossToCornerEvidence()
     const auto activate = [&](QQuickItem *item) { item->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); };
 
     QQuickItem *open = nullptr;
+    controller.setOutingTimeLossAllLaps(true);
     QTRY_VERIFY((open = window->findChild<QQuickItem *>("openTimeLosses")) && open->isEnabled());
     activate(open);
     auto *dialog = window->findChild<QObject *>("timeLossDialog"); QVERIFY(dialog);
@@ -4723,6 +4731,151 @@ void TelemetryTests::navigatesFromRankedLossToCornerEvidence()
     QTRY_VERIFY(dialog->property("visible").toBool());
     QTRY_COMPARE(list->property("currentIndex").toInt(), chosen);
     QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::formatsElapsedTimes()
+{
+    QCOMPARE(AppController::formatElapsedTime(100.838), QString("1:40.838"));
+    QCOMPARE(AppController::formatElapsedTime(109.8976), QString("1:49.898"));
+    QCOMPARE(AppController::formatElapsedTime(59.9996), QString("1:00.000")); // rounds before choosing the form
+    QCOMPARE(AppController::formatElapsedTime(28.662), QString("28.662 s"));
+    QCOMPARE(AppController::formatElapsedTime(0.05), QString("0.050 s"));
+    QCOMPARE(AppController::formatElapsedTime(-2.5), QString("-2.500 s"));
+    QCOMPARE(AppController::formatElapsedTime(3661.0), QString("61:01.000"));
+    QCOMPARE(AppController::formatElapsedTime(std::numeric_limits<double>::quiet_NaN()), QString("—"));
+}
+
+void TelemetryTests::analyzesPrivateTrackDayCorners()
+{
+    // KAN-117: opt-in real-day check of segmentation, theoretical best, time
+    // losses and the Corner Analyzer. FLAPPEDEAR_REAL_DAY is a directory of
+    // private VBO recordings (never committed); FLAPPEDEAR_CORNER_REVIEW_DIR,
+    // when set, receives screenshots of the real Analysis window.
+    const auto path = qEnvironmentVariable("FLAPPEDEAR_REAL_DAY");
+    if (path.isEmpty()) QSKIP("FLAPPEDEAR_REAL_DAY is not set");
+    const auto reviewDirectory = qEnvironmentVariable("FLAPPEDEAR_CORNER_REVIEW_DIR");
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    QList<QUrl> recordings;
+    for (const auto &name : QDir(path).entryList({"*.vbo"}, QDir::Files, QDir::Name))
+        recordings.append(QUrl::fromLocalFile(QDir(path).filePath(name)));
+    QVERIFY(!recordings.isEmpty());
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Private corners", recordings));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.eventRuns().size(), recordings.size(), 120000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.outingLapsLoading() && controller.m_outingLapRequestedKey == controller.outingLapKey(), 120000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.outingComparisonGroupId().isEmpty(), 60000);
+
+    // Review the best lap's run so its proposals come from a clean lap.
+    const auto bestOfDay = controller.outingRanking().value("bestOfDay").toMap();
+    QVERIFY(!bestOfDay.isEmpty());
+    QVERIFY(controller.selectOutingLapReference(bestOfDay.value("reference").toMap()));
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingLapDetailState(), QString("ready"), 60000);
+    controller.requestSegmentReview();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.segmentReviewState(), QString("ready"), 60000);
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    qInfo().noquote() << "Axis length" << controller.segmentReviewAxisLength() << "m, best lap"
+        << bestOfDay.value("runName").toString() << bestOfDay.value("lapNumber").toInt()
+        << bestOfDay.value("durationSeconds").toDouble();
+    const auto items = controller.segmentReviewItems();
+    for (const auto &value : items) {
+        const auto item = value.toMap();
+        qInfo().noquote() << QString("  proposal %1 %2 %3-%4 m (%5 m)").arg(item.value("name").toString(), -14)
+            .arg(item.value("type").toString(), -8).arg(item.value("startMeters").toDouble(), 7, 'f', 1)
+            .arg(item.value("endMeters").toDouble(), 7, 'f', 1).arg(item.value("lengthMeters").toDouble(), 6, 'f', 1);
+    }
+    for (int i = 0; i < items.size(); ++i) QCOMPARE(controller.approveSegmentProposal(i), QString());
+    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
+        const auto segment = value.toObject();
+        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble())
+            QCOMPARE(controller.splitApprovedSegment(segment.value("id").toString(), controller.segmentReviewAxisLength()), QString());
+    }
+    controller.closeOutingLap();
+
+    controller.requestOutingTheoreticalBest();
+    QTRY_VERIFY_WITH_TIMEOUT(controller.outingTheoreticalBest().value("state") != "loading", 180000);
+    const auto best = controller.outingTheoreticalBest();
+    QVERIFY2(best.value("state") == "ready", qPrintable(best.value("message").toString()));
+    const auto actual = best.value("actualBest").toMap();
+    qInfo().noquote() << "Theoretical" << best.value("totalSeconds").toDouble() << "actual" << actual.value("label").toString()
+        << actual.value("lapSeconds").toDouble() << "whole lap" << actual.value("coversWholeLap").toBool()
+        << "difference" << best.value("differenceSeconds").toDouble();
+    QString sameLapSector;
+    for (const auto &value : best.value("sectors").toList()) {
+        const auto sector = value.toMap();
+        qInfo().noquote() << QString("  %1 best %2 donor %3 actual %4 loss %5").arg(sector.value("name").toString(), -14)
+            .arg(sector.value("seconds").toDouble(), 7, 'f', 3).arg(sector.value("sourceLapLabel").toString(), -48)
+            .arg(sector.value("actualSeconds").toDouble(), 7, 'f', 3).arg(sector.value("lossSeconds").toDouble(), 6, 'f', 3);
+        if (sameLapSector.isEmpty() && sector.value("sourceLapReference").toMap() == actual.value("reference").toMap())
+            sameLapSector = sector.value("segmentId").toString();
+    }
+    const auto ranking = controller.outingTimeLossRanking();
+    qInfo().noquote() << "Losses:" << ranking.value("observationCount").toInt() << "observed over"
+        << ranking.value("comparedLapCount").toInt() << "laps";
+    const auto losses = ranking.value("losses").toList();
+    for (qsizetype i = 0; i < std::min<qsizetype>(10, losses.size()); ++i) {
+        const auto loss = losses[i].toMap();
+        qInfo().noquote() << QString("  #%1 +%2 s %3 (%4) %5").arg(i + 1).arg(loss.value("lossSeconds").toDouble(), 0, 'f', 3)
+            .arg(loss.value("name").toString(), loss.value("role").toString(), loss.value("lapLabel").toString());
+    }
+
+    // A sector whose donor is the actual best must never compare a lap with itself.
+    if (!sameLapSector.isEmpty()) {
+        QVERIFY(controller.openTheoreticalBestSector(sameLapSector));
+        QTRY_VERIFY_WITH_TIMEOUT(controller.comparisonPairReady(), 60000);
+        const auto pair = controller.comparisonSlots();
+        QVERIFY2(pair[0].toMap().value("lap").toMap().value("reference") != pair[1].toMap().value("lap").toMap().value("reference"),
+            "A theoretical-best sector opened a lap against itself");
+        controller.setComparisonViewOpen(false);
+    }
+
+    // Corner Analyzer on the top loss, shown in the real Analysis window.
+    QVERIFY(!losses.isEmpty());
+    const auto top = losses.first().toMap();
+    QVERIFY(controller.openTimeLoss(top));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.comparisonPairReady(), 60000);
+    qInfo() << "Channels" << controller.comparisonAvailableChannels().mid(0, 6) << "preferred"
+        << controller.comparisonPreferredChannels();
+    for (const auto &value : controller.comparisonApprovedSegments()) {
+        const auto segment = value.toMap();
+        const auto metrics = controller.comparisonSegmentMetrics(segment.value("id").toString());
+        const auto speeds = metrics.value("speeds").toMap();
+        qInfo().noquote() << QString("  %1 sector A %2 B %3 | entry A %4 max A %5 min A %6 exit A %7").arg(segment.value("name").toString(), -14)
+            .arg(metrics.value("sectorTime").toMap().value("a").toMap().value("value").toDouble(), 7, 'f', 3)
+            .arg(metrics.value("sectorTime").toMap().value("b").toMap().value("value").toDouble(), 7, 'f', 3)
+            .arg(speeds.value("entry").toMap().value("a").toMap().value("value").toDouble(), 6, 'f', 1)
+            .arg(speeds.value("maximum").toMap().value("a").toMap().value("value").toDouble(), 6, 'f', 1)
+            .arg(speeds.value("minimum").toMap().value("a").toMap().value("value").toDouble(), 6, 'f', 1)
+            .arg(speeds.value("exit").toMap().value("a").toMap().value("value").toDouble(), 6, 'f', 1);
+    }
+    if (reviewDirectory.isEmpty()) return;
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings); QQmlComponent component(&engine);
+    component.loadUrl(QUrl::fromLocalFile(QFileInfo(QStringLiteral(ANALYSIS_PANEL_QML_PATH)).dir().filePath("AnalysisWindow.qml")));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.createWithInitialProperties({{"videoSource", QUrl{}},
+        {"playbackPosition", 0}, {"playbackRunning", false}, {"mediaDuration", 0}}));
+    QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->resize(1600, 900);
+    controller.setAnalysisVisible(true);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    // Reopen with the window present, as in the app where the panel always exists.
+    controller.setComparisonViewOpen(false);
+    QVERIFY(controller.openTimeLoss(top));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.comparisonPairReady(), 60000);
+    QTRY_VERIFY(controller.comparisonFocusSegmentId().isEmpty());
+    QTest::qWait(1500);
+    QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("corner-analyzer.png")));
+    for (const auto &value : controller.comparisonApprovedSegments()) {
+        if (value.toMap().value("type") != "straight") continue;
+        auto *item = window->findChild<QQuickItem *>("cornerAnalyzerSegment-" + value.toMap().value("id").toString());
+        if (!item) break;
+        item->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); QTest::qWait(800);
+        QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("straight.png")));
+        break;
+    }
+    for (const auto &warning : warnings) qInfo() << "QML warning" << warning;
 }
 
 void TelemetryTests::selectsCornerAnalyzerSegmentThroughQml()

@@ -47,7 +47,70 @@ MetricProvenance namedProvenance(const QString &provenance, const bool hasValue)
     return MetricProvenance::Unavailable;
 }
 
+// KAN-117: measured speed at a segment's entry and exit and its extremes
+// inside, for every segment type. Read only from the recorded speed channel;
+// never derived from GPS positions.
+struct SegmentSpeeds {
+    std::optional<double> entry, exit, maximum, minimum;
+    QString unavailableReason;
+};
+
+SegmentSpeeds segmentSpeeds(const TelemetrySession &session, const QVector<ProgressSegment> &trace,
+    const double axisLengthMeters, const double lapStart, const double lapEnd,
+    const double startMeters, const double endMeters)
+{
+    SegmentSpeeds speeds;
+    if (!session.channels.contains(session.aliases.value("speed", "speed"))) {
+        speeds.unavailableReason = QString(cornerPhaseSpeedChannelMissing);
+        return speeds;
+    }
+    if (endMeters <= startMeters) {
+        speeds.unavailableReason = QString(cornerPhaseCrossesGate);
+        return speeds;
+    }
+    const auto timeAt = [&](const double meters) -> std::optional<double> {
+        if (meters <= 1e-6) return lapStart;
+        if (meters >= axisLengthMeters - 1e-6) return lapEnd;
+        return timeAtProgress(trace, meters);
+    };
+    const auto start = timeAt(startMeters);
+    const auto end = timeAt(endMeters);
+    if (start) speeds.entry = session.valueAt("speed", *start);
+    if (end) speeds.exit = session.valueAt("speed", *end);
+    for (const auto &boundary : {speeds.entry, speeds.exit}) {
+        if (!boundary) continue;
+        if (!speeds.maximum || *boundary > *speeds.maximum) speeds.maximum = boundary;
+        if (!speeds.minimum || *boundary < *speeds.minimum) speeds.minimum = boundary;
+    }
+    if (start && end && *end > *start) {
+        for (const auto &segment : session.sampledSegments("speed", *start, *end, 4000)) {
+            for (const auto &point : segment) {
+                const double value = point.y();
+                if (!speeds.maximum || value > *speeds.maximum) speeds.maximum = value;
+                if (!speeds.minimum || value < *speeds.minimum) speeds.minimum = value;
+            }
+        }
+    }
+    if (!speeds.entry || !speeds.exit || !speeds.maximum) speeds.unavailableReason = QStringLiteral("incompleteCoverage");
+    return speeds;
+}
+
 } // namespace
+
+QStringList AppController::comparisonPreferredChannels() const
+{
+    // The recording's own names for the speed, throttle and brake aliases
+    // (for example "velocity", "throttle_pos", "brake_pos").
+    const auto available = comparisonAvailableChannels();
+    if (available.isEmpty()) return {};
+    const auto &aliases = m_comparisonSlots[0].session->aliases;
+    QStringList preferred;
+    for (const auto *alias : {"speed", "throttle", "brake"}) {
+        const auto name = aliases.value(QString::fromLatin1(alias), QString::fromLatin1(alias));
+        if (available.contains(name) && !preferred.contains(name)) preferred.append(name);
+    }
+    return preferred;
+}
 
 ApprovedSegmentation AppController::comparisonApprovedSegmentation(const int slot) const
 {
@@ -161,6 +224,35 @@ QVariantMap AppController::comparisonSegmentMetrics(const QString &segmentId) co
                      sectorB->seconds ? MetricProvenance::Calculated : MetricProvenance::Unavailable, sectorB->unavailableReason)},
                 {"delta", deltaValue(comparison.secondsDelta, comparison.unavailableReason)}});
         }
+    }
+
+    // Entry/exit speed and the extremes inside, for every segment type (KAN-117).
+    {
+        double startMeters = 0.0, endMeters = 0.0;
+        for (const auto &value : approvedA.segments) {
+            const auto segment = value.toObject();
+            if (segment.value("id").toString() != segmentId) continue;
+            startMeters = segment.value("startProgressMeters").toDouble();
+            endMeters = segment.value("endProgressMeters").toDouble();
+        }
+        const auto length = m_comparisonProgressAxis.lengthMeters;
+        const auto speedsA = segmentSpeeds(*slotA.session, m_comparisonProgressTraceCache[0], length,
+            slotA.row.value("startTime").toDouble(), slotA.row.value("endTime").toDouble(), startMeters, endMeters);
+        const auto speedsB = segmentSpeeds(*slotB.session, m_comparisonProgressTraceCache[1], length,
+            slotB.row.value("startTime").toDouble(), slotB.row.value("endTime").toDouble(), startMeters, endMeters);
+        const auto entry = [&](const std::optional<double> a, const std::optional<double> b) {
+            std::optional<double> delta;
+            if (a && b) delta = *a - *b;
+            return QVariantMap{
+                {"a", provenanceValue(a, a ? MetricProvenance::Measured : MetricProvenance::Unavailable, speedsA.unavailableReason)},
+                {"b", provenanceValue(b, b ? MetricProvenance::Measured : MetricProvenance::Unavailable, speedsB.unavailableReason)},
+                {"delta", deltaValue(delta)}};
+        };
+        const auto speedChannel = slotA.session->aliases.value("speed", "speed");
+        result.insert("speeds", QVariantMap{{"unit", slotA.session->channels.value(speedChannel).unit},
+            {"entry", entry(speedsA.entry, speedsB.entry)},
+            {"maximum", entry(speedsA.maximum, speedsB.maximum)}, {"minimum", entry(speedsA.minimum, speedsB.minimum)},
+            {"exit", entry(speedsA.exit, speedsB.exit)}});
     }
 
     // Corner-only metrics (KAN-52/53/54's own scope, mirroring outingLap*Metrics).

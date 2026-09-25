@@ -753,6 +753,56 @@ the lap. Finally it goes back twice and checks that the ranking reopens with
 the same row selected, with no QML warnings. Synthetic only; no video-bearing
 fixture exercises the seek.
 
+## Corner Analyzer on real recordings (KAN-117)
+
+Changes made after the first owner test with the real Jastrząb day:
+
+- A theoretical-best sector whose donor lap is also the actual best no
+  longer compares that lap with itself. B is the next-fastest lap through
+  the sector.
+- The Corner Analyzer is a column beside the track map and the delta/channel
+  charts, sharing their zoom. The map highlights the zoomed stretch on lap
+  B's trace, and the segment list scrolls to the selected segment.
+- Every segment shows the measured entry, top, lowest and exit speed from the
+  recorded speed channel. They are never derived from GPS, and are
+  unavailable without a speed channel or when the segment crosses the gate.
+  Corners keep their KAN-52 entry/apex/minimum/exit rows.
+- Default comparison channels resolve the speed/throttle/brake aliases to
+  the recording's own names (`velocity`, `throttle_pos-obd`,
+  `brake_pos-obd`) through `comparisonPreferredChannels()`.
+- The theoretical best and the loss ranking are invalidated only when their
+  inputs change (group, eligible laps, exclusions, segments, track
+  configuration, best lap). Opening evidence, which persists the comparison
+  pair, no longer discards them.
+- The loss ranking compares each run's best lap with the day's best by
+  default. **Include every eligible lap** restores the full list, where
+  warm-up laps otherwise dominated the top of the ranking.
+- The canonical axis is built from the canonical run's fastest lap (the lap
+  usually reviewed). Before this change, the best lap on Jastrząb had no
+  projected time through one corner.
+- Lap and segment times of a minute or more display as `m:ss.mmm`
+  (`AppController::formatElapsedTime`).
+
+The VBO parser still records no channel units: RaceChrono declares them in
+`[header]`, but channel units are part of the recording fingerprint, so
+adding them would ask every saved project to relink its recordings. Speeds
+therefore show without a unit.
+
+Opt-in real-day check (recordings stay out of Git; screenshots go to a local
+directory):
+
+```bash
+FLAPPEDEAR_REAL_DAY="$PWD/jastrzab" FLAPPEDEAR_CORNER_REVIEW_DIR=/tmp/review \
+  ./build-native/native/tests/flappedear_native_tests analyzesPrivateTrackDayCorners
+```
+
+It reviews the best lap's run, prints the proposals, theoretical best,
+ranked losses and per-segment metrics, and checks that no sector opens a lap
+against itself. On the 29 August 2026 Jastrząb day it reported 15 proposals
+(including `Corners 9–16`, 504 m), a theoretical best of 1:47.900 against a
+1:49.898 actual best covering the whole lap, and speeds for every segment.
+`TelemetryTests::formatsElapsedTimes` covers the time formatter.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

@@ -33,7 +33,7 @@ Dialog {
             + "." + (ms % 1000).toString().padStart(3, "0");
     }
     function seconds(value) {
-        return value === null || value === undefined ? "—" : Number(value).toFixed(3) + " s";
+        return value === null || value === undefined ? "—" : appController.formatElapsedTime(Number(value));
     }
     function signedSeconds(value) {
         if (value === null || value === undefined) return "—";
