@@ -1177,7 +1177,7 @@ ApplicationWindow {
                     delegate: ItemDelegate {
                         required property var modelData
                         width: lapPicker.width
-                        text: qsTr("Lap %1 · %2").arg(modelData.number).arg(Number(modelData.durationSeconds).toFixed(3) + " s")
+                        text: qsTr("Lap %1 · %2").arg(modelData.number).arg(appController.formatElapsedTime(Number(modelData.durationSeconds)))
                     }
                 }
                 Label {
@@ -1200,10 +1200,10 @@ ApplicationWindow {
                     Layout.columnSpan: 2
                     Layout.fillWidth: true
                     visible: exportDialog.singleLapRange.valid === true
-                    text: qsTr("%1 → %2 · %3 s")
+                    text: qsTr("%1 → %2 · %3")
                         .arg(exportDialog.singleLapRange.inTimecode)
                         .arg(exportDialog.singleLapRange.outTimecode)
-                        .arg(Number(exportDialog.singleLapRange.durationSeconds).toFixed(3))
+                        .arg(appController.formatElapsedTime(Number(exportDialog.singleLapRange.durationSeconds)))
                     color: "#55e6a5"
                     font.family: "Menlo"
                     font.pixelSize: 10

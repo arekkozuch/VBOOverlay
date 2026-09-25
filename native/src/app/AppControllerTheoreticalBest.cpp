@@ -12,6 +12,8 @@
 #include "telemetry/TheoreticalBest.h"
 #include "telemetry/TrackProgress.h"
 
+#include <QCryptographicHash>
+#include <QJsonDocument>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
@@ -61,6 +63,7 @@ void AppController::initializeOutingTheoreticalBest()
     // theoretical best computed from laps that no longer apply.
     const auto invalidate = [this] {
         if (m_theoreticalBestState == "idle") return;
+        if (!m_theoreticalBestKey.isEmpty() && theoreticalBestInputKey() == m_theoreticalBestKey) return;
         ++m_theoreticalBestRequest;
         if (m_theoreticalBestCancellation) m_theoreticalBestCancellation->store(true);
         m_theoreticalBestState = QStringLiteral("idle");
@@ -72,6 +75,29 @@ void AppController::initializeOutingTheoreticalBest()
     };
     connect(this, &AppController::outingLapsChanged, this, invalidate);
     connect(this, &AppController::documentStateChanged, this, invalidate);
+}
+
+QByteArray AppController::theoreticalBestInputKey() const
+{
+    const auto event = currentProjectObject().value("event").toObject();
+    QJsonArray runs;
+    for (const auto &value : event.value("runs").toArray()) {
+        const auto run = value.toObject();
+        runs.append(QJsonObject{{"id", run.value("id")}, {"trackSegments", run.value("trackSegments")},
+            {"trackConfiguration", run.value("trackConfiguration")}});
+    }
+    QJsonArray population;
+    try {
+        for (const auto *row : eligibleOutingLaps(m_outingRawLapRows, m_outingComparisonGroupId,
+                 m_outingRunConfigurations, event.value("lapExclusions").toArray(), m_outingStaleRunIds))
+            population.append(row->reference);
+    } catch (const std::exception &) {
+        population = {};
+    }
+    const QJsonObject key{{"group", m_outingComparisonGroupId}, {"runs", runs}, {"population", population},
+        {"exclusions", event.value("lapExclusions")}, {"best", QJsonObject::fromVariantMap(
+            m_outingRanking.value("bestOfDay").toMap().value("reference").toMap())}};
+    return QCryptographicHash::hash(QJsonDocument(key).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256);
 }
 
 QString AppController::outingLapLabel(const QJsonObject &reference) const
@@ -143,8 +169,21 @@ QVariantMap AppController::outingTimeLossRanking() const
     }
     const TimedLapSectors reference{*m_theoreticalBestActual,
         m_theoreticalBestActual->lapReference.value("startTime").toDouble()};
-    const auto ranking = rankTimeLosses(m_theoreticalBestApproved, m_theoreticalBestAxisLength,
-        m_theoreticalBestPopulation, reference);
+    QVector<TimedLapSectors> compared;
+    if (m_timeLossAllLaps) {
+        compared = m_theoreticalBestPopulation;
+    } else {
+        QHash<QString, qsizetype> fastestByRun;
+        for (qsizetype i = 0; i < m_theoreticalBestPopulation.size(); ++i) {
+            const auto &lap = m_theoreticalBestPopulation[i];
+            const auto runId = lap.times.lapReference.value("runId").toString();
+            const auto it = fastestByRun.constFind(runId);
+            if (it == fastestByRun.cend() || lap.times.lapSeconds < m_theoreticalBestPopulation[*it].times.lapSeconds)
+                fastestByRun.insert(runId, i);
+        }
+        for (const auto index : fastestByRun) compared.append(m_theoreticalBestPopulation[index]);
+    }
+    const auto ranking = rankTimeLosses(m_theoreticalBestApproved, m_theoreticalBestAxisLength, compared, reference);
     if (!ranking.valid) {
         result.insert("state", QStringLiteral("unavailable"));
         result.insert("message", ranking.unavailableReason);
@@ -171,11 +210,19 @@ QVariantMap AppController::outingTimeLossRanking() const
     result.insert("algorithm", QString::fromLatin1(timeLossAlgorithm));
     result.insert("referenceLabel", outingLapLabel(ranking.referenceLap));
     result.insert("referenceLap", ranking.referenceLap.toVariantMap());
+    result.insert("scope", m_timeLossAllLaps ? QStringLiteral("allLaps") : QStringLiteral("runBests"));
     result.insert("observationCount", ranking.observationCount);
     result.insert("comparedLapCount", ranking.comparedLapCount);
     result.insert("untimedWindowCount", ranking.untimedWindowCount);
     result.insert("revision", ranking.stamp.revision);
     return result;
+}
+
+void AppController::setOutingTimeLossAllLaps(const bool allLaps)
+{
+    if (m_timeLossAllLaps == allLaps) return;
+    m_timeLossAllLaps = allLaps;
+    emit outingTheoreticalBestChanged();
 }
 
 bool AppController::openTheoreticalBestSector(const QString &segmentId)
@@ -184,9 +231,24 @@ bool AppController::openTheoreticalBestSector(const QString &segmentId)
     const auto sector = std::find_if(m_theoreticalBestBest.sectors.cbegin(), m_theoreticalBestBest.sectors.cend(),
         [&segmentId](const TheoreticalBestSector &candidate) { return candidate.segmentId == segmentId; });
     if (sector == m_theoreticalBestBest.sectors.cend() || !sector->seconds) return false;
-    // Donor lap as A against the group's actual best as B.
-    return openComparisonEvidence(sector->sourceLapReference.toVariantMap(),
-        m_theoreticalBestActual->lapReference.toVariantMap(), segmentId);
+    // Donor lap as A against the group's actual best as B. When the donor is
+    // the actual best, comparing it with itself shows nothing: B is then the
+    // next-fastest lap through this sector (KAN-117).
+    auto against = m_theoreticalBestActual->lapReference;
+    if (against == sector->sourceLapReference) {
+        std::optional<double> nextBest;
+        QJsonObject nextLap;
+        for (const auto &lap : m_theoreticalBestPopulation) {
+            if (lap.times.lapReference == sector->sourceLapReference) continue;
+            for (const auto &candidate : lap.times.sectors) {
+                if (candidate.segmentId != segmentId || !candidate.seconds) continue;
+                if (!nextBest || *candidate.seconds < *nextBest) { nextBest = candidate.seconds; nextLap = lap.times.lapReference; }
+            }
+        }
+        if (nextLap.isEmpty()) return false;
+        against = nextLap;
+    }
+    return openComparisonEvidence(sector->sourceLapReference.toVariantMap(), against.toVariantMap(), segmentId);
 }
 
 bool AppController::openTimeLoss(const QVariantMap &loss)
@@ -281,6 +343,7 @@ void AppController::requestOutingTheoreticalBest()
     for (const auto &value : outingLapSources())
         sourcesByRunId.insert(value.toObject().value("runId").toString(), value.toObject());
 
+    m_theoreticalBestKey = theoreticalBestInputKey();
     m_theoreticalBestCancellation = std::make_shared<std::atomic_bool>(false);
     m_theoreticalBestState = QStringLiteral("loading");
     m_theoreticalBestMessage.clear();
@@ -315,8 +378,13 @@ AppController::TheoreticalBestResult AppController::computeOutingTheoreticalBest
             return QVariantMap{{"startTime", row.start}, {"endTime", row.end}, {"lapNumber", row.lapNumber},
                 {"reference", row.reference.toVariantMap()}};
         };
-        const auto canonical = std::find_if(population.cbegin(), population.cend(),
-            [&canonicalRunId](const OutingLapRow &row) { return row.runId == canonicalRunId; });
+        // The axis comes from the canonical run's fastest lap: the lap usually
+        // reviewed, so segment bounds line up with the axis they were approved on.
+        auto canonical = population.cend();
+        for (auto it = population.cbegin(); it != population.cend(); ++it) {
+            if (it->runId != canonicalRunId) continue;
+            if (canonical == population.cend() || it->end - it->start < canonical->end - canonical->start) canonical = it;
+        }
         if (canonical == population.cend()) throw std::runtime_error("The canonical run has no eligible lap in this population.");
         const auto axisSource = readOutingLapDetail(sourcesByRunId.value(canonicalRunId), projectPath,
             rowVariant(*canonical), request, cancellation, cache, /*deriveReferenceGate=*/true);

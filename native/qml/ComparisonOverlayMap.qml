@@ -11,6 +11,13 @@ import QtQuick.Controls
 Rectangle {
     id: root
     property real hoverDistanceMeters: -1
+    // KAN-117: the shared zoom window, highlighted on lap B's trace so the
+    // selected segment is visible on the map. Empty for the whole lap.
+    property real rangeStartMeters: 0
+    property real rangeEndMeters: 0
+    property real totalMeters: 0
+    readonly property bool rangeShown: root.totalMeters > 0 && root.rangeEndMeters > root.rangeStartMeters
+        && root.rangeEndMeters - root.rangeStartMeters < root.totalMeters - 1
     readonly property var trackA: appController.comparisonSlots.length
         ? (appController.comparisonOverlayTrack(0) || []) : []
     readonly property var trackB: appController.comparisonSlots.length
@@ -66,6 +73,45 @@ Rectangle {
                 context.reset();
                 drawTrace(context, segmentsA, "#55e6a5");
                 drawTrace(context, segmentsB, "#d95926");
+            }
+        }
+        Canvas {
+            id: rangeCanvas
+            objectName: "comparisonMapRange"
+            anchors.fill: parent
+            visible: root.rangeShown
+            // Repainted only when the zoom window changes, never on hover.
+            property var points: {
+                if (!root.rangeShown) return [];
+                const span = root.rangeEndMeters - root.rangeStartMeters;
+                const step = Math.max(2, span / 150);
+                const result = [];
+                for (let meters = root.rangeStartMeters; meters <= root.rangeEndMeters + 1e-6; meters += step) {
+                    const point = appController.comparisonPositionAtProgress(1, Math.min(meters, root.rangeEndMeters));
+                    result.push(point.x !== undefined ? point : null);
+                }
+                return result;
+            }
+            onPointsChanged: requestPaint()
+            onAvailableChanged: if (available) requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                const context = getContext("2d");
+                context.reset();
+                context.strokeStyle = "rgba(255, 255, 255, 0.85)";
+                context.lineWidth = 7;
+                context.lineCap = "round";
+                context.lineJoin = "round";
+                let drawing = false;
+                context.beginPath();
+                for (const point of points) {
+                    if (!point) { drawing = false; continue; }
+                    const x = Number(point.x) * width, y = Number(point.y) * height;
+                    if (drawing) context.lineTo(x, y); else context.moveTo(x, y);
+                    drawing = true;
+                }
+                context.stroke();
             }
         }
         Label {

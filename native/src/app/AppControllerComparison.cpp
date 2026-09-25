@@ -67,6 +67,17 @@ QVariantList AppController::comparisonSlots() const
     return result;
 }
 
+QString AppController::formatElapsedTime(const double seconds)
+{
+    if (!std::isfinite(seconds)) return QStringLiteral("—");
+    const auto milliseconds = static_cast<qint64>(std::llround(std::abs(seconds) * 1000.0));
+    const QString sign = seconds < 0 && milliseconds > 0 ? QStringLiteral("-") : QString();
+    if (milliseconds < 60'000)
+        return sign + QStringLiteral("%1.%2 s").arg(milliseconds / 1000).arg(milliseconds % 1000, 3, 10, QLatin1Char('0'));
+    return sign + QStringLiteral("%1:%2.%3").arg(milliseconds / 60'000).arg(milliseconds / 1000 % 60, 2, 10, QLatin1Char('0'))
+        .arg(milliseconds % 1000, 3, 10, QLatin1Char('0'));
+}
+
 QVariantList AppController::comparisonLaps() const
 {
     QVariantList result;
@@ -74,8 +85,8 @@ QVariantList AppController::comparisonLaps() const
     for (const auto &value : m_outingLapRows) {
         auto row = value.toMap();
         if (!eligible(row)) continue;
-        row.insert("label", QStringLiteral("%1 · LAP %2 · %3 s").arg(row.value("runName").toString())
-            .arg(row.value("lapNumber").toInt()).arg(row.value("durationSeconds").toDouble(), 0, 'f', 3));
+        row.insert("label", QStringLiteral("%1 · LAP %2 · %3").arg(row.value("runName").toString())
+            .arg(row.value("lapNumber").toInt()).arg(formatElapsedTime(row.value("durationSeconds").toDouble())));
         result.append(row);
     }
     return result;

@@ -81,12 +81,20 @@ Dialog {
                 text: qsTr("Calculate again")
                 onClicked: appController.requestOutingTheoreticalBest()
             }
+            FeCheckBox {
+                objectName: "timeLossAllLaps"
+                visible: root.ranking.state === "ready"
+                text: qsTr("Include every eligible lap (otherwise each run's best lap)")
+                checked: appController.outingTimeLossAllLaps
+                onToggled: appController.outingTimeLossAllLaps = checked
+            }
             Label {
                 objectName: "timeLossSummary"
                 Layout.fillWidth: true
                 visible: root.ranking.state === "ready"
-                text: qsTr("Reference: %1 · %2 laps compared · %3 losses observed%4")
+                text: qsTr("Reference: %1 · %2 %3 compared · %4 losses observed%5")
                     .arg(root.ranking.referenceLabel || "—").arg(root.ranking.comparedLapCount || 0)
+                    .arg(root.ranking.scope === "allLaps" ? qsTr("laps") : qsTr("run-best laps"))
                     .arg(root.ranking.observationCount || 0)
                     .arg(root.ranking.untimedWindowCount > 0
                         ? qsTr(" · %1 windows without full coverage left out").arg(root.ranking.untimedWindowCount) : "")

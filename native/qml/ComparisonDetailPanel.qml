@@ -81,7 +81,9 @@ Rectangle {
 
     function defaultChannels(available) {
         if (available.length === 0) return [];
-        const preferred = ["Δ time", "speed", "throttle", "brake"];
+        // The recording's own names for speed/throttle/brake (for example
+        // "velocity", "throttle_pos-obd"), after the Δ time pseudo-channel.
+        const preferred = ["Δ time"].concat(appController.comparisonPreferredChannels());
         const picked = preferred.filter(channel => available.indexOf(channel) >= 0);
         return picked.length > 0 ? picked.slice(0, 4) : available.slice(0, Math.min(2, available.length));
     }
@@ -215,7 +217,7 @@ Rectangle {
                 FeButton {
                     objectName: "comparisonToggleCornerAnalyzer"
                     compact: true
-                    text: root.showingCornerAnalyzer ? qsTr("← Channels") : qsTr("Corner Analyzer")
+                    text: root.showingCornerAnalyzer ? qsTr("Hide Corner Analyzer") : qsTr("Corner Analyzer")
                     onClicked: root.showingCornerAnalyzer = !root.showingCornerAnalyzer
                 }
                 FeButton {
@@ -264,15 +266,17 @@ Rectangle {
                 }
             }
             RowLayout {
-                visible: !root.showingCornerAnalyzer
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
                 ComparisonOverlayMap {
                     id: overlayMap
-                    Layout.preferredWidth: Math.max(160, root.width * 0.26)
+                    Layout.preferredWidth: Math.max(160, root.width * (root.showingCornerAnalyzer ? 0.2 : 0.26))
                     Layout.fillHeight: true
                     hoverDistanceMeters: root.hoverDistanceMeters
+                    rangeStartMeters: root.zoomStart
+                    rangeEndMeters: root.zoomEnd
+                    totalMeters: root.totalMeters
                 }
                 Rectangle {
                     Layout.fillWidth: true
@@ -349,14 +353,17 @@ Rectangle {
                         font.pixelSize: 11
                     }
                 }
-            }
-            ComparisonSegmentPanel {
-                objectName: "comparisonSegmentPanel"
-                visible: root.showingCornerAnalyzer
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onRangeRequested: (start, end) => { root.zoomStart = start; root.zoomEnd = end; }
-                onHovered: meters => root.hoverDistanceMeters = meters
+                // KAN-117: beside the map and charts, sharing their zoom.
+                ComparisonSegmentPanel {
+                    objectName: "comparisonSegmentPanel"
+                    visible: root.showingCornerAnalyzer
+                    Layout.preferredWidth: 420
+                    Layout.minimumWidth: 380
+                    Layout.maximumWidth: 420
+                    Layout.fillHeight: true
+                    onRangeRequested: (start, end) => { root.zoomStart = start; root.zoomEnd = end; }
+                    onHovered: meters => root.hoverDistanceMeters = meters
+                }
             }
         }
     }
