@@ -803,6 +803,19 @@ against itself. On the 29 August 2026 Jastrząb day it reported 15 proposals
 1:49.898 actual best covering the whole lap, and speeds for every segment.
 `TelemetryTests::formatsElapsedTimes` covers the time formatter.
 
+## Pedal as the throttle input (KAN-118)
+
+`preferAcceleratorPedalForThrottle` (`TelemetrySession.h`) runs after
+both the VBO and the RCZ parser. `RczTests::prefersAcceleratorPedalForThrottle`
+covers: a VBO with plate and pedal, where `throttle` reads the pedal (0 %
+during a 72 % plate blip) and the plate stays readable by name; a
+plate-only VBO, which is unchanged; a pedal column without numeric values,
+which is ignored; an RCZ with OBD channels 10025 (plate) and 10071 (pedal);
+and a plate-only RCZ. On the private Jastrząb day
+(`analyzesPrivateTrackDayCorners`), throttle pickup went from undetected on
+every corner (the plate never falls below the 10 % off threshold) to
+measured on all of them.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

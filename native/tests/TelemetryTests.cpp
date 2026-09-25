@@ -4840,6 +4840,11 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
         const auto segment = value.toMap();
         const auto metrics = controller.comparisonSegmentMetrics(segment.value("id").toString());
         const auto speeds = metrics.value("speeds").toMap();
+        const auto pickup = metrics.value("exitEffects").toMap().value("pickup").toMap();
+        if (!pickup.isEmpty())
+            qInfo().noquote() << QString("  %1 throttle pickup A %2 B %3 (%4)").arg(segment.value("name").toString(), -14)
+                .arg(pickup.value("a").toMap().value("value").toDouble(), 7, 'f', 1).arg(pickup.value("b").toMap().value("value").toDouble(), 7, 'f', 1)
+                .arg(pickup.value("a").toMap().value("unavailableReason").toString());
         qInfo().noquote() << QString("  %1 sector A %2 B %3 | entry A %4 max A %5 min A %6 exit A %7").arg(segment.value("name").toString(), -14)
             .arg(metrics.value("sectorTime").toMap().value("a").toMap().value("value").toDouble(), 7, 'f', 3)
             .arg(metrics.value("sectorTime").toMap().value("b").toMap().value("value").toDouble(), 7, 'f', 3)

@@ -160,6 +160,15 @@ lap's projection never lands on the gate exactly. A missing brake and
 deceleration channel is reported (`noBrakeOrDecelerationChannel`) before
 coverage is checked.
 
+The `throttle` alias means the driver's input (KAN-118). When a recording
+has an accelerator-pedal channel with numeric data (RaceChrono OBD
+`accelerator_pos`), the alias refers to it. The throttle plate
+(`throttle_pos`) stays available under its own name, because it shows what
+the ECU did: on the owner's car it reads 13.3 % at idle and 80.4 % fully
+open, is fully open from about 70 % pedal, and opens for downshift rev-match
+blips while the pedal is released. Aliases are not part of recording
+fingerprints, so saved projects are unaffected.
+
 Throttle pickup (KAN-54) is measured only from the recorded throttle channel;
 without one, a positive longitudinal-acceleration onset is reported and
 labelled inferred. Exit effects are compared over an explicit interval (the

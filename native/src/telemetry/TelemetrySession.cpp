@@ -1,5 +1,7 @@
 #include "telemetry/TelemetrySession.h"
 
+#include <QRegularExpression>
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -261,6 +263,20 @@ std::optional<double> telemetryToVideoTime(
     }
     const double videoTime = (telemetryTime - transform.offset) / transform.timeScale;
     return std::isfinite(videoTime) ? std::optional<double>(videoTime) : std::nullopt;
+}
+
+void preferAcceleratorPedalForThrottle(TelemetrySession &session)
+{
+    static const QRegularExpression pedal(QStringLiteral("^accelerator.?(?:pedal|pos)"),
+        QRegularExpression::CaseInsensitiveOption);
+    for (const auto &name : session.channelNames()) {
+        if (!pedal.match(name).hasMatch()) continue;
+        const auto &values = session.channels[name].values;
+        if (std::any_of(values.cbegin(), values.cend(), [](const float value) { return std::isfinite(value); })) {
+            session.aliases.insert(QStringLiteral("throttle"), name);
+            return;
+        }
+    }
 }
 
 } // namespace FlappedEar
