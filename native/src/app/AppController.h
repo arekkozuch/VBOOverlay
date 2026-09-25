@@ -114,6 +114,12 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
     Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
+    // KAN-39: video linkage for the open lap, gated to the lap's own run
+    // being the currently active/loaded one -- a lap from a different run
+    // is treated as having no video for this increment (disclosed gap),
+    // rather than silently switching the active run and its loaded sources.
+    Q_PROPERTY(bool outingLapVideoAvailable READ outingLapVideoAvailable NOTIFY outingLapVideoChanged)
+    Q_PROPERTY(qint64 outingLapVideoPositionMilliseconds READ outingLapVideoPositionMilliseconds NOTIFY outingLapVideoChanged)
     Q_PROPERTY(QVariantMap outingRanking READ outingRanking NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantMap outingProgression READ outingProgression NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantList outingCompatibilityGroups READ outingCompatibilityGroups NOTIFY outingLapsChanged)
@@ -292,6 +298,12 @@ public:
     [[nodiscard]] QVariantMap outingLapTrackPoint() const;
     [[nodiscard]] double outingLapCursor() const { return m_outingLapCursor; }
     void setOutingLapCursor(double seconds);
+    // Reuses the central SyncTransform (videoToTelemetryTime/telemetryToVideoTime,
+    // TelemetrySession.h) already relied on for the main preview's playback<->
+    // telemetry mapping -- never a second, ad hoc conversion.
+    [[nodiscard]] bool outingLapVideoAvailable() const;
+    [[nodiscard]] qint64 outingLapVideoPositionMilliseconds() const;
+    Q_INVOKABLE bool followOutingLapVideoPosition(qint64 videoPositionMilliseconds);
     [[nodiscard]] QVariantList outingLaps() const;
     [[nodiscard]] QVariantMap outingAnalysisStatus() const;
     Q_INVOKABLE bool retryOutingAnalysis();
@@ -381,6 +393,7 @@ signals:
     void batchImportCommitted();
     void outingLapsChanged();
     void outingLapDetailChanged();
+    void outingLapVideoChanged();
     void comparisonSlotsChanged();
     void comparisonViewOpenChanged();
     void outingLapCursorChanged();
