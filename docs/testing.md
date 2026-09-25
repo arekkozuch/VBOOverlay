@@ -199,6 +199,41 @@ values were checked beforehand with a line-for-line Python model of the same
 algorithm. These are synthetic fixtures only; no real VBO recording has been
 segmented yet.
 
+## Corner entry, apex, exit and minimum speed (KAN-46)
+
+`native/src/telemetry/CornerPhases.h/.cpp` (algorithm tag `corner-phase-v1`)
+keeps geometry and driving apart:
+
+- `proposeCornerGeometryPhases` (per axis, shared by every lap): entry
+  (`curvatureOnset`) and exit (`curvatureRelease`) reuse the KAN-45 corner
+  boundaries with their tolerance and uncertainty. The apex
+  (`peakCurvatureRegion`) is the midpoint of the corner's high-curvature
+  region: curvature at or above 80% of the corner peak opens a region, which
+  closes only once curvature falls below 60% (hysteresis, so ripple on a
+  constant-radius arc is not split into false apexes). More than one region
+  leaves the apex unresolved (`multipleApexes`) and lists every candidate; a
+  region wider than the smoothing tolerance is located at its midpoint with a
+  widened tolerance and `broadPeak`.
+- `locateMinimumSpeed` (per lap): samples the lap's `speed` channel every
+  `stepMeters` across the corner through its projected trace. It is never
+  derived from the apex. Missing speed channel, any sample without projected
+  GPS coverage or a speed value, a flat speed, or a corner crossing the gate
+  (the two halves are at opposite ends of a gate-to-gate lap) leave it
+  unresolved rather than searching around the hole. A minimum touching the
+  corner boundary is flagged `atCornerBoundary`.
+
+Every phase exposes its method, tolerance and an evidence object (peak
+curvature and region, or channel, unit, measured minimum, telemetry time and
+sample counts). `CornerPhaseTests` uses shared line/arc loops
+(`native/tests/SyntheticLoopFixture.h`, also used by KAN-45 tests) and a
+synthetic 20 Hz GPS/speed lap: a single tight arc (apex at the arc, minimum
+speed placed ~28 m later), two tight arcs joined by a gentle one (unresolved,
+two candidates), a constant-radius semicircle (broad peak), and GPS gaps, NaN
+speed, missing speed channel, flat speed, a gate-crossing corner and invalid
+inputs. Expected apex positions were checked beforehand with a Python model.
+Synthetic fixtures only; braking onset (KAN-47) and review UI (KAN-48) are
+separate.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
