@@ -162,18 +162,30 @@ review/editing UI, remain separate, later M3 tickets (KAN-45 onward).
 ## Automatic straight and corner proposals (KAN-45)
 
 `proposeTrackSegments` (`native/src/telemetry/TrackSegmentProposals.h/.cpp`,
-algorithm tag `track-segment-proposal-v1`) classifies each axis sample of the
+algorithm tag `track-segment-proposal-v2`) classifies each axis sample of the
 KAN-44 smoothed curvature as straight or left/right turning (explicit
 `cornerCurvaturePerMeter` threshold, default 1/250 m), folds turning runs below
 `minimumCornerTurnRadians` (default 0.35 rad) back into the straight as kinks,
 and emits alternating corner/straight proposals named `Corner N`/`Straight N`
-in progress order from the gate. Each boundary carries a tolerance (smoothing
-radius plus axis spacing) and zero or more uncertainty reasons:
+in progress order from the gate.
 
-- `connectedCorners`: opposite-direction corners with no straight between
-  them, or corners separated by a straight shorter than
-  `connectedStraightMeters` (default 20 m). That straight is not proposed;
-  its two corners meet at its midpoint.
+Corners with no proposed straight between them form one **corner chain**
+proposal (KAN-116, tag `v2`). This covers opposite-direction corners with no
+straight (an S-bend) and corners separated by a straight shorter than
+`connectedStraightMeters` (default 20 m). A chain is named after the corners
+it contains (`Corners 2–3`), and `chainedCorners` records how many there are.
+Its `turnRadians` is the net heading change, close to zero for an S-bend.
+Only a proposed straight separates corners, and a loop with no proposed
+straight stays unresolved (`continuousCorner`). Within a chain, a single
+geometric apex is reported as `multipleApexes`. Entry, exit, minimum,
+braking, sector time and loss windows cover the whole chain. To separate a
+chain, split the approved segment. The version bump means review rejections
+persisted for v1 proposals are not applied to v2 proposals; approved
+segments are unchanged.
+
+Each boundary carries a tolerance (smoothing radius plus axis spacing) and
+zero or more uncertainty reasons:
+
 - `shortStraight`: both ends of a straight shorter than
   `certainStraightMeters` (default 40 m).
 - `gpsGap`: within tolerance of a caller-supplied progress range lacking GPS
@@ -191,8 +203,9 @@ separate tickets.
 `TrackSegmentProposalTests` builds exact line/arc loops through the real
 `buildProgressAxis` → `computeTrackFeatures` → `proposeTrackSegments` pipeline:
 a stadium (4 certain proposals, ~pi corner turns, wrap at the gate), the same
-stadium with a GPS-gap range, left-right chicanes (connected-corner
-boundaries), 44 m straights between 90-degree corners (short-straight
+stadium with a GPS-gap range, left-right chicanes (each one corner chain,
+`Corners 2–3` numbering, near-zero net turn), 90-degree corners 16 m apart
+(one same-direction chain), 44 m straights between 90-degree corners (short-straight
 boundaries), 10-degree kinks (folded into straights), a circle (unresolved),
 conversion/editing of proposals as segments, and invalid inputs. Expected
 values were checked beforehand with a line-for-line Python model of the same

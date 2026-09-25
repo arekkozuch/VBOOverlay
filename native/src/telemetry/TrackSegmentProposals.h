@@ -10,7 +10,9 @@
 
 namespace FlappedEar {
 
-inline constexpr auto trackSegmentProposalAlgorithm = "track-segment-proposal-v1";
+// v2 (KAN-116): corners with no proposed straight between them form one
+// corner chain. Persisted review decisions are keyed by this tag.
+inline constexpr auto trackSegmentProposalAlgorithm = "track-segment-proposal-v2";
 
 // Uncertainty reasons attached to a proposal boundary. A boundary with no
 // reason is geometrically well separated; it still carries a finite
@@ -47,6 +49,7 @@ struct TrackSegmentProposal {
     double lengthMeters = 0.0;
     double turnRadians = 0.0;           // signed total heading change; positive turns left
     double peakCurvaturePerMeter = 0.0; // signed curvature with the largest magnitude
+    int chainedCorners = 0;             // corners joined into this proposal (0 for a straight)
 };
 
 struct TrackSegmentProposals {
