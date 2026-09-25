@@ -360,8 +360,22 @@ bool AppController::confirmBatchImport(const QString &name, const bool append, c
     QJsonObject event = append ? project.value("event").toObject()
                               : QJsonObject{{"id", identity()}, {"name", name.trimmed()}};
     QJsonArray runs = event.value("runs").toArray();
-    for (const auto &primary : selected) {
-        if (groups.value(primary.id) != primary.id) continue;
+    // KAN-119: runs are named "Session N" in recording order, continuing after
+    // the event's existing runs; a run without a recording clock follows the
+    // dated ones in import order. Names are stored, so they never renumber.
+    QVector<TelemetryRunProposal> primaries;
+    for (const auto &run : selected)
+        if (groups.value(run.id) == run.id) primaries.append(run);
+    const auto startOf = [](const TelemetryRunProposal &run) {
+        return run.telemetry ? recordingTimestamp(*run.telemetry) : std::nullopt;
+    };
+    std::stable_sort(primaries.begin(), primaries.end(), [&](const TelemetryRunProposal &a, const TelemetryRunProposal &b) {
+        const auto left = startOf(a), right = startOf(b);
+        if (left.has_value() != right.has_value()) return left.has_value();
+        return left && right && *left < *right;
+    });
+    auto sessionNumber = runs.size();
+    for (const auto &primary : primaries) {
         QJsonArray sources;
         QString primarySourceId;
         for (const auto &source : selected) {
@@ -377,8 +391,7 @@ bool AppController::confirmBatchImport(const QString &name, const bool append, c
                     {"format", source.format}, {"fingerprint", fingerprint}}}});
         }
         const QString runId = identity();
-        QString runName = QFileInfo(primary.sourcePath).completeBaseName().left(160).trimmed();
-        if (runName.isEmpty()) runName = QStringLiteral("Run");
+        const QString runName = QStringLiteral("Session %1").arg(++sessionNumber);
         runs.append(QJsonObject{{"id", runId}, {"name", runName}, {"primaryTelemetrySourceId", primarySourceId},
             {"sources", QJsonObject{{"telemetry", sources}}},
             {"trackConfiguration", EventProjectCodec::unknownTrackConfiguration(primarySourceId,

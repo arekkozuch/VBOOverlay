@@ -2972,10 +2972,11 @@ void TelemetryTests::ordersWholeOutingAndReopensSources()
     QCOMPARE(controller.outingLapMessages().size(), 2);
     for (const auto &message : controller.outingLapMessages()) QVERIFY(message.contains("repeated, complete GPS laps"));
     const auto rows = controller.outingLaps();
-    QCOMPARE(rows[0].toMap().value("runName").toString(), QStringLiteral("early"));
+    // KAN-119: named by recording time, not import order or filename.
+    QCOMPARE(rows[0].toMap().value("runName").toString(), QStringLiteral("Session 1"));
     QCOMPARE(rows[0].toMap().value("type").toString(), QStringLiteral("OUT"));
     QCOMPARE(rows[4].toMap().value("type").toString(), QStringLiteral("IN"));
-    QCOMPARE(rows[5].toMap().value("runName").toString(), QStringLiteral("late"));
+    QCOMPARE(rows[5].toMap().value("runName").toString(), QStringLiteral("Session 2"));
     const auto path = directory.filePath("day.fetproject");
     QTRY_COMPARE(controller.vboLoadState(), QStringLiteral("ready"));
     QVERIFY(controller.saveProject(QUrl::fromLocalFile(path)));
@@ -4409,7 +4410,7 @@ void TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow()
         QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
 
         // Proposal and review: approve every proposal on one run only.
-        const auto approved = approveAllSegmentsOnRun(controller, "fastfirst");
+        const auto approved = approveAllSegmentsOnRun(controller, "Session 1");
         QVERIFY(approved.size() >= 3);
 
         // Known-time sums.
@@ -4427,7 +4428,7 @@ void TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow()
         QSet<QString> donorRuns;
         for (const auto &value : best.value("sectors").toList())
             donorRuns.insert(value.toMap().value("sourceLapLabel").toString().section(" · ", 0, 0));
-        QVERIFY2(donorRuns.contains("fastfirst") && donorRuns.contains("fastsecond"),
+        QVERIFY2(donorRuns.contains("Session 1") && donorRuns.contains("Session 2"),
             qPrintable(QStringList(donorRuns.values()).join(", ")));
         revision = best.value("revision").toString();
         QVERIFY(!revision.isEmpty());
@@ -4436,7 +4437,7 @@ void TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow()
         int lapIndex = -1;
         const auto rows = controller.outingLaps();
         for (int i = 0; i < rows.size() && lapIndex < 0; ++i)
-            if (rows[i].toMap().value("type") == "LAP" && rows[i].toMap().value("runName") == "fastfirst") lapIndex = i;
+            if (rows[i].toMap().value("type") == "LAP" && rows[i].toMap().value("runName") == "Session 1") lapIndex = i;
         QVERIFY(controller.selectOutingLap(lapIndex));
         QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
         controller.requestSegmentReview();
@@ -4497,7 +4498,7 @@ void TelemetryTests::acceptsM3SegmentationCornerAndTheoreticalBestWorkflow()
         // A layout change: the approved segments no longer apply to the run.
         QString runId;
         for (const auto &value : reopened.outingLaps())
-            if (value.toMap().value("runName") == "fastfirst") runId = value.toMap().value("runId").toString();
+            if (value.toMap().value("runName") == "Session 1") runId = value.toMap().value("runId").toString();
         QVERIFY(reopened.setRunTrackConfiguration(runId, "Changed", "clockwise"));
         QTRY_VERIFY(!reopened.outingLapsLoading() && reopened.m_outingLapRequestedKey == reopened.outingLapKey());
         QTRY_COMPARE(reopened.outingTheoreticalBest().value("state").toString(), QString("idle"));
@@ -4523,7 +4524,7 @@ void TelemetryTests::derivesTimeLossObservationsForComparisonPair()
     QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
     QTRY_VERIFY(!controller.outingLapsLoading());
     QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
-    QVERIFY(!approveAllSegmentsOnRun(controller, "fastfirst").isEmpty());
+    QVERIFY(!approveAllSegmentsOnRun(controller, "Session 1").isEmpty());
     QVERIFY(!controller.comparisonTimeLossObservations().value("valid").toBool()); // no pair yet
 
     // A pair from different runs, measured against the canonical segments.
@@ -4589,7 +4590,7 @@ void TelemetryTests::ranksTimeLossesAndRecalculatesOnExclusion()
     QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
     QTRY_VERIFY(!controller.outingLapsLoading());
     QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
-    QVERIFY(!approveAllSegmentsOnRun(controller, "fastfirst").isEmpty());
+    QVERIFY(!approveAllSegmentsOnRun(controller, "Session 1").isEmpty());
 
     QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
     QSignalSpy warnings(&engine, &QQmlEngine::warnings);
@@ -4663,7 +4664,7 @@ void TelemetryTests::navigatesFromRankedLossToCornerEvidence()
     QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
     QTRY_VERIFY(!controller.outingLapsLoading());
     QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
-    QVERIFY(!approveAllSegmentsOnRun(controller, "fastfirst").isEmpty());
+    QVERIFY(!approveAllSegmentsOnRun(controller, "Session 1").isEmpty());
 
     QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
     QSignalSpy warnings(&engine, &QQmlEngine::warnings);
@@ -5433,7 +5434,7 @@ void TelemetryTests::presentsDayResultStatesWithoutVideo()
     QTRY_VERIFY(QMetaObject::invokeMethod(runStatuses, "itemAt", Q_RETURN_ARG(QQuickItem *, missing), Q_ARG(int, 0)) && missing);
     QCOMPARE(missing->objectName(), "outingRunStatus_" + runB);
     QVERIFY(missing->isVisible());
-    QVERIFY(missing->property("text").toString().contains("afternoon"));
+    QVERIFY(missing->property("text").toString().contains(controller.runMetadata(runB).value("name").toString()));
     QVERIFY(missing->property("text").toString().contains("missing"));
     QTRY_VERIFY(lapList->height() > 30);
     QVERIFY(retry->mapRectToScene(retry->boundingRect()).bottom() <= window->height());

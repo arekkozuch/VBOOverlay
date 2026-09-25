@@ -35,7 +35,12 @@ Analysis then uses VBO; RCZ remains attached as an alternative source.
 4. **All laps** automatically lists recorded sections from every run, in UTC
    chronological order. Columns show start time, **OUT / LAP / IN**, the source
    run and section duration. No video or run selection is required.
-5. **Add files…** extends the outing. Save the project to retain its source
+   Runs are named **Session 1, Session 2, …** in recording-time order, not
+   after their files (KAN-119). A recording without a clock follows the dated
+   ones in import order. The names are stored in the project, so they never
+   renumber. Rename a run and see its source file in **Run details…**.
+   Projects imported before this change keep their existing names.
+5. **Add files…** extends the outing and continues the session numbering. Save the project to retain its source
    references; reopening rebuilds the entire list from verified sources.
 
 Click any row (or focus it with Tab and press Enter/Space) to open that section.
