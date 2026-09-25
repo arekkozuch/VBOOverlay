@@ -138,6 +138,7 @@ private slots:
     void reportsEntryApexMinimumAndExitSpeedsSeparately();
     void limitsOrWithholdsCornerSpeedsOnPoorData();
     void cornerSpeedsHandleOtherSegmentShapes();
+    void comparesCornerSpeedsBetweenTwoLaps();
 };
 
 void CornerPhaseTests::entryAndExitReuseCornerBoundaries()
@@ -403,6 +404,49 @@ void CornerPhaseTests::cornerSpeedsHandleOtherSegmentShapes()
 
     QVERIFY(!computeCornerSpeeds(corner.axis, corner.features, approvedAs(corner.proposal), "missing", trace, lap.session).valid);
     QVERIFY(!computeCornerSpeeds(ProgressAxis{}, corner.features, approvedAs(corner.proposal), "x", trace, lap.session).valid);
+}
+
+void CornerPhaseTests::comparesCornerSpeedsBetweenTwoLaps()
+{
+    // KAN-55: A minus B for the same approved segment/revision. Lap B is
+    // driven 10% slower everywhere, so every phase delta is exactly
+    // predictable (A - B = 0.1 * A) -- this is the "compare two whole laps'
+    // worth of independently-computed CornerSpeeds", not a single shared
+    // computation, mirroring how the app will call this once per slot.
+    const auto corner = firstCorner(singleApexHalf());
+    const auto approved = approvedAs(corner.proposal);
+    const auto id = onlyId(approved);
+    const auto lapA = driveLap(singleApexHalf(), speedDipAt185);
+    const auto lapB = driveLap(singleApexHalf(), [](double s) { return speedDipAt185(s) * 0.9; });
+    const auto traceA = projectLapTrace(corner.axis, lapA.session, 0.0, lapA.endTime);
+    const auto traceB = projectLapTrace(corner.axis, lapB.session, 0.0, lapB.endTime);
+    const auto speedsA = computeCornerSpeeds(corner.axis, corner.features, approved, id, traceA, lapA.session);
+    const auto speedsB = computeCornerSpeeds(corner.axis, corner.features, approved, id, traceB, lapB.session);
+    QVERIFY(speedsA.valid && speedsB.valid);
+
+    const auto comparison = compareCornerSpeeds(speedsA, speedsB);
+    QVERIFY(comparison.valid);
+    QVERIFY(comparison.unavailableReason.isEmpty());
+    for (const auto &delta : {comparison.entryDelta, comparison.apexDelta, comparison.minimumDelta, comparison.exitDelta})
+        QVERIFY(delta.has_value());
+    QVERIFY2(std::abs(*comparison.entryDelta - 0.1 * *speedsA.entry.value) < 0.5,
+        qPrintable(QString("entryDelta=%1 expected~%2").arg(*comparison.entryDelta).arg(0.1 * *speedsA.entry.value)));
+    QVERIFY(*comparison.apexDelta > 0.0); // A was faster everywhere
+    QVERIFY(*comparison.minimumDelta > 0.0);
+    QVERIFY(*comparison.exitDelta > 0.0);
+
+    // A different segment (even if geometrically identical bounds) is never compared.
+    auto otherSegments = QJsonArray{makeTrackSegment(TrackSegmentType::Corner, "Other",
+        corner.proposal.start.progressMeters, corner.proposal.end.progressMeters, speedConfiguration())};
+    const auto otherApproved = approvedSegmentation(otherSegments, speedConfiguration());
+    const auto speedsOther = computeCornerSpeeds(corner.axis, corner.features, otherApproved, onlyId(otherApproved), traceB, lapB.session);
+    QVERIFY(speedsOther.valid);
+    const auto differentRevision = compareCornerSpeeds(speedsA, speedsOther);
+    QVERIFY(!differentRevision.valid);
+    QCOMPARE(differentRevision.unavailableReason, QString(cornerSpeedDifferentSegmentOrRevision));
+
+    // An invalid input on either side withholds the whole comparison.
+    QVERIFY(!compareCornerSpeeds(CornerSpeeds{}, speedsB).valid);
 }
 
 QTEST_GUILESS_MAIN(CornerPhaseTests)

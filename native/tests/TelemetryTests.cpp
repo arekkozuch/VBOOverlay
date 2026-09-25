@@ -147,6 +147,8 @@ private slots:
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void comparesTwoLapsFromTheSameRun();
     void overlaysComparisonLapsOnASharedProgressAxis();
+    void showsCornerAnalyzerSegmentMetricsForBothLaps();
+    void selectsCornerAnalyzerSegmentThroughQml();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -3944,6 +3946,202 @@ void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()
     QTRY_VERIFY2(chartObject->property("hasData").toBool(), "overlay chart should show data once both laps are ready");
     QTRY_VERIFY2(!mapObject->property("trackA").toList().isEmpty(), "overlay map track A should populate");
     QTRY_VERIFY2(!mapObject->property("trackB").toList().isEmpty(), "overlay map track B should populate");
+}
+
+void TelemetryTests::showsCornerAnalyzerSegmentMetricsForBothLaps()
+{
+    // KAN-55: two laps of the SAME run/file share one run id, so approving
+    // segments once (via the ordinary single-lap review flow, on either lap)
+    // gives both comparison slots the identical approved revision -- this is
+    // the ordinary "compare two laps from one session" case, not the harder
+    // cross-run case where each run keeps its own independently-approved
+    // trackSegments and only a matching revision makes them comparable.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Corner Analyzer", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    const auto a = candidates[0].toMap(), b = candidates[1].toMap();
+
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    // No segments approved yet: nothing to show, not an empty-but-valid list.
+    QVERIFY(controller.comparisonApprovedSegments().isEmpty());
+    QVERIFY(controller.comparisonSegmentMetrics("anything").isEmpty());
+
+    // Approve every proposal on lap A's underlying run (shared with lap B).
+    int lapIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+    }
+    QVERIFY(lapIndex >= 0);
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    controller.requestSegmentReview();
+    QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    const auto count = controller.segmentReviewItems().size();
+    for (int i = 0; i < count; ++i) QCOMPARE(controller.approveSegmentProposal(i), QString());
+    QString wrappingId;
+    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
+        const auto segment = value.toObject();
+        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble())
+            wrappingId = segment.value("id").toString();
+    }
+    if (!wrappingId.isEmpty())
+        QCOMPARE(controller.splitApprovedSegment(wrappingId, controller.segmentReviewAxisLength()), QString());
+    const auto approvedSegments = controller.storedRunTrackSegments(runId).toArray();
+    QVERIFY(!approvedSegments.isEmpty());
+    controller.closeOutingLap();
+
+    // Both slots resolve the same run's approved segmentation: available now.
+    const auto segments = controller.comparisonApprovedSegments();
+    QCOMPARE(segments.size(), approvedSegments.size());
+    QString cornerId, otherId;
+    for (const auto &value : segments) {
+        const auto segment = value.toMap();
+        QVERIFY(!segment.value("id").toString().isEmpty());
+        if (segment.value("type") == "corner" && cornerId.isEmpty()) cornerId = segment.value("id").toString();
+        else if (otherId.isEmpty()) otherId = segment.value("id").toString();
+    }
+
+    // A non-corner (or any) segment always reports sector time -- both laps
+    // took a real, positive amount of time through it, projected on the
+    // shared comparison axis, not each lap's own distance-into-lap.
+    const auto anyId = cornerId.isEmpty() ? otherId : cornerId;
+    QVERIFY(!anyId.isEmpty());
+    const auto metrics = controller.comparisonSegmentMetrics(anyId);
+    QCOMPARE(metrics.value("segmentId").toString(), anyId);
+    const auto sectorTime = metrics.value("sectorTime").toMap();
+    QVERIFY(!sectorTime.isEmpty());
+    for (const auto *side : {"a", "b"}) {
+        const auto value = sectorTime.value(side).toMap();
+        QVERIFY2(value.contains("value"), qPrintable(value.value("unavailableReason").toString()));
+        QCOMPARE(value.value("provenance").toString(), QString("calculated"));
+        QVERIFY(value.value("value").toDouble() > 0.0);
+    }
+    QVERIFY(sectorTime.value("delta").toMap().contains("value"));
+
+    // A corner segment: the route has no recorded speed channel, so every
+    // corner/braking/exit value is explicitly unavailable, never derived from
+    // GPS positions -- the same invariant outingLapCornerSpeeds already proves
+    // for the single-lap case, now also true through the A/B combination.
+    if (!cornerId.isEmpty()) {
+        const auto cornerMetrics = controller.comparisonSegmentMetrics(cornerId);
+        const auto corner = cornerMetrics.value("corner").toMap();
+        QVERIFY(!corner.isEmpty());
+        for (const auto *phase : {"entry", "apex", "minimum", "exit"}) {
+            const auto phaseMap = corner.value(phase).toMap();
+            for (const auto *side : {"a", "b"}) {
+                const auto value = phaseMap.value(side).toMap();
+                QVERIFY(!value.contains("value"));
+                QCOMPARE(value.value("unavailableReason").toString(), QString(cornerPhaseSpeedChannelMissing));
+                QCOMPARE(value.value("provenance").toString(), QString("unavailable"));
+            }
+        }
+        const auto braking = cornerMetrics.value("braking").toMap();
+        QVERIFY(!braking.isEmpty());
+        QCOMPARE(braking.value("point").toMap().value("a").toMap().value("unavailableReason").toString(), QString(brakingNoChannel));
+        const auto exitEffects = cornerMetrics.value("exitEffects").toMap();
+        QVERIFY(!exitEffects.isEmpty());
+        QCOMPARE(exitEffects.value("pickup").toMap().value("a").toMap().value("unavailableReason").toString(), QString(exitNoChannel));
+    }
+
+    // An unknown segment id is never fabricated into a result.
+    QVERIFY(controller.comparisonSegmentMetrics("not-a-real-id").isEmpty());
+}
+
+void TelemetryTests::selectsCornerAnalyzerSegmentThroughQml()
+{
+    // KAN-55: the Corner Analyzer panel inside ComparisonDetailPanel.qml
+    // renders the approved-segment list and per-segment metrics, and
+    // "jump to this segment" sets the shared zoom/hover state the way
+    // ComparisonOverlayChart/ComparisonOverlayMap already consume it --
+    // reusing the existing shared cursor, not a second one.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Corner Analyzer QML", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    const auto candidates = controller.comparisonLaps(); QVERIFY(candidates.size() >= 2);
+    const auto a = candidates[0].toMap(), b = candidates[1].toMap();
+    QVERIFY(controller.selectComparisonLap(0, a.value("reference").toMap()));
+    QVERIFY(controller.selectComparisonLap(1, b.value("reference").toMap()));
+    QTRY_VERIFY(controller.comparisonPairReady());
+
+    int lapIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size() && lapIndex < 0; ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+    }
+    QVERIFY(lapIndex >= 0);
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    controller.requestSegmentReview();
+    QTRY_COMPARE(controller.segmentReviewState(), QString("ready"));
+    const auto count = controller.segmentReviewItems().size();
+    for (int i = 0; i < count; ++i) QCOMPARE(controller.approveSegmentProposal(i), QString());
+    QString wrappingId;
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
+        const auto segment = value.toObject();
+        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble())
+            wrappingId = segment.value("id").toString();
+    }
+    if (!wrappingId.isEmpty())
+        QCOMPARE(controller.splitApprovedSegment(wrappingId, controller.segmentReviewAxisLength()), QString());
+    controller.closeOutingLap();
+    QVERIFY(!controller.comparisonApprovedSegments().isEmpty());
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 900; height: 600; visible: true; "
+        "ComparisonDetailPanel { objectName: \"comparisonRoot\"; anchors.fill: parent } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    auto *toggle = window->findChild<QQuickItem *>("comparisonToggleCornerAnalyzer"); QVERIFY(toggle);
+    toggle->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *panel = window->findChild<QObject *>("comparisonSegmentPanel"); QVERIFY(panel);
+    QTRY_VERIFY(panel->property("visible").toBool());
+    QTRY_COMPARE(panel->property("segments").toList().size(), controller.comparisonApprovedSegments().size());
+
+    auto *sectorA = window->findChild<QObject *>("cornerAnalyzerSectorTimeA"); QVERIFY(sectorA);
+    auto *sectorB = window->findChild<QObject *>("cornerAnalyzerSectorTimeB"); QVERIFY(sectorB);
+    auto *sectorDelta = window->findChild<QObject *>("cornerAnalyzerSectorTimeDelta"); QVERIFY(sectorDelta);
+    QTRY_VERIFY(sectorA->property("text").toString().contains(" s"));
+    QTRY_VERIFY(sectorB->property("text").toString().contains(" s"));
+    QTRY_VERIFY(sectorDelta->property("text").toString().contains(" s"));
+    QVERIFY(!sectorA->property("text").toString().contains("—"));
+
+    auto *comparisonRoot = window->findChild<QObject *>("comparisonRoot"); QVERIFY(comparisonRoot);
+    const auto zoomStartBefore = comparisonRoot->property("zoomStart").toDouble();
+    const auto zoomEndBefore = comparisonRoot->property("zoomEnd").toDouble();
+
+    auto *jump = window->findChild<QQuickItem *>("cornerAnalyzerSectorTimeSelect"); QVERIFY(jump);
+    jump->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(comparisonRoot->property("hoverDistanceMeters").toDouble() >= 0.0);
+    // Selecting a segment set the shared range to that segment's own bounds,
+    // not the full-lap default it started at.
+    QVERIFY(comparisonRoot->property("zoomStart").toDouble() != zoomStartBefore
+        || comparisonRoot->property("zoomEnd").toDouble() != zoomEndBefore);
+    QCOMPARE(warnings.size(), 0);
 }
 
 void TelemetryTests::showsComparisonSlotCompatibilityAndCoverageContext()

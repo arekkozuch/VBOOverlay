@@ -132,6 +132,7 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/ExitMetrics.h
     src/telemetry/CornerPhases.cpp
     src/telemetry/CornerPhases.h
+    src/telemetry/MetricProvenance.h
     src/telemetry/BrakingOnset.cpp
     src/telemetry/BrakingOnset.h
     src/telemetry/RczParser.cpp
@@ -176,6 +177,7 @@ qt_add_executable(flappedear_native MACOSX_BUNDLE
     src/app/AppControllerComparison.cpp
     src/app/AppControllerOuting.cpp
     src/app/AppControllerSegmentReview.cpp
+    src/app/AppControllerCornerAnalyzer.cpp
     src/app/AppController.cpp
     src/app/AppController.h
     src/main.cpp
@@ -215,6 +217,7 @@ qt_add_qml_module(flappedear_native
         qml/ComparisonDetailPanel.qml
         qml/ComparisonOverlayChart.qml
         qml/ComparisonOverlayMap.qml
+        qml/ComparisonSegmentPanel.qml
         qml/ComparisonLapDialog.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml

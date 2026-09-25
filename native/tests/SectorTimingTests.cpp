@@ -53,6 +53,7 @@ private slots:
     void gapsLeaveOnlyTheAffectedSectorUntimed();
     void gateCrossingAndGappedPartitionsAreNotComplete();
     void rejectsInvalidInputs();
+    void comparesSectorTimesBetweenTwoLaps();
 };
 
 void SectorTimingTests::completePartitionSumsToTheLapTime()
@@ -144,6 +145,47 @@ void SectorTimingTests::rejectsInvalidInputs()
     const auto empty = computeLapSectorTimes(approved, lapLength, {}, lapStart, lapEnd, reference);
     QVERIFY(empty.valid);
     QVERIFY(!empty.sectors[0].seconds);
+}
+
+void SectorTimingTests::comparesSectorTimesBetweenTwoLaps()
+{
+    // KAN-55: A minus B, from two laps' whole-lap results for the same
+    // approved revision. Lap A is the existing 20 m/s fixture (50 s lap); lap
+    // B is a faster, independently-projected 25 m/s lap (40 s), so the delta
+    // per sector is exactly predictable.
+    const auto approved = approvedOf({{0.0, 305.0}, {305.0, 700.0}, {700.0, lapLength}});
+    const auto timesA = computeLapSectorTimes(approved, lapLength, projectedLap(), lapStart, lapEnd, reference);
+    QVERIFY(timesA.valid && timesA.completePartition);
+
+    constexpr double lapEndB = lapStart + lapLength / 25.0; // 25 m/s
+    QVector<ProgressSegment> lapB(1);
+    for (double progress = 2.0; progress <= 998.0 + 1e-9; progress += 10.0)
+        lapB.last().samples.append({lapStart + progress / 25.0, progress, true});
+    const auto timesB = computeLapSectorTimes(approved, lapLength, lapB, lapStart, lapEndB, reference);
+    QVERIFY(timesB.valid && timesB.completePartition);
+
+    const auto id = timesA.sectors[0].segmentId;
+    const auto comparison = compareSectorTimes(timesA, timesB, id);
+    QVERIFY(comparison.valid);
+    QVERIFY(comparison.unavailableReason.isEmpty());
+    QVERIFY(comparison.secondsDelta.has_value());
+    QVERIFY2(std::abs(*comparison.secondsDelta - (*timesA.sectors[0].seconds - *timesB.sectors[0].seconds)) < 1e-9,
+        qPrintable(QString("delta=%1").arg(*comparison.secondsDelta)));
+    QVERIFY(*comparison.secondsDelta > 0.0); // A (slower, 20 m/s) took longer than B (25 m/s)
+
+    // A different approved revision (one more sector) is never compared.
+    const auto differentRevision = approvedOf({{0.0, 300.0}, {300.0, 305.0}, {305.0, 700.0}, {700.0, lapLength}});
+    const auto timesC = computeLapSectorTimes(differentRevision, lapLength, lapB, lapStart, lapEndB, reference);
+    const auto mismatched = compareSectorTimes(timesA, timesC, id);
+    QVERIFY(!mismatched.valid);
+    QCOMPARE(mismatched.unavailableReason, QString(sectorTimeDifferentSegmentOrRevision));
+
+    // A segment id absent from the (same-revision) result is never fabricated.
+    QVERIFY(!compareSectorTimes(timesA, timesB, "not-a-real-id").valid);
+    QCOMPARE(compareSectorTimes(timesA, timesB, "not-a-real-id").unavailableReason, QString(sectorTimeSegmentNotFound));
+
+    // Invalid input on either side withholds the whole comparison.
+    QVERIFY(!compareSectorTimes(LapSectorTimes{}, timesB, id).valid);
 }
 
 QTEST_GUILESS_MAIN(SectorTimingTests)

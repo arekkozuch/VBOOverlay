@@ -26,6 +26,10 @@ Rectangle {
     property real zoomEnd: totalMeters
     property real hoverDistanceMeters: -1
     readonly property bool zoomed: zoomStart > 1e-3 || zoomEnd < totalMeters - 1e-3
+    // KAN-55: toggles the channel-chart area for the Corner Analyzer
+    // (ComparisonSegmentPanel) -- shares this same zoomStart/zoomEnd/
+    // hoverDistanceMeters state, not a separate cursor.
+    property bool showingCornerAnalyzer: false
     // KAN-41: on a fresh pair (this document's persisted A/B just restored, or
     // freshly (re)opening the compare view), apply the persisted range/channel
     // selection instead of resetting to full range/defaults, once per such
@@ -206,6 +210,12 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
                 FeButton {
+                    objectName: "comparisonToggleCornerAnalyzer"
+                    compact: true
+                    text: root.showingCornerAnalyzer ? qsTr("← Channels") : qsTr("Corner Analyzer")
+                    onClicked: root.showingCornerAnalyzer = !root.showingCornerAnalyzer
+                }
+                FeButton {
                     objectName: "comparisonResetZoom"
                     visible: root.zoomed
                     compact: true
@@ -251,6 +261,7 @@ Rectangle {
                 }
             }
             RowLayout {
+                visible: !root.showingCornerAnalyzer
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
@@ -335,6 +346,14 @@ Rectangle {
                         font.pixelSize: 11
                     }
                 }
+            }
+            ComparisonSegmentPanel {
+                objectName: "comparisonSegmentPanel"
+                visible: root.showingCornerAnalyzer
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onRangeRequested: (start, end) => { root.zoomStart = start; root.zoomEnd = end; }
+                onHovered: meters => root.hoverDistanceMeters = meters
             }
         }
     }
