@@ -37,6 +37,7 @@
 #include "telemetry/SectorTiming.h"
 #include "telemetry/CornerSpeeds.h"
 #include "telemetry/BrakingMetrics.h"
+#include "telemetry/ExitMetrics.h"
 #include "project/EventProjectCodec.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -3842,6 +3843,21 @@ void TelemetryTests::timesApprovedSectorsForTheOpenLap()
         QVERIFY(!metrics.contains("peakDeceleration"));
         QCOMPARE(metrics.value("calculationAlgorithm").toString(), QString(brakingMetricsAlgorithm));
     }
+
+    // KAN-54: no throttle or acceleration channel means no pickup; the following
+    // interval is still timed from the projection, without any speed values.
+    const auto exits = controller.outingLapExitMetrics();
+    QCOMPARE(exits.size(), corners.size());
+    bool timedInterval = false;
+    for (const auto &value : exits) {
+        const auto exit = value.toMap();
+        QCOMPARE(exit.value("pickup").toMap().value("unavailableReason").toString(), QString(exitNoChannel));
+        QVERIFY(!exit.value("pickup").toMap().contains("progressMeters"));
+        QVERIFY(!exit.contains("exitSpeed"));
+        QVERIFY(!exit.contains("intervalEndSpeed"));
+        timedInterval |= exit.contains("elapsedSeconds") && exit.value("elapsedSeconds").toDouble() > 0.0;
+    }
+    QVERIFY(timedInterval);
 }
 
 void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()

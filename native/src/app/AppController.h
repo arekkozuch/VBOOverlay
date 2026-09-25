@@ -13,6 +13,7 @@
 #include "telemetry/SectorTiming.h"
 #include "telemetry/CornerSpeeds.h"
 #include "telemetry/BrakingMetrics.h"
+#include "telemetry/ExitMetrics.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -322,6 +323,8 @@ public:
     Q_INVOKABLE QVariantList outingLapCornerSpeeds() const;
     // KAN-53: braking point, time, distance and deceleration per approved corner.
     Q_INVOKABLE QVariantList outingLapBrakingMetrics() const;
+    // KAN-54: throttle pickup and the following-straight interval per approved corner.
+    Q_INVOKABLE QVariantList outingLapExitMetrics() const;
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QVariantMap outingLapSeries(
         const QString &channel, double startTime, double endTime, int maximumPoints) const;
