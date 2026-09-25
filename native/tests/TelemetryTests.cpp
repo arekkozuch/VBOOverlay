@@ -156,6 +156,7 @@ private slots:
     void acceptsM3SegmentationCornerAndTheoreticalBestWorkflow();
     void derivesTimeLossObservationsForComparisonPair();
     void ranksTimeLossesAndRecalculatesOnExclusion();
+    void navigatesFromRankedLossToCornerEvidence();
     void reviewsSegmentProposalsForTheOpenLap();
     void editsApprovedSegmentsWithUndo();
     void persistsSegmentationAcrossSaveRecoveryAndReopen();
@@ -4636,6 +4637,91 @@ void TelemetryTests::ranksTimeLossesAndRecalculatesOnExclusion()
         }(), 30000);
     QVERIFY(controller.outingTimeLossRanking().value("comparedLapCount").toInt() < ranking.value("comparedLapCount").toInt()
         || controller.outingTimeLossRanking().value("referenceLap").toMap() != reference);
+    QCOMPARE(warnings.size(), 0);
+}
+
+void TelemetryTests::navigatesFromRankedLossToCornerEvidence()
+{
+    // KAN-61: Day results -> Time losses -> a loss opens A (the loss's lap)
+    // against B (the reference) in the Corner Analyzer, focused and zoomed on
+    // the loss window. Lap A opens at the window with no video available
+    // (nothing blocks), and returning reopens the ranking on the same row.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("fastfirst.vbo"), second = directory.filePath("fastsecond.vbo");
+    QVERIFY(writeBytes(first, warpedRouteVbo(true)));
+    QVERIFY(writeBytes(second, warpedRouteVbo(false)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Navigation", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    QVERIFY(!approveAllSegmentsOnRun(controller, "fastfirst").isEmpty());
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 1100; height: 760; visible: true; "
+        "OutingLapPanel { objectName: \"outingRoot\"; anchors.fill: parent; visible: !appController.comparisonViewOpen } "
+        "ComparisonDetailPanel { objectName: \"comparisonRoot\"; anchors.fill: parent; visible: appController.comparisonViewOpen } }",
+        QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    const auto activate = [&](QQuickItem *item) { item->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); };
+
+    QQuickItem *open = nullptr;
+    QTRY_VERIFY((open = window->findChild<QQuickItem *>("openTimeLosses")) && open->isEnabled());
+    activate(open);
+    auto *dialog = window->findChild<QObject *>("timeLossDialog"); QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("visible").toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingTimeLossRanking().value("state").toString(), QString("ready"), 30000);
+    const auto ranking = controller.outingTimeLossRanking();
+    const auto losses = ranking.value("losses").toList();
+    QVERIFY(losses.size() >= 2);
+    // Pick a window that does not wrap the gate so its zoom range is simple.
+    int chosen = -1;
+    for (int i = 0; i < losses.size() && chosen < 0; ++i)
+        if (losses[i].toMap().value("endMeters").toDouble() > losses[i].toMap().value("startMeters").toDouble() + 1.0) chosen = i;
+    QVERIFY(chosen >= 0);
+    const auto loss = losses[chosen].toMap();
+    auto *list = window->findChild<QQuickItem *>("timeLossList"); QVERIFY(list);
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, chosen)) && row);
+    activate(row);
+
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QVERIFY(controller.comparisonViewOpen());
+    QTRY_VERIFY(controller.comparisonPairReady());
+    const auto pair = controller.comparisonSlots();
+    QCOMPARE(pair[0].toMap().value("lap").toMap().value("reference").toMap(), loss.value("lapReference").toMap());
+    QCOMPARE(pair[1].toMap().value("lap").toMap().value("reference").toMap(), ranking.value("referenceLap").toMap());
+    auto *segmentPanel = window->findChild<QObject *>("comparisonSegmentPanel"); QVERIFY(segmentPanel);
+    auto *comparisonRoot = window->findChild<QObject *>("comparisonRoot"); QVERIFY(comparisonRoot);
+    QTRY_VERIFY(segmentPanel->property("visible").toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(segmentPanel->property("selectedSegmentId").toString(), loss.value("segmentId").toString(), 20000);
+    QTRY_VERIFY(std::abs(comparisonRoot->property("zoomStart").toDouble() - loss.value("startMeters").toDouble()) < 1e-6
+        && std::abs(comparisonRoot->property("zoomEnd").toDouble() - loss.value("endMeters").toDouble()) < 1e-6);
+    QTRY_VERIFY(controller.comparisonFocusSegmentId().isEmpty());
+
+    // Lap A at the loss window; this fixture has no video, which must not block it.
+    QQuickItem *openLapA = nullptr;
+    QTRY_VERIFY((openLapA = window->findChild<QQuickItem *>("cornerAnalyzerOpenLapA")) && openLapA->isVisible());
+    activate(openLapA);
+    QTRY_COMPARE(controller.selectedOutingLap().value("reference").toMap(), loss.value("lapReference").toMap());
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    QVERIFY(!controller.outingLapVideoAvailable());
+    const auto lapStart = controller.selectedOutingLap().value("startTime").toDouble();
+    const auto lapEnd = controller.selectedOutingLap().value("endTime").toDouble();
+    QVERIFY(controller.outingLapCursor() > lapStart + 0.5 && controller.outingLapCursor() < lapEnd);
+
+    // Back to the comparison, then back to Day results: the ranking reopens on the same row.
+    controller.closeOutingLap();
+    QVERIFY(controller.comparisonViewOpen());
+    controller.setComparisonViewOpen(false);
+    QTRY_VERIFY(dialog->property("visible").toBool());
+    QTRY_COMPARE(list->property("currentIndex").toInt(), chosen);
     QCOMPARE(warnings.size(), 0);
 }
 

@@ -17,13 +17,31 @@ Dialog {
     standardButtons: Dialog.Close
     readonly property var ranking: appController.outingTimeLossRanking
     signal lossSelected(var loss)
+    // KAN-61: the loss last opened, so returning from its evidence shows the
+    // same row again (matched by lap and segment, since a recalculation can
+    // reorder the list).
+    property var returnKey: null
+    function lossKey(loss) { return JSON.stringify(loss.lapReference) + "|" + loss.segmentId; }
+    function restoreSelection() {
+        if (!root.returnKey) return;
+        const list = root.ranking.losses || [];
+        const index = list.findIndex(loss => root.lossKey(loss) === root.returnKey);
+        losses.currentIndex = index;
+        if (index >= 0) losses.positionViewAtIndex(index, ListView.Center);
+    }
     function calculateIfNeeded() {
         if (root.visible && ["idle", "error"].indexOf(root.ranking.state) >= 0) appController.requestOutingTheoreticalBest();
     }
-    onOpened: root.calculateIfNeeded()
+    onOpened: {
+        root.calculateIfNeeded();
+        Qt.callLater(root.restoreSelection);
+    }
     // Exclusions, a new reference or edited segments invalidate the result;
     // recalculate while the dialog is showing.
-    onRankingChanged: if (root.ranking.state === "idle") Qt.callLater(root.calculateIfNeeded)
+    onRankingChanged: {
+        if (root.ranking.state === "idle") Qt.callLater(root.calculateIfNeeded);
+        else if (root.ranking.state === "ready") Qt.callLater(root.restoreSelection);
+    }
 
     function roleText(loss) {
         if (loss.role === "continuation")
@@ -119,7 +137,10 @@ Dialog {
                     required property int index
                     objectName: "timeLoss" + index
                     width: losses.width - 18
+                    highlighted: ListView.isCurrentItem
                     onClicked: root.lossSelected(lossRow.modelData)
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Open this lap against the reference in the Corner Analyzer, zoomed to this segment")
                     contentItem: RowLayout {
                         spacing: 8
                         Label { text: lossRow.index + 1; color: "#657386"; Layout.preferredWidth: 28 }
