@@ -78,6 +78,7 @@ private slots:
     void separatesSignedIncrementFromCumulativeDelta();
     void leavesGappedWindowUntimedWithoutBridging();
     void rejectsLapsFromAnotherRevision();
+    void ranksLossesAcrossLapsAgainstReference();
 };
 
 void TimeLossTests::incrementsTileTheLapDeltaWithContinuations()
@@ -164,6 +165,46 @@ void TimeLossTests::rejectsLapsFromAnotherRevision()
     QVERIFY(!result.valid);
     QCOMPARE(result.unavailableReason, QString(timeLossDifferentSegmentOrRevision));
     QVERIFY(!computeTimeLossObservations({}, lapLength, {}, lapStart, {}, lapStart).valid);
+}
+
+void TimeLossTests::ranksLossesAcrossLapsAgainstReference()
+{
+    const auto approved = approvedOf({{TrackSegmentType::Corner, 0, 300}, {TrackSegmentType::Straight, 300, 700},
+        {TrackSegmentType::Corner, 700, 1000}});
+    const auto lap = [&](const std::function<double(double)> &elapsedAt, const int number,
+                         const double holeFrom = -1.0, const double holeTo = -1.0) {
+        auto times = computeLapSectorTimes(approved, lapLength, projectedLap(elapsedAt, holeFrom, holeTo),
+            lapStart, lapStart + elapsedAt(lapLength), QJsonObject{{"lap", number}, {"startTime", lapStart}});
+        return TimedLapSectors{times, lapStart};
+    };
+    const auto reference = lap(constantSpeed(25.0), 0);   // 12 / 16 / 12 s
+    const auto slow = lap(constantSpeed(20.0), 1);        // 15 / 20 / 15 s: +3, +4, +3
+    const auto mixed = lap(quickThenSlow, 2);             // 12 / 20 / 18 s: 0, +4, +6
+    const auto gapped = lap(constantSpeed(20.0), 3, 400.0, 500.0); // straight untimed
+    const auto ranking = rankTimeLosses(approved, lapLength, {reference, slow, mixed, gapped}, reference);
+    QVERIFY(ranking.valid);
+    QCOMPARE(ranking.referenceLap, reference.times.lapReference);
+    QCOMPARE(ranking.comparedLapCount, 3); // the reference lap itself is skipped
+    QCOMPARE(ranking.untimedWindowCount, 1);
+    // slow: 3; mixed: 2 (its first corner ties, a zero increment is not a loss); gapped: 2.
+    QCOMPARE(ranking.observationCount, 7);
+    QVERIFY(std::abs(ranking.losses[0].lossSeconds - 6.0) < 1e-6);
+    QCOMPARE(ranking.losses[0].lapReference.value("lap").toInt(), 2);
+    QCOMPARE(ranking.losses[0].window.role, QString(timeLossRoleCorner));
+    for (qsizetype i = 1; i < ranking.losses.size(); ++i)
+        QVERIFY(ranking.losses[i - 1].lossSeconds >= ranking.losses[i].lossSeconds);
+    for (const auto &loss : ranking.losses) {
+        QVERIFY(loss.lossSeconds > 0.0);
+        QVERIFY(std::abs(loss.coverageLap - 1.0) < 0.05 && std::abs(loss.coverageReference - 1.0) < 0.05);
+    }
+    // Equal losses are ordered by track position.
+    QVERIFY(std::abs(ranking.losses[1].lossSeconds - 4.0) < 1e-6 && std::abs(ranking.losses[2].lossSeconds - 4.0) < 1e-6);
+    QVERIFY(ranking.losses[1].window.startProgressMeters <= ranking.losses[2].window.startProgressMeters);
+
+    const auto truncated = rankTimeLosses(approved, lapLength, {slow, mixed}, reference, 2);
+    QCOMPARE(truncated.losses.size(), 2);
+    QCOMPARE(truncated.observationCount, 5);
+    QVERIFY(!rankTimeLosses(approved, lapLength, {slow}, TimedLapSectors{}).valid);
 }
 
 QTEST_GUILESS_MAIN(TimeLossTests)

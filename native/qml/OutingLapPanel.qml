@@ -18,6 +18,7 @@ Rectangle {
     ComparisonLapDialog { id: comparisonLapDialog }
     OutingProgressionDialog { id: progressionDialog }
     TheoreticalBestDialog { id: theoreticalBestDialog }
+    TimeLossDialog { id: timeLossDialog }
     Dialog {
         id: rankingDialog
         objectName: "outingRankingDialog"
@@ -399,6 +400,14 @@ Rectangle {
                 onClicked: theoreticalBestDialog.open()
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Fastest recorded time per approved sector across this group, with the lap each came from")
+            }
+            FeButton {
+                objectName: "openTimeLosses"
+                text: qsTr("Time losses…")
+                enabled: root.ranking.state === "available"
+                onClicked: timeLossDialog.open()
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Largest observed losses of each eligible lap against the group's best lap, per approved segment")
             }
             FeButton {
                 objectName: "openOutingRankingDetails"
