@@ -19,6 +19,7 @@ results belong in their Jira completion records.
 | M1 steps 009–016: identity, exclusions, rankings, metadata, progression, persistent decisions and automatic GPS grouping | PRs #23–#29 plus owner-local commit `ddb095a514c06cd7ad090257b9a74108e85d810d` | [Local private-recording evidence](kan26-local-validation.md), separately from hosted synthetic coverage |
 | Step 017: complete video-free result states and bounded retry | [PR #31](https://github.com/arekkozuch/VBOOverlay/pull/31), merge `f2f1af0262e6ed20d2426aece241e10e77b33912` | [PR CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34773978691) and [main CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34774340031), macOS Debug and Release |
 | Readable channel selectors | [PR #32](https://github.com/arekkozuch/VBOOverlay/pull/32), merge `5d71a1a5e5d31579102e93b6912838a122baa763` | [PR CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34775248771); [main CI](https://github.com/arekkozuch/VBOOverlay/actions/runs/34775598217); exact acceptance matrix in [KAN-28 record](kan28-m1-acceptance.md) |
+| M2 steps 019–031: independent A/B, shared track-progress axis, delta/channel/map comparison, optional video linkage, missing-data context and persistence | PRs #37–#41 plus owner-local commits `080d4ea`, `143303c` | Exact acceptance matrix, new fixture coverage and measured-cycle reforecast in [KAN-42 record](kan42-m2-acceptance.md); PR CI links recorded per-task in Jira |
 
 ## Evidence levels
 
@@ -118,7 +119,7 @@ elapsed-time guarantees and are not divided by agent count.
 | --- | --- | --- | --- |
 | M0 — regain a reliable baseline | Existing outing workflow integrated; master vision/status truthful | KAN-5 and KAN-12–KAN-18: C01–C03 verified, descendant/parser/coordinate fixes, sync-bound verification and naming; C07 retained in M5 | 1–3 working days for the original narrower audit slice |
 | M1 — day results | Best eligible run/day, run progression, notes/conditions and exclusions | Reuse outing service; compatible layout/direction/gate groups; missing files and GPS incomplete states; persistence/recovery | 2–4 days |
-| M2 — comparison evidence | Independent A/B, distance delta, speed/available channels, two traces, common cursor | M1; deterministic shared track-progress alignment including crossings/gaps; no editor mutation | 6–10 days |
+| M2 — comparison evidence | Independent A/B, distance delta, speed/available channels, two traces, common cursor | M1; deterministic shared track-progress alignment including crossings/gaps; no editor mutation | 6–10 days (original estimate); **measured ~11.4 elapsed days, see [KAN-42 reforecast](kan42-m2-acceptance.md#measured-m2-cycle-time-and-reforecast)** |
 | M3 — corner analysis | Automatic sector/corner proposals with review/editing, entry/apex/exit/braking metrics, sector theoretical | M2; stable editable boundaries, metric prerequisites/provenance and downstream straight effects | 7–12 days |
 | M4 — useful conclusions | Ranked losses, consistency, G-G, available thermal/HR summary and clickable report | M3; non-overlapping losses, sample counts, missing-data semantics, measured/inferred distinction | 5–9 days |
 | M5 — complete core acceptance | A tested Mac app covering the core product journey and overlay export | M4 + C04–C08; full-day/private-video walkthrough, reopen/recovery, installed candidate, short/lap/full exports | 4–7 days plus external access |
@@ -153,9 +154,20 @@ remains low-confidence until M2 demonstrates the harder analysis work and the
 private acceptance window is exercised. The target does not authorize dropping
 features or counting skipped physical checks as passed.
 
-Next: [KAN-29], step 019, independent A/B selection. Continue numbered dependency
-order and reforecast at [KAN-42] using actual M2 results. The recorded UX tickets
-remain backlog work, as requested. No unattended execution between turns is implied.
+M2 (steps 019–031, [KAN-29]–[KAN-41]) is complete and merged. Its measured
+cycle time and reforecast are recorded in the
+[KAN-42 acceptance record](kan42-m2-acceptance.md#measured-m2-cycle-time-and-reforecast):
+M2 took roughly 11.4 elapsed days for 13 tickets, an order of magnitude
+slower than the capacity scenarios below (themselves modeled from M0/M1's
+much faster synthetic-only cycles), and close to M2's own original 6–10-day
+human estimate. At that observed rate, the 68 numbered tasks remaining after
+step 032 (033–100, M3 through M6) would take on the order of 60 elapsed
+days — the 27 September planning target is not achievable for full F00–F20
+scope on this evidence. Whether to start M3 (step 033, [KAN-43]), narrow
+scope, or hold at the current baseline is the owner's decision with this
+evidence in hand; this ledger does not make that call. The recorded UX
+tickets remain backlog work, as requested. No unattended execution between
+turns is implied.
 
 The owner's near-term benefit arrives incrementally: integrated PR #11 gives day/lap inspection;
 M1 gives day results; M2 gives actionable comparison; M4 gives the original
