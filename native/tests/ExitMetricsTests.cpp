@@ -196,6 +196,18 @@ void ExitMetricsTests::definesTheDownstreamIntervalExplicitly()
     QCOMPARE(computeExitMetrics(lapLength, toGate, firstId(toGate), projectedLap(), session).downstreamUnavailableReason,
         QString(exitIncompleteCoverage));
 
+    // A corner ending at the gate searches for pickup up to the lap's timed end,
+    // even though the projection stops short of the gate.
+    const auto lastCorner = approvedOf({{TrackSegmentType::Corner, 900.0, lapLength}});
+    const auto shortEnd = projectedLap(49.7, 51.0);
+    QCOMPARE(computeExitMetrics(lapLength, lastCorner, firstId(lastCorner), shortEnd, measuredSession(960))
+                 .pickup.unavailableReason,
+        QString(exitIncompleteCoverage));
+    const auto lastPickup = computeExitMetrics(lapLength, lastCorner, firstId(lastCorner), shortEnd, measuredSession(960), 50.0);
+    QVERIFY2(lastPickup.pickup.unavailableReason.isEmpty(), qPrintable(lastPickup.pickup.unavailableReason));
+    QVERIFY(lastPickup.pickup.progressMeters);
+    QVERIFY(*lastPickup.pickup.progressMeters > 950.0 && *lastPickup.pickup.progressMeters < 965.0);
+
     const auto late = approvedOf({{TrackSegmentType::Corner, 900.0, 950.0}});
     QCOMPARE(computeExitMetrics(lapLength, late, firstId(late), projectedLap(), session, 50.0).downstreamUnavailableReason,
         QString(exitCrossesGate));

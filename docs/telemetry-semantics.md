@@ -146,7 +146,9 @@ Throttle pickup (KAN-54) is measured only from the recorded throttle channel;
 without one, a positive longitudinal-acceleration onset is reported and
 labelled inferred. Exit effects are compared over an explicit interval (the
 adjoining approved straight, or 200 m after the segment) and no cause is
-attributed to a difference.
+attributed to a difference. A segment or interval ending at the gate ends at
+the lap's timed end. A segment starting exactly at the gate is not yet bounded
+by the lap's timed start and reports `incompleteCoverage` for pickup.
 
 ## Synchronization transforms and numeric bounds
 

@@ -151,7 +151,8 @@ ExitMetrics computeExitMetrics(const double axisLengthMeters, const ApprovedSegm
         pickup.unit = channel.unit;
         const bool declared = !channel.unit.trimmed().isEmpty();
         const auto fromTime = timeAtProgress(lapTrace, start);
-        const auto toTime = timeAtProgress(lapTrace, end);
+        // A segment ending at the gate ends at the lap's timed end; the projection never reaches it exactly.
+        const auto toTime = end >= length - boundaryEpsilon && lapEndTime ? lapEndTime : timeAtProgress(lapTrace, end);
         if (declared && channel.unit.trimmed().compare(pickup.threshold.unit.trimmed(), Qt::CaseInsensitive) != 0) {
             pickup.unavailableReason = exitUnitMismatch;
         } else if (!fromTime || !toTime || !(*toTime > *fromTime)) {
