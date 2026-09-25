@@ -126,6 +126,39 @@ detection (KAN-44), review/editing UI (KAN-45+) and Corner Analyzer metrics
 (KAN-46, KAN-51-55) are separate, later tickets -- this task is the data
 model and its validation only.
 
+## Smoothed heading and curvature on track progress (KAN-44)
+
+`computeTrackFeatures` (`native/src/telemetry/TrackProgress.h/.cpp`) is a
+pure function of the existing shared `ProgressAxis` (KAN-31): it never reads
+or produces a per-lap projection. Investigation before implementing this
+confirmed `buildProgressAxis`'s only ever accepts a `referenceEligible`
+(gap-free, continuous) lap trace -- eligibility screening already happens a
+layer earlier, in lap-timing -- so there is no per-lap gap concept for this
+computation to preserve. "Preserved gaps" is satisfied structurally: the
+function only ever reads `axis.points`/`axis.cumulative`/`axis.spacingMeters`
+and never writes back to them or to any telemetry channel.
+
+Heading at each axis point is the circular mean (mean of unit tangent
+vectors, extending the existing `axisTangent` helper used by lap-trace
+projection) of the axis's direction of travel within an explicit
+`smoothingMeters` radius on each side, wrapping around the closed loop --
+never a naive mean of raw angles, which breaks across the +-pi wrap.
+Curvature is the signed angular change between adjacent smoothed headings
+divided by the axis's uniform point spacing; positive means a left turn.
+
+Three new `TrackProgressTests` regressions cover the acceptance criterion
+directly: the hairpin fixture's two exactly-colinear straights read as
+(numerically) exactly zero curvature while its two ~180-degree connectors
+spike well above a generous threshold regardless of exact resampling-index
+drift; a real closed-circuit fixture's convex ellipse reads a consistently
+signed (never sign-flipping) curvature at ten points spread around the whole
+loop; and invalid inputs (an invalid axis, non-positive, infinite or NaN
+smoothing scale) are rejected without touching the axis geometry the
+features were derived from.
+
+Automatic corner/sector *proposals* built from this feature data, and any
+review/editing UI, remain separate, later M3 tickets (KAN-45 onward).
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

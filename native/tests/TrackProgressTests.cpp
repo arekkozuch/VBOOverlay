@@ -11,6 +11,7 @@
 
 #include <QtTest>
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 using namespace FlappedEar;
@@ -113,6 +114,9 @@ private slots:
     void headingRejectsOppositeDirectionParallelSection();
     void outlierAndGapBreakSegmentsWithoutBridging();
     void deltaSeriesOnlyCoversSharedValidRange();
+    void marksStraightsWithZeroCurvatureAndCornersWithASpike();
+    void producesConsistentlySignedCurvatureOnAConvexLoop();
+    void rejectsInvalidSmoothingAndNeverModifiesTheAxis();
 };
 
 void TrackProgressTests::buildsAxisAnchoredAtTheGate()
@@ -293,6 +297,90 @@ void TrackProgressTests::deltaSeriesOnlyCoversSharedValidRange()
     }
     QVERIFY(sawNearFifty);
     QVERIFY(sawNearHundred);
+}
+
+void TrackProgressTests::marksStraightsWithZeroCurvatureAndCornersWithASpike()
+{
+    // KAN-44: the hairpin fixture's two straights are exactly colinear by
+    // construction and its two connectors turn the path ~180 degrees over
+    // only a few meters -- the sharpest, most unambiguous "predictable
+    // feature" case: zero on a straight, a real spike at a real corner.
+    const auto axis = buildHairpinAxis();
+    QVERIFY(axis.valid);
+    const auto features = computeTrackFeatures(axis, 6.0);
+    QVERIFY(features.valid);
+    QCOMPARE(features.samples.size(), axis.points.size());
+    const auto n = features.samples.size();
+
+    // Deep inside the outbound straight (heading pointing east, +x): both
+    // heading and curvature must be the exact straight-line values -- these
+    // axis points are exactly colinear, so smoothing changes nothing.
+    constexpr int outboundIndex = 25;
+    QVERIFY(std::abs(features.samples[outboundIndex].headingRadians) < 1e-6);
+    QVERIFY(std::abs(features.samples[outboundIndex].curvaturePerMeter) < 1e-6);
+
+    // Deep inside the return straight (heading pointing west, -x).
+    constexpr int returnIndex = 75;
+    QVERIFY(std::abs(std::abs(features.samples[returnIndex].headingRadians) - std::numbers::pi) < 1e-6);
+    QVERIFY(std::abs(features.samples[returnIndex].curvaturePerMeter) < 1e-6);
+
+    // Generous windows around where the resampled axis places each
+    // connector (progress ~100m and ~204-208m of the ~208m loop, i.e. axis
+    // indices near 50 and near the 104/0 wrap at ~2m spacing) -- wide enough
+    // to tolerate exact resampling-index drift without including so much of
+    // either straight that a real spike could be diluted away.
+    double cornerMax = 0.0;
+    for (int index = 40; index <= 60; ++index)
+        cornerMax = std::max(cornerMax, std::abs(features.samples[index % n].curvaturePerMeter));
+    for (int index = 92; index <= 112; ++index)
+        cornerMax = std::max(cornerMax, std::abs(features.samples[index % n].curvaturePerMeter));
+    QVERIFY2(cornerMax > 0.2, "the sharp connector must show a real curvature spike");
+}
+
+void TrackProgressTests::producesConsistentlySignedCurvatureOnAConvexLoop()
+{
+    // routeVbo()'s default (reverse=false) ellipse is traced counterclockwise
+    // in the local east/north frame; a convex loop traversed consistently in
+    // one rotational direction never reverses its turning direction, so
+    // curvature must stay positive (left-turning) everywhere it is sampled,
+    // not just on average -- this is what "noise ... produce[s] predictable
+    // features" means for a real closed track shape.
+    const auto fixture = buildRouteFixture();
+    QVERIFY(fixture.axis.valid);
+    const auto features = computeTrackFeatures(fixture.axis, 6.0);
+    QVERIFY(features.valid);
+    QCOMPARE(features.samples.size(), fixture.axis.points.size());
+
+    const auto n = features.samples.size();
+    for (int tenth = 0; tenth < 10; ++tenth) {
+        const auto index = (n * tenth) / 10;
+        QVERIFY2(features.samples[index].curvaturePerMeter > 0.0,
+            qPrintable(QString("curvature at index %1 (progress %2 m) should be positive")
+                .arg(index).arg(features.samples[index].progressMeters)));
+    }
+}
+
+void TrackProgressTests::rejectsInvalidSmoothingAndNeverModifiesTheAxis()
+{
+    const auto axis = buildHairpinAxis();
+    QVERIFY(axis.valid);
+    const auto snapshotPoints = axis.points;
+    const auto snapshotLength = axis.lengthMeters;
+
+    QVERIFY(!computeTrackFeatures(ProgressAxis{}, 6.0).valid); // invalid axis
+    QVERIFY(!computeTrackFeatures(axis, 0.0).valid); // zero scale
+    QVERIFY(!computeTrackFeatures(axis, -1.0).valid); // negative scale
+    QVERIFY(!computeTrackFeatures(axis, std::numeric_limits<double>::infinity()).valid);
+    QVERIFY(!computeTrackFeatures(axis, std::numeric_limits<double>::quiet_NaN()).valid);
+
+    const auto features = computeTrackFeatures(axis, 6.0);
+    QVERIFY(features.valid);
+    QCOMPARE(features.smoothingMeters, 6.0);
+
+    // A pure function of the axis: deriving features must never touch the
+    // geometry (or any telemetry channel) they were derived from.
+    QCOMPARE(axis.points, snapshotPoints);
+    QCOMPARE(axis.lengthMeters, snapshotLength);
 }
 
 QTEST_GUILESS_MAIN(TrackProgressTests)
