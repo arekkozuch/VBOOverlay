@@ -36,6 +36,7 @@ void AppController::initializeOutingTheoreticalBest()
         if (result.request != m_theoreticalBestRequest) return; // stale: outing laps changed or a new request started
         m_theoreticalBestBest = {};
         m_theoreticalBestActual.reset();
+        m_theoreticalBestPopulation.clear();
         if (!result.error.isEmpty()) {
             m_theoreticalBestState = QStringLiteral("error");
             m_theoreticalBestMessage = result.error;
@@ -49,6 +50,9 @@ void AppController::initializeOutingTheoreticalBest()
             m_theoreticalBestBest = std::move(result.best);
             m_theoreticalBestActual = std::move(result.actualBest);
             m_theoreticalBestCanonicalRunId = result.canonicalRunId;
+            m_theoreticalBestPopulation = std::move(result.population);
+            m_theoreticalBestApproved = std::move(result.approved);
+            m_theoreticalBestAxisLength = result.axisLengthMeters;
         }
         emit outingTheoreticalBestChanged();
     });
@@ -63,6 +67,7 @@ void AppController::initializeOutingTheoreticalBest()
         m_theoreticalBestMessage.clear();
         m_theoreticalBestBest = {};
         m_theoreticalBestActual.reset();
+        m_theoreticalBestPopulation.clear();
         emit outingTheoreticalBestChanged();
     };
     connect(this, &AppController::outingLapsChanged, this, invalidate);
@@ -124,6 +129,52 @@ QVariantMap AppController::outingTheoreticalBest() const
     }
     result.insert("revision", m_theoreticalBestBest.stamp.revision);
     result.insert("trackConfigurationReference", m_theoreticalBestBest.stamp.trackConfigurationReference);
+    return result;
+}
+
+QVariantMap AppController::outingTimeLossRanking() const
+{
+    QVariantMap result{{"state", m_theoreticalBestState}, {"message", m_theoreticalBestMessage}};
+    if (m_theoreticalBestState != "ready") return result;
+    if (!m_theoreticalBestActual) {
+        result.insert("state", QStringLiteral("unavailable"));
+        result.insert("message", QStringLiteral("The group's best lap could not be timed against the approved segments."));
+        return result;
+    }
+    const TimedLapSectors reference{*m_theoreticalBestActual,
+        m_theoreticalBestActual->lapReference.value("startTime").toDouble()};
+    const auto ranking = rankTimeLosses(m_theoreticalBestApproved, m_theoreticalBestAxisLength,
+        m_theoreticalBestPopulation, reference);
+    if (!ranking.valid) {
+        result.insert("state", QStringLiteral("unavailable"));
+        result.insert("message", ranking.unavailableReason);
+        return result;
+    }
+    QVariantList losses;
+    for (const auto &loss : ranking.losses) {
+        const auto &window = loss.window;
+        QVariantMap row{{"lossSeconds", loss.lossSeconds}, {"segmentId", window.segmentId}, {"name", window.name},
+            {"type", window.type}, {"role", window.role}, {"startMeters", window.startProgressMeters},
+            {"endMeters", window.endProgressMeters}, {"lapReference", loss.lapReference.toVariantMap()},
+            {"lapLabel", outingLapLabel(loss.lapReference)}, {"coverageLap", loss.coverageLap},
+            {"coverageReference", loss.coverageReference}};
+        if (!window.cornerSegmentId.isEmpty()) {
+            row.insert("cornerSegmentId", window.cornerSegmentId);
+            for (const auto &candidate : m_theoreticalBestBest.sectors)
+                if (candidate.segmentId == window.cornerSegmentId) row.insert("cornerName", candidate.name);
+        }
+        if (window.cumulativeAtStartSeconds) row.insert("cumulativeAtStartSeconds", *window.cumulativeAtStartSeconds);
+        if (window.cumulativeAtEndSeconds) row.insert("cumulativeAtEndSeconds", *window.cumulativeAtEndSeconds);
+        losses.append(row);
+    }
+    result.insert("losses", losses);
+    result.insert("algorithm", QString::fromLatin1(timeLossAlgorithm));
+    result.insert("referenceLabel", outingLapLabel(ranking.referenceLap));
+    result.insert("referenceLap", ranking.referenceLap.toVariantMap());
+    result.insert("observationCount", ranking.observationCount);
+    result.insert("comparedLapCount", ranking.comparedLapCount);
+    result.insert("untimedWindowCount", ranking.untimedWindowCount);
+    result.insert("revision", ranking.stamp.revision);
     return result;
 }
 
@@ -278,10 +329,13 @@ AppController::TheoreticalBestResult AppController::computeOutingTheoreticalBest
             const auto trace = projectLapTrace(axis, *currentSession, row.start, row.end, cancelled);
             populationTimes.append(
                 computeLapSectorTimes(approved, axis.lengthMeters, trace, row.start, row.end, row.reference));
+            result.population.append({populationTimes.last(), row.start});
             if (!actualBestReference.isEmpty() && row.reference == actualBestReference)
                 result.actualBest = populationTimes.last();
         }
         result.best = computeTheoreticalBest(approved, populationTimes);
+        result.approved = approved;
+        result.axisLengthMeters = axis.lengthMeters;
     } catch (const OperationCancelled &) {
         result.error = QStringLiteral("Theoretical best calculation was cancelled.");
     } catch (const std::exception &error) {

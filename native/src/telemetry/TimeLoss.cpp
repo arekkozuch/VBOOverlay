@@ -95,4 +95,48 @@ TimeLossObservations computeTimeLossObservations(const ApprovedSegmentation &app
     return result;
 }
 
+TimeLossRanking rankTimeLosses(const ApprovedSegmentation &approved, const double axisLengthMeters,
+    const QVector<TimedLapSectors> &laps, const TimedLapSectors &reference, const qsizetype maximumResults)
+{
+    TimeLossRanking result;
+    if (!reference.times.valid || reference.times.lapReference.isEmpty()) {
+        result.unavailableReason = timeLossNoReference;
+        return result;
+    }
+    if (!approved.valid || approved.revision.isEmpty() || approved.segments.isEmpty()) {
+        result.unavailableReason = QStringLiteral("noApprovedSegmentation");
+        return result;
+    }
+    result.stamp = segmentationResultStamp(approved, timeLossAlgorithm);
+    result.referenceLap = reference.times.lapReference;
+    result.valid = true;
+    const auto coverage = [](const LapSectorTimes &times, const QString &segmentId) {
+        const auto *sector = sectorById(times, segmentId);
+        if (!sector || sector->lengthMeters <= 0.0) return 0.0;
+        return std::clamp(sector->coveredMeters / sector->lengthMeters, 0.0, 1.0);
+    };
+    for (const auto &lap : laps) {
+        if (lap.times.lapReference == reference.times.lapReference) continue;
+        const auto observations = computeTimeLossObservations(
+            approved, axisLengthMeters, lap.times, lap.startTime, reference.times, reference.startTime);
+        if (!observations.valid) continue;
+        ++result.comparedLapCount;
+        for (const auto &window : observations.windows) {
+            if (!window.incrementSeconds) { ++result.untimedWindowCount; continue; }
+            if (*window.incrementSeconds <= 0.0) continue;
+            result.losses.append({lap.times.lapReference, window, *window.incrementSeconds,
+                coverage(lap.times, window.segmentId), coverage(reference.times, window.segmentId)});
+        }
+    }
+    result.observationCount = result.losses.size();
+    std::sort(result.losses.begin(), result.losses.end(), [](const RankedTimeLoss &left, const RankedTimeLoss &right) {
+        if (left.lossSeconds != right.lossSeconds) return left.lossSeconds > right.lossSeconds;
+        if (left.window.startProgressMeters != right.window.startProgressMeters)
+            return left.window.startProgressMeters < right.window.startProgressMeters;
+        return left.lapReference.value("startTime").toDouble() < right.lapReference.value("startTime").toDouble();
+    });
+    if (maximumResults >= 0 && result.losses.size() > maximumResults) result.losses.resize(maximumResults);
+    return result;
+}
+
 } // namespace FlappedEar

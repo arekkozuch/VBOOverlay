@@ -18,7 +18,13 @@ Dialog {
     standardButtons: Dialog.Close
     readonly property var theoretical: appController.outingTheoreticalBest
     readonly property var actualBest: root.theoretical.actualBest || null
-    onOpened: if (["idle", "error"].indexOf(root.theoretical.state) >= 0) appController.requestOutingTheoreticalBest()
+    function calculateIfNeeded() {
+        if (root.visible && ["idle", "error"].indexOf(root.theoretical.state) >= 0) appController.requestOutingTheoreticalBest();
+    }
+    onOpened: root.calculateIfNeeded()
+    // Exclusions, a new best lap or edited segments invalidate the result;
+    // recalculate while the dialog is showing.
+    onTheoreticalChanged: if (root.theoretical.state === "idle") Qt.callLater(root.calculateIfNeeded)
 
     function duration(seconds) {
         if (seconds === null || seconds === undefined || !isFinite(seconds)) return "—";

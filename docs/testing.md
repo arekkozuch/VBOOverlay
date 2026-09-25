@@ -679,6 +679,35 @@ windows both lose and gain more than 0.5 s, that increments sum to the lap
 delta within 10 ms, and that windows are in order, do not overlap and have a
 continuous running delta. Synthetic only.
 
+## Ranked time losses (KAN-60)
+
+`rankTimeLosses` (`TimeLoss.h/.cpp`) compares every lap with a reference lap,
+one KAN-59 window per approved segment. Each positive increment is one
+observed loss. Gains, zero increments and the reference lap itself are left
+out. Windows without full coverage on either lap are counted
+(`untimedWindowCount`) but not ranked. Losses are sorted largest first. Ties
+are broken by track position, then by lap start. At most 50 are returned,
+and `observationCount` is the total before truncation.
+
+Day results → **Time losses…** (`TimeLossDialog.qml`) shows
+`AppController::outingTimeLossRanking`. It uses the same background
+calculation as the theoretical best: every eligible lap of the comparison
+group is timed on the canonical axis against the group's best lap. Each row
+shows the loss, the segment and its role (a continuation names its corner),
+the compared lap and the window's coverage on both laps. The header names
+the reference lap and the counts. The method text says that an observed
+loss is not a guaranteed or necessarily safe gain. Exclusions, a new best
+lap, edited segments or document changes invalidate the result, and an open
+dialog (either one) recalculates.
+
+`TimeLossTests::ranksLossesAcrossLapsAgainstReference` checks the order, ties,
+the omission of gains and of the reference lap, untimed windows, truncation
+and a missing reference. `TelemetryTests::ranksTimeLossesAndRecalculatesOnExclusion`
+opens the dialog on the KAN-58 two-run fixture and checks the ranked rows,
+the reference label and the disclaimer. It then excludes the top loss's lap
+and checks that the open dialog recalculates without it, with no QML
+warnings. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

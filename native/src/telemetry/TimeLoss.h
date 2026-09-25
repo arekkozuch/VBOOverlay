@@ -66,4 +66,41 @@ inline constexpr auto timeLossDifferentSegmentOrRevision = "differentSegmentOrRe
 [[nodiscard]] TimeLossObservations computeTimeLossObservations(const ApprovedSegmentation &approved,
     double axisLengthMeters, const LapSectorTimes &a, double lapStartA, const LapSectorTimes &b, double lapStartB);
 
+// A lap's sector times together with its timed start.
+struct TimedLapSectors {
+    LapSectorTimes times;
+    double startTime = 0.0;
+};
+
+// One observed loss: a window where `lapReference` took longer than the
+// reference lap.
+struct RankedTimeLoss {
+    QJsonObject lapReference;
+    TimeLossWindow window;
+    double lossSeconds = 0.0;
+    double coverageLap = 0.0;       // covered fraction of the window, 0..1
+    double coverageReference = 0.0;
+};
+
+struct TimeLossRanking {
+    SegmentationResultStamp stamp;
+    QJsonObject referenceLap;
+    QVector<RankedTimeLoss> losses; // largest first, at most the requested count
+    qsizetype observationCount = 0; // positive increments before truncation
+    qsizetype comparedLapCount = 0;
+    qsizetype untimedWindowCount = 0;
+    QString unavailableReason;
+    bool valid = false;
+};
+
+inline constexpr auto timeLossNoReference = "noReferenceLap";
+
+// Ranks every positive increment of every lap against `reference` (KAN-60).
+// Gains and the reference lap itself are not losses. Each (lap, window) pair
+// is one observation; windows never overlap, so a lap's observations never
+// count the same stretch twice. Ties are broken by track position, then by
+// lap start, so the order is deterministic.
+[[nodiscard]] TimeLossRanking rankTimeLosses(const ApprovedSegmentation &approved, double axisLengthMeters,
+    const QVector<TimedLapSectors> &laps, const TimedLapSectors &reference, qsizetype maximumResults = 50);
+
 } // namespace FlappedEar

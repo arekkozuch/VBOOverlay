@@ -145,6 +145,9 @@ class AppController final : public QObject {
     // (those are cheap JSON aggregation; this decodes every eligible lap's
     // recording) and must be explicitly requested.
     Q_PROPERTY(QVariantMap outingTheoreticalBest READ outingTheoreticalBest NOTIFY outingTheoreticalBestChanged)
+    // KAN-60: the day's largest observed losses of each eligible lap against
+    // the group's actual best, from the same calculation.
+    Q_PROPERTY(QVariantMap outingTimeLossRanking READ outingTimeLossRanking NOTIFY outingTheoreticalBestChanged)
     // KAN-57: a segment the comparison view should show in the Corner
     // Analyzer once the requested pair is loaded; cleared when shown or when
     // the comparison view closes.
@@ -259,6 +262,7 @@ public:
     [[nodiscard]] QVariantMap outingRanking() const;
     [[nodiscard]] QVariantMap outingProgression() const;
     [[nodiscard]] QVariantMap outingTheoreticalBest() const;
+    [[nodiscard]] QVariantMap outingTimeLossRanking() const;
     Q_INVOKABLE void requestOutingTheoreticalBest();
     Q_INVOKABLE bool openTheoreticalBestSector(const QString &segmentId);
     [[nodiscard]] QString comparisonFocusSegmentId() const { return m_comparisonFocusSegmentId; }
@@ -704,6 +708,11 @@ private:
         // per-sector losses compare like with like.
         std::optional<FlappedEar::LapSectorTimes> actualBest;
         QString canonicalRunId;
+        // KAN-60: every eligible lap timed on the canonical axis, kept for
+        // the time-loss ranking against the actual best.
+        QVector<FlappedEar::TimedLapSectors> population;
+        FlappedEar::ApprovedSegmentation approved;
+        double axisLengthMeters = 0.0;
     };
     static TheoreticalBestResult computeOutingTheoreticalBest(QVector<FlappedEar::OutingLapRow> population,
         QHash<QString, QJsonObject> sourcesByRunId, QString projectPath, FlappedEar::ApprovedSegmentation approved,
@@ -719,6 +728,9 @@ private:
     FlappedEar::TheoreticalBestLap m_theoreticalBestBest;
     std::optional<FlappedEar::LapSectorTimes> m_theoreticalBestActual;
     QString m_theoreticalBestCanonicalRunId;
+    QVector<FlappedEar::TimedLapSectors> m_theoreticalBestPopulation;
+    FlappedEar::ApprovedSegmentation m_theoreticalBestApproved;
+    double m_theoreticalBestAxisLength = 0.0;
     QString m_comparisonFocusSegmentId;
     // KAN-57: set when the comparison is opened from a theoretical-best
     // sector. The pair is then measured against the canonical run's approved
