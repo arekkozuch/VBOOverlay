@@ -1586,6 +1586,34 @@ void TelemetryTests::opensOutingLapWithoutChangingEditor()
     QVERIFY(zoomed.value("maximum").toDouble() <= 200 + zoomEnd);
     QVERIFY(zoomed.value("minimum").toDouble() > series.value("minimum").toDouble());
     QVERIFY(zoomed.value("maximum").toDouble() < series.value("maximum").toDouble());
+    {
+        // The lap chart plots the zoom window, so the pointer must map across
+        // that window, not the whole lap.
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        std::unique_ptr<QObject> panel(component.createWithInitialProperties(
+            {{"lapDetail", true}, {"mediaDuration", 0}, {"width", 900}, {"height", 600}}));
+        QVERIFY2(panel, qPrintable(component.errorString()));
+        const auto seekAt = [&panel](const double ratio) {
+            return QMetaObject::invokeMethod(panel.get(), "seekAt", Q_ARG(QVariant, ratio));
+        };
+        QVERIFY(seekAt(0.5));
+        QCOMPARE(controller.outingLapCursor(), (start + end) / 2);
+        QVERIFY(panel->setProperty("zoomStart", zoomStart));
+        QVERIFY(panel->setProperty("zoomEnd", zoomEnd));
+        QVERIFY(panel->property("zoomed").toBool());
+        QVERIFY(seekAt(0.0));
+        QCOMPARE(controller.outingLapCursor(), zoomStart);
+        QVERIFY(seekAt(0.5));
+        QCOMPARE(controller.outingLapCursor(), (zoomStart + zoomEnd) / 2);
+        QVERIFY(seekAt(1.0));
+        QCOMPARE(controller.outingLapCursor(), zoomEnd);
+        QVERIFY(QMetaObject::invokeMethod(panel.get(), "resetZoom"));
+        QVERIFY(seekAt(1.0));
+        QCOMPARE(controller.outingLapCursor(), end);
+    }
     const auto track = controller.outingLapTrack();
     controller.setOutingLapCursor(-100); QCOMPARE(controller.outingLapCursor(), start);
     controller.setOutingLapCursor(1000); QCOMPARE(controller.outingLapCursor(), end);

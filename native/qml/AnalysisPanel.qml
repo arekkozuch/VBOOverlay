@@ -70,11 +70,13 @@ Rectangle {
         return 3 + (brakingUp ? fraction : 1 - fraction) * Math.max(1, height - 6);
     }
 
+    // `ratio` is the pointer's position across the plot, which shows the zoom
+    // window; map it across that window, not the whole lap.
     function seekAt(ratio) {
         if (comparisonSlot >= 0) return; // No per-slot cursor yet; never touch global playback.
         const bounded = Math.max(0, Math.min(1, ratio));
         if (lapDetail)
-            appController.outingLapCursor = rangeStart + bounded * (rangeEnd - rangeStart);
+            appController.outingLapCursor = zoomStart + bounded * (zoomEnd - zoomStart);
         else if (mediaDuration > 0)
             seekRequested(bounded * mediaDuration);
         else

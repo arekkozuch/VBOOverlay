@@ -898,6 +898,13 @@ The ordinary analysis chart renderer is shared with this view, and static map
 paths stay separate from cursor updates. No private GoPro synchronization or
 recording export was run; the local synthetic VideoToolbox integration passed.
 
+The lap chart maps pointer position across its visible zoom window, not across
+the whole lap, so the cursor follows the pointer exactly after zooming.
+`opensOutingLapWithoutChangingEditor` loads the lap-detail `AnalysisPanel`, zooms
+it, and checks that the left edge, middle and right edge of the plot map to the
+zoom start, midpoint and end. It then checks that after a zoom reset the right
+edge maps to the lap end again.
+
 ## Candidate acceptance
 
 See [beta-acceptance.md](beta-acceptance.md) for supported scope, archive identity, installation prerequisites, the real-media walkthrough and required evidence. Passing a hosted startup check with the build SDK hidden is useful deployment evidence; it does not replace testing on a clean physical machine or using the final hardware encoder.
