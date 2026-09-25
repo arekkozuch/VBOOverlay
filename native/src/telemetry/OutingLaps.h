@@ -47,6 +47,14 @@ inline constexpr auto lapReferenceAlgorithm = "source-laps-v1";
     const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
     const QSet<QString> &staleRunIds = {});
 
+// The same eligibility criteria rankOutingLaps applies, exposed directly as
+// the compatible population a second consumer (KAN-56 theoretical best) can
+// iterate lap-by-lap. Pointers reference `rows` and are valid only as long as
+// it is. Empty groupId, or too many rows/exclusions, yields no population.
+[[nodiscard]] QVector<const OutingLapRow *> eligibleOutingLaps(const QVector<OutingLapRow> &rows, const QString &groupId,
+    const QHash<QString, QJsonObject> &configurations, const QJsonArray &exclusions,
+    const QSet<QString> &staleRunIds = {});
+
 // Progression consumes the same eligibility-filtered ranking as best-lap results.
 // Run metadata entries contain id, name, groupId, notes, conditions and setupChanges.
 [[nodiscard]] QJsonObject summarizeOutingProgression(const QVector<OutingLapRow> &rows,

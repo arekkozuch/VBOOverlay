@@ -322,6 +322,7 @@ AppController::AppController(QObject *parent, QString recoveryPath,
     initializeOutingLapDetail();
     initializeSegmentReview();
     initializeComparisonLaps();
+    initializeOutingTheoreticalBest();
     retireLegacyDocumentSettings();
     restoreStartupState();
 }

@@ -194,6 +194,7 @@ void AppController::refreshOutingCompatibility()
         const auto runId = source.value("runId").toString();
         configurations.insert(runId, m_outingInferredGroups.configurations.value(runId, source.value("trackConfiguration").toObject()));
     }
+    m_outingRunConfigurations = configurations;
     QMap<QString, QVariantMap> groups;
     QHash<QString, QVariantList> membersByGroup, eligibleByGroup;
     for (const auto &value : m_outingLapRows) {

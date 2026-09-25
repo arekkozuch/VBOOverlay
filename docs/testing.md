@@ -543,6 +543,44 @@ including mixed provenance and a different revision. `TelemetryTests` checks
 that the synthetic route yields no pickup and no speeds, while following
 intervals are still timed. The KAN-51 axis limitation applies. Synthetic only.
 
+## Sector theoretical best across a population (KAN-56)
+
+`computeTheoreticalBest` (`native/src/telemetry/TheoreticalBest.h/.cpp`, tag
+`theoretical-best-v1`) takes one `LapSectorTimes` per lap and, for each
+approved segment, keeps the fastest numeric time together with the lap
+reference that produced it (the donor lap). Results stamped with another
+revision or configuration reference are ignored. A segment with no timed lap
+reports `incompleteCoverage`; the other segments stay visible, but the total
+is withheld. With no approved segmentation nothing is computed
+(`noApprovedSegmentation`).
+
+The population is `eligibleOutingLaps` (`OutingLaps.h`), which applies the
+same per-lap reasons as `rankOutingLaps` (compatibility group, exclusions,
+GPS issues, stale sources, invalid references). `rankOutingLaps` now calls the
+same helper, so the two cannot disagree.
+
+`AppController::requestOutingTheoreticalBest()` runs in the background for the
+current comparison group. Segments are approved per run, so it uses one
+canonical run: the lowest run ID among eligible runs that has approved
+segments for the group. One shared progress axis is built from a lap of that
+run, and every eligible lap, from any run, is projected onto it before its
+sector times are computed. This avoids the per-lap axis limitation of KAN-51
+for this result. Laps are processed grouped by run, so each recording is
+decoded once, and a lap whose recording cannot be decoded is skipped. The
+result, `outingTheoreticalBest`, is invalidated whenever outing laps or the
+document change. Choosing the lowest run ID is deterministic but arbitrary
+when more than one run has approved segments.
+
+`TheoreticalBestTests` covers per-segment winners from different laps, a
+segment no lap covers (total withheld, other segments kept), a faster lap
+from another revision being ignored, and no approved segmentation.
+`LapEligibilityTests::exposesEligiblePopulationMatchingRanking` checks that
+the population matches ranking, including exclusions, stale runs, other groups
+and ineligible laps. `TelemetryTests::calculatesOutingTheoreticalBestAcrossPopulation`
+checks that the result is unavailable before approval, then approves one
+run's segments and checks each timed segment's donor label and whether a
+total is present. Synthetic only.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

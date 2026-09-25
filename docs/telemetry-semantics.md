@@ -127,6 +127,13 @@ continuous projected coverage, or one that crosses the gate, has no numeric
 time. For a complete partition the sector times sum to the lap time within
 1 ms.
 
+The sector theoretical best (KAN-56) is the sum of the fastest recorded time
+for each approved sector across the eligible laps of one compatibility group.
+Each sector names its donor lap. It is a sum of separately recorded fragments
+and does not show that the whole lap can be driven that fast. If any sector
+has no timed lap, no total is reported. All laps are timed on one shared axis
+built from the canonical run (the lowest run ID with approved segments).
+
 Corner speeds (KAN-52) are read only from the recorded speed channel: entry
 and exit at the segment boundaries, the apex speed at the geometric apex and
 the minimum where the lap was slowest. The apex is never taken as the minimum,

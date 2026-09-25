@@ -11,6 +11,7 @@
 #include "telemetry/TrackSegmentReview.h"
 #include "telemetry/TrackSegmentEditing.h"
 #include "telemetry/SectorTiming.h"
+#include "telemetry/TheoreticalBest.h"
 #include "telemetry/CornerSpeeds.h"
 #include "telemetry/BrakingMetrics.h"
 #include "telemetry/ExitMetrics.h"
@@ -137,6 +138,12 @@ class AppController final : public QObject {
     Q_PROPERTY(qint64 outingLapVideoPositionMilliseconds READ outingLapVideoPositionMilliseconds NOTIFY outingLapVideoChanged)
     Q_PROPERTY(QVariantMap outingRanking READ outingRanking NOTIFY outingLapsChanged)
     Q_PROPERTY(QVariantMap outingProgression READ outingProgression NOTIFY outingLapsChanged)
+    // KAN-56: the fastest valid time per approved sector across the current
+    // comparison group's whole compatible population, not just one lap.
+    // Loading state is separate from outingRanking/outingProgression's
+    // (those are cheap JSON aggregation; this decodes every eligible lap's
+    // recording) and must be explicitly requested.
+    Q_PROPERTY(QVariantMap outingTheoreticalBest READ outingTheoreticalBest NOTIFY outingTheoreticalBestChanged)
     Q_PROPERTY(QVariantList outingCompatibilityGroups READ outingCompatibilityGroups NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonGroupId READ outingComparisonGroupId NOTIFY outingLapsChanged)
     Q_PROPERTY(QString outingComparisonSelectionState READ outingComparisonSelectionState NOTIFY outingLapsChanged)
@@ -246,6 +253,8 @@ public:
     Q_INVOKABLE bool selectOutingComparisonGroup(const QString &groupId);
     [[nodiscard]] QVariantMap outingRanking() const;
     [[nodiscard]] QVariantMap outingProgression() const;
+    [[nodiscard]] QVariantMap outingTheoreticalBest() const;
+    Q_INVOKABLE void requestOutingTheoreticalBest();
     [[nodiscard]] QVariantList outingCompatibilityGroups() const;
     [[nodiscard]] QString outingComparisonGroupId() const;
     [[nodiscard]] QString outingComparisonSelectionState() const;
@@ -450,6 +459,7 @@ signals:
     void outingLapsChanged();
     void outingLapDetailChanged();
     void outingLapVideoChanged();
+    void outingTheoreticalBestChanged();
     void comparisonSlotsChanged();
     void comparisonViewOpenChanged();
     void outingLapCursorChanged();
@@ -668,6 +678,27 @@ private:
     int m_comparisonLoadingSlot = -1;
     bool m_comparisonPending = false;
     bool m_comparisonViewOpen = false;
+    // KAN-56: theoretical best across the current comparison group's whole
+    // eligible population, not the two comparison slots. Deliberately its own
+    // background worker/cache rather than m_analysisSourceCache/m_comparisonSlots
+    // -- it must decode every eligible lap's recording in turn, which the
+    // 2-entry comparison cache is not sized for; a fresh single-request cache
+    // is used instead (sized fine since laps are processed grouped by run).
+    struct TheoreticalBestResult {
+        quint64 request = 0;
+        QString error;
+        FlappedEar::TheoreticalBestLap best;
+    };
+    static TheoreticalBestResult computeOutingTheoreticalBest(QVector<FlappedEar::OutingLapRow> population,
+        QHash<QString, QJsonObject> sourcesByRunId, QString projectPath, FlappedEar::ApprovedSegmentation approved,
+        QString canonicalRunId, quint64 request, const std::shared_ptr<std::atomic_bool> &cancellation);
+    void initializeOutingTheoreticalBest();
+    QFutureWatcher<TheoreticalBestResult> m_theoreticalBestWatcher;
+    std::shared_ptr<std::atomic_bool> m_theoreticalBestCancellation;
+    quint64 m_theoreticalBestRequest = 0;
+    QString m_theoreticalBestState = QStringLiteral("idle");
+    QString m_theoreticalBestMessage;
+    FlappedEar::TheoreticalBestLap m_theoreticalBestBest;
     void initializeOutingLapDetail();
     void loadOutingLapDetail();
     static QVariantMap sessionSeries(const TelemetrySession &session, const QString &channel,
@@ -761,6 +792,10 @@ private:
     QVariantMap m_outingProgression;
     QVariantList m_outingCompatibilityGroups;
     QString m_outingComparisonGroupId;
+    // The per-run track configuration used by rankOutingLaps/refreshOutingCompatibility,
+    // captured so a second population consumer (theoretical best) can reuse the
+    // exact same configurations without recomputing or risking drift.
+    QHash<QString, QJsonObject> m_outingRunConfigurations;
     QVector<OutingLapRow> m_outingRawLapRows;
     QList<OutingSourceMessage> m_outingSourceMessages;
     QByteArray m_loadedSourceRevision;

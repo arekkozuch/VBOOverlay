@@ -25,6 +25,7 @@ qt_add_executable(flappedear_native_tests
     ../src/app/AppControllerOuting.cpp
     ../src/app/AppControllerSegmentReview.cpp
     ../src/app/AppControllerCornerAnalyzer.cpp
+    ../src/app/AppControllerTheoreticalBest.cpp
     TelemetryTests.cpp
     ../src/app/AppController.cpp
     ../src/app/AppController.h
@@ -128,6 +129,11 @@ target_compile_features(flappedear_sector_timing_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_sector_timing_tests PRIVATE flappedear_core Qt6::Test)
 flappedear_enable_warnings(flappedear_sector_timing_tests)
 add_test(NAME flappedear_sector_timing_tests COMMAND flappedear_sector_timing_tests)
+qt_add_executable(flappedear_theoretical_best_tests TheoreticalBestTests.cpp)
+target_compile_features(flappedear_theoretical_best_tests PRIVATE cxx_std_20)
+target_link_libraries(flappedear_theoretical_best_tests PRIVATE flappedear_core Qt6::Test)
+flappedear_enable_warnings(flappedear_theoretical_best_tests)
+add_test(NAME flappedear_theoretical_best_tests COMMAND flappedear_theoretical_best_tests)
 qt_add_executable(flappedear_braking_metrics_tests BrakingMetricsTests.cpp)
 target_compile_features(flappedear_braking_metrics_tests PRIVATE cxx_std_20)
 target_link_libraries(flappedear_braking_metrics_tests PRIVATE flappedear_core Qt6::Test)
