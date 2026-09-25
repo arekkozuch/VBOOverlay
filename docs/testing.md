@@ -468,6 +468,41 @@ apexes, a straight segment and a gate-crossing segment.
 route, which has no speed channel, yields explicitly unavailable corner
 speeds. The axis limitation of KAN-51 applies. Synthetic only.
 
+## Braking point, distance and deceleration (KAN-53)
+
+`computeBrakingMetrics` (`native/src/telemetry/BrakingMetrics.h/.cpp`, tag
+`braking-metrics-v1`) defines its reference explicitly: shared-axis progress,
+with a search interval from 200 m (`approachMeters`) before the segment's
+start boundary to its end boundary, clipped at the gate
+(`approachClippedAtGate`). The braking point is the first KAN-47 onset
+candidate in that interval, keeping its method (`measuredBrake` /
+`inferredDeceleration`), provenance, channel and unit-tagged threshold. It
+reports the distance before the entry boundary (negative inside the segment),
+the episode's time, and its distance only when one continuous projection spans
+onset to episode end. Peak and mean deceleration (positive magnitudes of
+negative longitudinal G, in the channel's unit) are read only from the
+recorded `longitudinalAcceleration` channel over the same episode, and only
+when its samples cover the episode without a gap. Missing coverage at the
+interval start, a gate-crossing segment, no channel and no onset each give an
+explicit reason instead of a number.
+
+`compareBrakingMetrics` returns A minus B for the same segment and revision
+(braking point positive when A brakes later) and refuses to compare different
+methods, provenances or channels (`mixedProvenance`).
+`AppController::outingLapBrakingMetrics()` returns single-lap metrics for the
+reviewed lap's approved corners; A/B wiring and UI land with the Corner
+Analyzer.
+
+`BrakingMetricsTests` uses a constant-speed projected lap and 20 Hz channels:
+an interpolated measured onset at 22.025 s (440.5 m) with distance before entry,
+time and distance, peak/mean deceleration, the inferred path, a missing
+acceleration channel, projection holes inside the episode and at the interval
+start, a missing acceleration sample, no onset in the interval, no channels, a
+gate-crossing segment, a clipped approach, and A/B comparison including mixed
+provenance and different revisions. `TelemetryTests` checks that the synthetic
+route, with no brake or acceleration channel, yields no braking values. The
+KAN-51 axis limitation applies. Synthetic only; no real brake sensor.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

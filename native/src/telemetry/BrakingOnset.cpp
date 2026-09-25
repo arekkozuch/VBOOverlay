@@ -13,23 +13,6 @@ bool validThreshold(const BrakingThreshold &threshold)
         && threshold.on > threshold.off && !threshold.unit.trimmed().isEmpty();
 }
 
-std::optional<double> progressAtTime(const QVector<ProgressSegment> &lap, const double time)
-{
-    for (const auto &segment : lap) {
-        const auto &samples = segment.samples;
-        if (samples.isEmpty() || time < samples.first().telemetryTime || time > samples.last().telemetryTime) continue;
-        const auto next = std::lower_bound(samples.cbegin(), samples.cend(), time,
-            [](const ProjectedSample &sample, const double value) { return sample.telemetryTime < value; });
-        if (next == samples.cbegin()) return next->progressMeters;
-        const auto &previous = *std::prev(next);
-        const double span = next->telemetryTime - previous.telemetryTime;
-        if (!(span > 0.0)) return previous.progressMeters;
-        return previous.progressMeters
-            + (next->progressMeters - previous.progressMeters) * (time - previous.telemetryTime) / span;
-    }
-    return std::nullopt;
-}
-
 } // namespace
 
 BrakingOnsetDetection detectBrakingOnsets(const TelemetrySession &session, const double startTime,

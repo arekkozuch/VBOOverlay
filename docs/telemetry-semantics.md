@@ -132,6 +132,16 @@ and exit at the segment boundaries, the apex speed at the geometric apex and
 the minimum where the lap was slowest. The apex is never taken as the minimum,
 and no speed is derived from GPS positions.
 
+Braking metrics (KAN-53) use shared-axis progress with an explicit interval
+(200 m before the segment start through its end). Measured and inferred braking
+points keep their provenance and are never compared with each other; distance
+and deceleration are reported only with continuous coverage of the braking
+episode. An interval bound on the gate (an approach clipped at the gate, or a
+segment ending at the lap length) uses the lap's timed start or end, because a
+lap's projection never lands on the gate exactly. A missing brake and
+deceleration channel is reported (`noBrakeOrDecelerationChannel`) before
+coverage is checked.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;

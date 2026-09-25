@@ -707,3 +707,40 @@ QVariantList AppController::outingLapCornerSpeeds() const
     }
     return rows;
 }
+
+QVariantList AppController::outingLapBrakingMetrics() const
+{
+    if (m_segmentReviewState != "ready" || !m_segmentReviewAxis.valid || !m_outingLapDetailSession) return {};
+    const auto approved = currentApprovedSegmentation();
+    QVariantList rows;
+    for (const auto &value : approved.segments) {
+        const auto segment = value.toObject();
+        if (segment.value("type").toString() != trackSegmentTypeName(TrackSegmentType::Corner)) continue;
+        const auto metrics = computeBrakingMetrics(m_segmentReviewAxis.lengthMeters, approved,
+            segment.value("id").toString(), m_segmentReviewLapTrace, *m_outingLapDetailSession,
+            m_selectedOutingLap.value("startTime").toDouble(), m_selectedOutingLap.value("endTime").toDouble());
+        if (!metrics.valid) continue;
+        QVariantMap row{{"segmentId", metrics.segmentId}, {"name", segment.value("name").toString()},
+            {"intervalStartMeters", metrics.intervalStartMeters}, {"intervalEndMeters", metrics.intervalEndMeters},
+            {"entryMeters", metrics.entryMeters}, {"method", metrics.method}, {"provenance", metrics.provenance},
+            {"channel", metrics.channel}, {"thresholdUnit", metrics.thresholdUnit}, {"onThreshold", metrics.onThreshold},
+            {"limitations", metrics.limitations}, {"decelerationChannel", metrics.decelerationChannel},
+            {"decelerationUnit", metrics.decelerationUnit}, {"revision", metrics.stamp.revision},
+            {"calculationAlgorithm", metrics.stamp.calculationAlgorithm}};
+        if (!metrics.unavailableReason.isEmpty()) row.insert("unavailableReason", metrics.unavailableReason);
+        if (!metrics.decelerationUnavailableReason.isEmpty())
+            row.insert("decelerationUnavailableReason", metrics.decelerationUnavailableReason);
+        const auto insert = [&row](const char *key, const std::optional<double> &number) {
+            if (number) row.insert(QString::fromLatin1(key), *number);
+        };
+        insert("brakingPointMeters", metrics.brakingPointMeters);
+        insert("brakingPointTime", metrics.brakingPointTime);
+        insert("distanceBeforeEntryMeters", metrics.distanceBeforeEntryMeters);
+        insert("brakingSeconds", metrics.brakingSeconds);
+        insert("brakingDistanceMeters", metrics.brakingDistanceMeters);
+        insert("peakDeceleration", metrics.peakDeceleration);
+        insert("meanDeceleration", metrics.meanDeceleration);
+        rows.append(row);
+    }
+    return rows;
+}
