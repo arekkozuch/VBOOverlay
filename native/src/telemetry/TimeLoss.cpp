@@ -85,6 +85,10 @@ TimeLossObservations computeTimeLossObservations(const ApprovedSegmentation &app
         }
         if (sectorB && sectorA->seconds && sectorB->seconds) {
             window.incrementSeconds = *sectorA->seconds - *sectorB->seconds;
+            // A gate-crossing window ends in the next lap's opening metres;
+            // its exit is this lap's running delta plus the window's increment.
+            if (window.endProgressMeters < window.startProgressMeters && window.cumulativeAtStartSeconds)
+                window.cumulativeAtEndSeconds = *window.cumulativeAtStartSeconds + *window.incrementSeconds;
             result.timedIncrementSumSeconds += *window.incrementSeconds;
         } else {
             window.unavailableReason = timeLossUntimed;

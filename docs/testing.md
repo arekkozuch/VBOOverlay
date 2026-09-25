@@ -425,8 +425,9 @@ the shared progress axis:
   Each sector reports `coveredMeters`. A sector has a numeric time only when
   one covered range spans it and both crossings exist; otherwise it is
   `incompleteCoverage` with no time, never bridged across a gap.
-- A gate-crossing sector cannot be timed within one gate-to-gate lap
-  (`crossesGate`). `completePartition` is true only when approved segments
+- A gate-crossing sector is timed within the lap as its part after the start
+  crossing plus its part before the end crossing (KAN-120; formerly
+  `crossesGate`). `completePartition` is true only when approved segments
   tile [0, axis length] without gaps or a gate-crossing segment; only then,
   with every sector timed, are `sumSeconds` and `partitionErrorSeconds` set.
 - Each result carries the lap reference, segment IDs and a
@@ -815,6 +816,38 @@ and a plate-only RCZ. On the private Jastrząb day
 (`analyzesPrivateTrackDayCorners`), throttle pickup went from undetected on
 every corner (the plate never falls below the 10 % off threshold) to
 measured on all of them.
+
+## Where the best lap can improve (KAN-120)
+
+Two changes after owner testing on the real Jastrząb day:
+
+- **Gate-crossing segments are timed.** A segment whose end lies past the
+  start/finish line (the last proposal of a lap usually does) used to be
+  `crossesGate` and untimed, so the theoretical best, the actual best's sum
+  and the difference were all withheld. `computeLapSectorTimes` now times it
+  within the lap as (lap end − its start crossing) + (its end crossing − lap
+  start). Both parts must be fully covered, and a gap is never bridged. The
+  two parts count toward `completePartition`. In a time-loss window that
+  crosses the gate, the exit running delta is the entry value plus the
+  increment. Corner speed and braking metrics for such a segment remain
+  unavailable (`crossesGate`).
+- **The window leads with the best lap.** **Theoretical best…** shows your
+  best lap → theoretical best → time available, then a track map. The map is
+  the canonical axis, north up; each approved segment is drawn in one
+  sequential hue by the time your best lap loses there, with a legend. Next
+  to it is a list sorted by gain that names the fastest lap in each segment.
+  Hovering a row or clicking the map selects a segment. Clicking a row or
+  double-clicking the map opens that lap against your best lap in the
+  Corner Analyzer. `outingTheoreticalBest` adds `gains` (sorted) and `map`
+  (normalised segment polylines).
+
+`SectorTimingTests::gateCrossingAndGappedPartitionsAreNotComplete` now
+checks a gate-crossing sector timed within the lap (10 s on the 20 m/s
+fixture), a complete partition, and that a hole in either part leaves it
+untimed. `TelemetryTests::timesApprovedSectorsForTheOpenLap` checks that the
+unsplit set already sums to the lap time. On the private day (approving
+every proposal without splitting), the result is 1:47.905 theoretical
+against a 1:49.898 best, with 1.993 s available.
 
 ## Video-free day-result states (KAN-27)
 

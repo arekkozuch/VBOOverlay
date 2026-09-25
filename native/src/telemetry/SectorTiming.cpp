@@ -76,10 +76,9 @@ LapSectorTimes computeLapSectorTimes(const ApprovedSegmentation &approved, const
     result.lapSeconds = lapEndTime - lapStartTime;
     const auto ranges = coverage(lapTrace, length);
 
-    bool complete = !approved.segments.isEmpty();
     bool allTimed = !approved.segments.isEmpty();
-    double reached = 0.0;
     double sum = 0.0;
+    QVector<Range> tiles; // every segment's extent on [0, length], split at the gate
     for (const auto &value : approved.segments) {
         const auto segment = value.toObject();
         SectorTime sector;
@@ -90,18 +89,28 @@ LapSectorTimes computeLapSectorTimes(const ApprovedSegmentation &approved, const
         sector.endProgressMeters = segment.value("endProgressMeters").toDouble();
         const double start = sector.startProgressMeters;
         const double end = sector.endProgressMeters;
+        sector.startTime = crossingTime(lapTrace, start, length, lapStartTime, lapEndTime);
+        sector.endTime = crossingTime(lapTrace, end, length, lapStartTime, lapEndTime);
         if (end < start) {
-            // Its two halves lie at opposite ends of a gate-to-gate lap.
+            // Its two parts lie at opposite ends of a gate-to-gate lap (KAN-120):
+            // timed within this lap as the part after its start plus the part
+            // before its end. Each part must be fully covered.
             sector.lengthMeters = end + length - start;
             sector.coveredMeters = coveredWithin(ranges, start, length) + coveredWithin(ranges, 0.0, end);
-            sector.unavailableReason = sectorCrossesGate;
-            complete = false;
-            allTimed = false;
+            tiles.append({start, length});
+            tiles.append({0.0, end});
+            if (fullyCovered(ranges, start, length) && fullyCovered(ranges, 0.0, end) && sector.startTime && sector.endTime
+                && lapEndTime - *sector.startTime > 0.0 && *sector.endTime - lapStartTime > 0.0) {
+                sector.seconds = (lapEndTime - *sector.startTime) + (*sector.endTime - lapStartTime);
+                sum += *sector.seconds;
+            } else {
+                sector.unavailableReason = sectorIncompleteCoverage;
+                allTimed = false;
+            }
         } else {
             sector.lengthMeters = end - start;
             sector.coveredMeters = coveredWithin(ranges, start, end);
-            sector.startTime = crossingTime(lapTrace, start, length, lapStartTime, lapEndTime);
-            sector.endTime = crossingTime(lapTrace, end, length, lapStartTime, lapEndTime);
+            tiles.append({start, end});
             if (fullyCovered(ranges, start, end) && sector.startTime && sector.endTime && *sector.endTime > *sector.startTime) {
                 sector.seconds = *sector.endTime - *sector.startTime;
                 sum += *sector.seconds;
@@ -109,10 +118,15 @@ LapSectorTimes computeLapSectorTimes(const ApprovedSegmentation &approved, const
                 sector.unavailableReason = sectorIncompleteCoverage;
                 allTimed = false;
             }
-            if (std::abs(start - reached) > boundaryEpsilon) complete = false;
-            reached = end;
         }
         result.sectors.append(sector);
+    }
+    std::sort(tiles.begin(), tiles.end(), [](const Range &a, const Range &b) { return a.start < b.start; });
+    bool complete = !tiles.isEmpty();
+    double reached = 0.0;
+    for (const auto &tile : tiles) {
+        if (std::abs(tile.start - reached) > boundaryEpsilon) complete = false;
+        reached = tile.end;
     }
     if (complete && std::abs(reached - length) > boundaryEpsilon) complete = false;
     result.completePartition = complete;

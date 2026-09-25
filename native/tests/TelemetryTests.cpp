@@ -3834,8 +3834,12 @@ void TelemetryTests::timesApprovedSectorsForTheOpenLap()
             wrappingId = segment.value("id").toString();
     }
     if (!wrappingId.isEmpty()) {
+        // KAN-120: unsplit, the gate-crossing segment is timed within the lap
+        // and the approved set already tiles it; splitting keeps the same sum.
         times = controller.outingLapSectorTimes();
-        QVERIFY(!times.value("completePartition").toBool());
+        QVERIFY(times.value("completePartition").toBool());
+        QVERIFY(times.contains("sumSeconds"));
+        QVERIFY(times.value("partitionErrorSeconds").toDouble() <= sectorSumToleranceSeconds);
         QCOMPARE(controller.splitApprovedSegment(wrappingId, controller.segmentReviewAxisLength()), QString());
     }
 
@@ -4359,9 +4363,14 @@ void TelemetryTests::opensTheoreticalBestSectorThroughQml()
     if (controller.outingTheoreticalBest().contains("totalSeconds"))
         QVERIFY(total->property("text").toString() != "—");
 
+    // KAN-120: the list is ordered by gain, and the map draws every segment.
+    QCOMPARE(controller.outingTheoreticalBest().value("gains").toList().size(),
+        controller.outingTheoreticalBest().value("sectors").toList().size());
+    QCOMPARE(controller.outingTheoreticalBest().value("map").toMap().value("segments").toList().size(),
+        controller.outingTheoreticalBest().value("sectors").toList().size());
     QString timedId;
     int timedRow = -1;
-    const auto sectors = controller.outingTheoreticalBest().value("sectors").toList();
+    const auto sectors = controller.outingTheoreticalBest().value("gains").toList();
     for (int i = 0; i < sectors.size() && timedRow < 0; ++i)
         if (sectors[i].toMap().contains("seconds")) { timedRow = i; timedId = sectors[i].toMap().value("segmentId").toString(); }
     QVERIFY(timedRow >= 0);
@@ -4785,12 +4794,9 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
             .arg(item.value("type").toString(), -8).arg(item.value("startMeters").toDouble(), 7, 'f', 1)
             .arg(item.value("endMeters").toDouble(), 7, 'f', 1).arg(item.value("lengthMeters").toDouble(), 6, 'f', 1);
     }
+    // As a driver would: approve every proposal, without splitting the one
+    // that crosses the start/finish line (KAN-120 times it within the lap).
     for (int i = 0; i < items.size(); ++i) QCOMPARE(controller.approveSegmentProposal(i), QString());
-    for (const auto &value : controller.storedRunTrackSegments(runId).toArray()) {
-        const auto segment = value.toObject();
-        if (segment.value("endProgressMeters").toDouble() < segment.value("startProgressMeters").toDouble())
-            QCOMPARE(controller.splitApprovedSegment(segment.value("id").toString(), controller.segmentReviewAxisLength()), QString());
-    }
     controller.closeOutingLap();
 
     controller.requestOutingTheoreticalBest();
@@ -4880,6 +4886,15 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
         item->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space); QTest::qWait(800);
         QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("straight.png")));
         break;
+    }
+    // The theoretical-best window on the same real day.
+    controller.setComparisonViewOpen(false);
+    QTest::qWait(500);
+    auto *theoretical = window->findChild<QObject *>("theoreticalBestDialog");
+    if (theoretical) {
+        QVERIFY(QMetaObject::invokeMethod(theoretical, "open"));
+        QTest::qWait(1500);
+        QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("theoretical-best.png")));
     }
     for (const auto &warning : warnings) qInfo() << "QML warning" << warning;
 }

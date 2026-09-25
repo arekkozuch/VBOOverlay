@@ -55,6 +55,7 @@ void AppController::initializeOutingTheoreticalBest()
             m_theoreticalBestPopulation = std::move(result.population);
             m_theoreticalBestApproved = std::move(result.approved);
             m_theoreticalBestAxisLength = result.axisLengthMeters;
+            m_theoreticalBestAxis = std::move(result.axis);
         }
         emit outingTheoreticalBestChanged();
     });
@@ -155,6 +156,55 @@ QVariantMap AppController::outingTheoreticalBest() const
     }
     result.insert("revision", m_theoreticalBestBest.stamp.revision);
     result.insert("trackConfigurationReference", m_theoreticalBestBest.stamp.trackConfigurationReference);
+
+    // KAN-120: where the best lap loses time, largest first ...
+    auto gains = sectors;
+    std::stable_sort(gains.begin(), gains.end(), [](const QVariant &left, const QVariant &right) {
+        return left.toMap().value("lossSeconds", -1.0).toDouble() > right.toMap().value("lossSeconds", -1.0).toDouble();
+    });
+    result.insert("gains", gains);
+    // ... and each segment's line on the track map (north up, fitted to a
+    // unit square with the aspect ratio kept).
+    const auto &axis = m_theoreticalBestAxis;
+    if (axis.valid && axis.points.size() == axis.cumulative.size() && !axis.points.isEmpty()) {
+        double minX = axis.points.first().x(), maxX = minX, minY = axis.points.first().y(), maxY = minY;
+        for (const auto &point : axis.points) {
+            minX = std::min(minX, point.x()); maxX = std::max(maxX, point.x());
+            minY = std::min(minY, point.y()); maxY = std::max(maxY, point.y());
+        }
+        const double span = std::max({maxX - minX, maxY - minY, 1.0});
+        const double offsetX = (span - (maxX - minX)) / 2.0, offsetY = (span - (maxY - minY)) / 2.0;
+        const auto normalized = [&](const QPointF &point) {
+            return QVariantMap{{"x", (point.x() - minX + offsetX) / span}, {"y", (maxY - point.y() + offsetY) / span}};
+        };
+        const auto line = [&](const double from, const double to) {
+            QVariantList points;
+            for (qsizetype i = 0; i < axis.points.size(); ++i)
+                if (axis.cumulative[i] >= from - 1e-6 && axis.cumulative[i] <= to + 1e-6) points.append(normalized(axis.points[i]));
+            return points;
+        };
+        QVariantList mapSegments;
+        for (const auto &value : sectors) {
+            auto row = value.toMap();
+            const auto id = row.value("segmentId").toString();
+            double start = 0.0, end = 0.0;
+            for (const auto &segmentValue : m_theoreticalBestApproved.segments) {
+                const auto segment = segmentValue.toObject();
+                if (segment.value("id").toString() != id) continue;
+                start = segment.value("startProgressMeters").toDouble();
+                end = segment.value("endProgressMeters").toDouble();
+            }
+            QVariantList parts;
+            if (end >= start) parts.append(QVariant(line(start, end)));
+            else { parts.append(QVariant(line(start, axis.lengthMeters))); parts.append(QVariant(line(0.0, end))); }
+            row.insert("parts", parts);
+            mapSegments.append(row);
+        }
+        QVariantList outline;
+        for (qsizetype i = 0; i < axis.points.size(); i += std::max<qsizetype>(1, axis.points.size() / 800))
+            outline.append(normalized(axis.points[i]));
+        result.insert("map", QVariantMap{{"segments", mapSegments}, {"outline", outline}});
+    }
     return result;
 }
 
@@ -420,6 +470,7 @@ AppController::TheoreticalBestResult AppController::computeOutingTheoreticalBest
         result.best = computeTheoreticalBest(approved, populationTimes);
         result.approved = approved;
         result.axisLengthMeters = axis.lengthMeters;
+        result.axis = axis;
     } catch (const OperationCancelled &) {
         result.error = QStringLiteral("Theoretical best calculation was cancelled.");
     } catch (const std::exception &error) {
