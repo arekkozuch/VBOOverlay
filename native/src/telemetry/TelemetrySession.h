@@ -69,6 +69,13 @@ public:
         SampledSegmentsStatus *status = nullptr) const;
 };
 
+// The driver's throttle input (KAN-118). When a recording has an
+// accelerator-pedal channel with numeric data, the "throttle" alias refers to
+// it; the throttle plate (which follows the ECU: idle air, a lower full-open
+// reading, rev-match blips with the pedal released) stays available under its
+// own channel name. Aliases are not part of recording fingerprints.
+void preferAcceleratorPedalForThrottle(TelemetrySession &session);
+
 [[nodiscard]] std::optional<double> videoToTelemetryTime(double videoTime, const SyncTransform &transform);
 [[nodiscard]] std::optional<double> telemetryToVideoTime(
     double telemetryTime, const SyncTransform &transform);

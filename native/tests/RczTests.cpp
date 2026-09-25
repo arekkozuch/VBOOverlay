@@ -98,6 +98,40 @@ private slots:
         QVERIFY(std::abs(gate.endpointB.longitudeDegrees - 20.0) < 1e-8);
         QVERIFY(TelemetrySource::supportsPath("SESSION.RCZ"));
     }
+    void prefersAcceleratorPedalForThrottle()
+    {
+        // KAN-118: VBO with both the throttle plate and the accelerator pedal.
+        const QString vbo = "[header]\ncoordinate units = degrees\n[column names]\n"
+            "time lat long velocity throttle_pos-obd accelerator_pos-obd\n[data]\n"
+            "0 50 20 72 13.3 0\n0.1 50.0001 20 72 72.4 0\n0.2 50.0002 20 72 80.4 100\n";
+        const auto both = VboParser::parse(vbo);
+        QCOMPARE(both.aliases.value("throttle"), QString("accelerator_pos-obd"));
+        QCOMPARE(both.valueAt("throttle", 0.1).value(), 0.0); // a rev-match blip on the plate is not driver input
+        QVERIFY(std::abs(both.valueAt("throttle_pos-obd", 0.1).value() - 72.4) < 1e-4); // the plate stays available
+        // Only the plate: unchanged.
+        const QString plateOnly = "[header]\ncoordinate units = degrees\n[column names]\n"
+            "time lat long velocity throttle_pos-obd\n[data]\n0 50 20 72 13.3\n0.1 50.0001 20 72 20\n";
+        QCOMPARE(VboParser::parse(plateOnly).aliases.value("throttle"), QString("throttle_pos-obd"));
+        // A pedal column without numeric data is ignored.
+        const QString emptyPedal = "[header]\ncoordinate units = degrees\n[column names]\n"
+            "time lat long velocity throttle_pos-obd accelerator_pos-obd\n[data]\n"
+            "0 50 20 72 13.3 x\n0.1 50.0001 20 72 20 -\n";
+        QCOMPARE(VboParser::parse(emptyPedal).aliases.value("throttle"), QString("throttle_pos-obd"));
+
+        // RCZ with both OBD channels (10025 plate, 10071 pedal).
+        auto files = RczFixture::members();
+        files["channel_5_200_10025_1_1"] = RczFixture::ticks({250, 1250});
+        files["channel2_5_200_10025_10025_3"] = RczFixture::doubles({13.3, 80.4});
+        files["channel_5_200_10071_1_1"] = RczFixture::ticks({250, 1250});
+        files["channel2_5_200_10071_10071_3"] = RczFixture::doubles({0, 100});
+        const auto rcz = parse(RczFixture::zip(files));
+        QCOMPARE(rcz.aliases.value("throttle"), QString("accelerator_pos-obd"));
+        QCOMPARE(rcz.valueAt("throttle", .25).value(), 0.0);
+        QVERIFY(std::abs(rcz.valueAt("throttle_pos-obd", .25).value() - 13.3) < 1e-4);
+        // RCZ with only the plate keeps its explicit mapping.
+        files.remove("channel_5_200_10071_1_1"); files.remove("channel2_5_200_10071_10071_3");
+        QCOMPARE(parse(RczFixture::zip(files)).aliases.value("throttle"), QString("throttle_pos-obd"));
+    }
     void missingValuesAndPrimaryGps()
     {
         auto files = RczFixture::members();

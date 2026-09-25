@@ -387,6 +387,7 @@ TelemetrySession RczParser::parseFile(const QString &path, const CancellationChe
         }
     }
     if (!session.aliases.contains("speed") || !session.aliases.contains("latitude")) fail("Declared GPS channels are missing.");
+    preferAcceleratorPedalForThrottle(session);
     if (archive.members.contains("trackId.json")) {
         // Archive integrity/resource failures remain fatal even for optional metadata.
         const auto trackBytes = archive.data("trackId.json", 1024 * 1024);
