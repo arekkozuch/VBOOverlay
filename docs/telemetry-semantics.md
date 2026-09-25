@@ -93,6 +93,21 @@ The Export dialog's **Single lap · hotlap** range is similarly C++ owned. It ta
 Known audit limitation: best-lap reference traces still need explicit GPS-gap segment preservation; do not treat a displayed comparison across a recording gap as validated. Raw missing-data semantics above do not establish correctness of that derived comparison path.
 
 
+## Track segments: proposals and the approved revision
+
+Automatic straight/corner proposals, their boundary uncertainty and the
+geometric apex are review input only. They are never persisted as segments
+and never consumed by a metric. Only segments a user has approved are stored
+in a run's `trackSegments`, each tagged with the track-configuration
+(compatibility-group) reference it was approved for. Segments approved for
+another configuration are never applied to the current one.
+
+Any result derived from segments (sector times, theoretical lap, reports)
+must use `approvedSegmentation(run.trackSegments, configuration)`, record its
+`revision` (`track-segments-v1:<sha256>`) together with the configuration
+reference, and treat itself as stale once `segmentationResultCurrent` fails.
+With no approved segments there is no revision and no segment-based result.
+
 ## Synchronization transforms and numeric bounds
 
 `videoToTelemetryTime(video, sync)` computes `video * timeScale + offset`;

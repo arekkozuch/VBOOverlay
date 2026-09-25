@@ -6,7 +6,9 @@
 #include "telemetry/TelemetrySession.h"
 #include "telemetry/TelemetryRenderContext.h"
 #include "telemetry/TrackGeometry.h"
+#include "telemetry/CornerPhases.h"
 #include "telemetry/TrackProgress.h"
+#include "telemetry/TrackSegmentReview.h"
 #include "telemetry/TelemetryImportPlan.h"
 #include "telemetry/OutingLaps.h"
 #include "telemetry/TrackInference.h"
@@ -112,6 +114,13 @@ class AppController final : public QObject {
     Q_PROPERTY(QStringList outingLapChannels READ outingLapChannels WRITE setOutingLapChannels NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QStringList outingLapAvailableChannels READ outingLapAvailableChannels NOTIFY outingLapDetailChanged)
     Q_PROPERTY(QVariantList outingLapTrack READ outingLapTrack NOTIFY outingLapDetailChanged)
+    // KAN-48: automatic segment proposals for the open lap and their review.
+    Q_PROPERTY(QString segmentReviewState READ segmentReviewState NOTIFY segmentReviewChanged)
+    Q_PROPERTY(QString segmentReviewMessage READ segmentReviewMessage NOTIFY segmentReviewChanged)
+    Q_PROPERTY(double segmentReviewAxisLength READ segmentReviewAxisLength NOTIFY segmentReviewChanged)
+    Q_PROPERTY(QVariantList segmentReviewItems READ segmentReviewItems NOTIFY segmentReviewChanged)
+    Q_PROPERTY(QVariantMap segmentReviewApproved READ segmentReviewApproved NOTIFY segmentReviewChanged)
+    Q_PROPERTY(QVariantList segmentReviewMapLayers READ segmentReviewMapLayers NOTIFY segmentReviewChanged)
     Q_PROPERTY(QVariantMap outingLapTrackPoint READ outingLapTrackPoint NOTIFY outingLapCursorChanged)
     Q_PROPERTY(double outingLapCursor READ outingLapCursor WRITE setOutingLapCursor NOTIFY outingLapCursorChanged)
     // KAN-39: video linkage for the open lap, gated to the lap's own run
@@ -284,6 +293,14 @@ public:
     Q_INVOKABLE bool selectOutingLapReference(const QVariantMap &reference);
     Q_INVOKABLE bool setOutingLapExcluded(const QVariantMap &reference, bool excluded, const QString &reason = {});
     Q_INVOKABLE void closeOutingLap();
+    Q_INVOKABLE void requestSegmentReview();
+    Q_INVOKABLE QString approveSegmentProposal(int index);
+    Q_INVOKABLE int approveCertainSegmentProposals();
+    Q_INVOKABLE bool setSegmentProposalRejected(int index, bool rejected);
+    Q_INVOKABLE QString editSegmentProposal(int index, const QString &name, const QString &type,
+        double startMeters, double endMeters);
+    Q_INVOKABLE bool revokeApprovedSegment(const QString &id);
+    Q_INVOKABLE bool discardOtherConfigurationSegments();
     Q_INVOKABLE QVariantMap outingLapSeries(const QString &channel, int maximumPoints) const;
     Q_INVOKABLE QVariantMap outingLapSeries(
         const QString &channel, double startTime, double endTime, int maximumPoints) const;
@@ -297,6 +314,12 @@ public:
     [[nodiscard]] QVariantList outingLapTrack() const { return m_outingLapTrack; }
     [[nodiscard]] QVariantMap outingLapTrackPoint() const;
     [[nodiscard]] double outingLapCursor() const { return m_outingLapCursor; }
+    [[nodiscard]] QString segmentReviewState() const { return m_segmentReviewState; }
+    [[nodiscard]] QString segmentReviewMessage() const { return m_segmentReviewMessage; }
+    [[nodiscard]] double segmentReviewAxisLength() const;
+    [[nodiscard]] QVariantList segmentReviewItems() const;
+    [[nodiscard]] QVariantMap segmentReviewApproved() const;
+    [[nodiscard]] QVariantList segmentReviewMapLayers() const;
     void setOutingLapCursor(double seconds);
     // Reuses the central SyncTransform (videoToTelemetryTime/telemetryToVideoTime,
     // TelemetrySession.h) already relied on for the main preview's playback<->
@@ -397,6 +420,7 @@ signals:
     void comparisonSlotsChanged();
     void comparisonViewOpenChanged();
     void outingLapCursorChanged();
+    void segmentReviewChanged();
     void videoSourceChanged();
     void telemetryChanged();
     void lapNavigationChanged();
@@ -626,6 +650,39 @@ private:
     QStringList m_outingLapChannels;
     QVariantList m_outingLapTrack;
     double m_outingLapCursor = 0;
+    struct SegmentReviewResult {
+        quint64 request = 0;
+        FlappedEar::ProgressAxis axis;
+        FlappedEar::TrackSegmentProposals proposals;
+        QVector<FlappedEar::CornerGeometryPhases> phases; // one per proposal; invalid for straights
+        QVector<FlappedEar::ProgressSegment> lapTrace;
+        QString unavailable; // no proposals can be made, and why
+        QString error;
+    };
+    static SegmentReviewResult computeSegmentReview(std::shared_ptr<const TelemetrySession> session,
+        double startTime, double endTime, int lapNumber, quint64 request,
+        const std::shared_ptr<std::atomic_bool> &cancellation);
+    void initializeSegmentReview();
+    void resetSegmentReview();
+    [[nodiscard]] QString segmentReviewUnavailableReason() const;
+    [[nodiscard]] QString segmentReviewConfiguration() const;
+    [[nodiscard]] FlappedEar::ApprovedSegmentation currentApprovedSegmentation() const;
+    [[nodiscard]] QVector<FlappedEar::SegmentReviewItem> currentSegmentReviewItems() const;
+    bool replaceRunTrackSegments(const QString &runId, const QJsonArray &segments);
+    [[nodiscard]] QVariantList mapPolylines(double startMeters, double endMeters) const;
+    QFutureWatcher<SegmentReviewResult> m_segmentReviewWatcher;
+    std::shared_ptr<std::atomic_bool> m_segmentReviewCancellation;
+    quint64 m_segmentReviewRequest = 0;
+    QString m_segmentReviewState = QStringLiteral("idle");
+    QString m_segmentReviewMessage;
+    FlappedEar::ProgressAxis m_segmentReviewAxis;
+    QVector<FlappedEar::TrackSegmentProposal> m_segmentProposals;
+    QVector<FlappedEar::CornerGeometryPhases> m_segmentProposalPhases;
+    QVector<FlappedEar::ProgressSegment> m_segmentReviewLapTrace;
+    QSet<int> m_editedSegmentProposals;
+    QSet<int> m_rejectedSegmentProposals;
+    mutable QVariantList m_segmentReviewLayerCache;
+    mutable bool m_segmentReviewLayersDirty = true;
     struct OutingSourceMessage {
         QString runId;
         QString text;

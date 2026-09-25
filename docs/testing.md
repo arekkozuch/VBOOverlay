@@ -270,6 +270,54 @@ for an empty brake channel, `bar` vs `%` units, undeclared units, progress
 mapping and invalid inputs. Synthetic only; no real brake-sensor recording
 has been validated.
 
+## Segment-proposal review and approved revision (KAN-48)
+
+`native/src/telemetry/TrackSegmentReview.h/.cpp` (tag
+`track-segment-review-v1`) holds the pure review rules; the controller glue is
+`native/src/app/AppControllerSegmentReview.cpp` and the UI is
+`SegmentReviewPanel.qml` with a static segment layer in `TrackMapPanel.qml`.
+
+- Opening *Review segments* on a clean timed lap builds a progress axis from
+  that lap and runs `proposeTrackSegments` (smoothing 6 m) and
+  `proposeCornerGeometryPhases` off the UI thread. The worker is cancellable and
+  its result is dropped unless its request matches the current review, so
+  closing or switching the lap cannot apply a stale proposal set. OUT/IN
+  sections, laps with GPS or layout issues, and laps without a resolved track
+  configuration are reported as unavailable instead of guessing.
+- Coverage holes of 15 m or more in the lap's own projected trace are passed
+  as GPS gaps, so nearby boundaries are marked uncertain.
+- A proposal is `proposed`, `approved` (an approved segment has exactly its
+  bounds and type), `rejected` (review session only), or `superseded` (it
+  overlaps an approved segment from elsewhere and cannot be approved).
+- Approving writes an ordinary segment into the run's `trackSegments`. It is
+  refused if it overlaps an approved segment (including across the
+  start/finish line), if segments approved for another track configuration are
+  still stored (they can only be discarded explicitly), or above the 64-segment
+  bound. *Approve all certain* skips any proposal with an uncertain boundary.
+- Edits (name, type, numeric bounds) are validated (finite, within the axis,
+  non-empty, 1–160 character name). A moved boundary drops the automatic
+  uncertainty, and the geometric apex is hidden for an edited proposal.
+  Approved segments are revoked, not edited; full editing is KAN-49.
+- `approvedSegmentation` gives the segments for one configuration and their
+  `trackSegmentSetRevision`. Results record a `SegmentationResultStamp` and are
+  current only while `segmentationResultCurrent` holds. Approval, revocation,
+  rename or a configuration change all produce a different revision.
+- The map draws approved segments (green), proposals (blue corners, grey
+  straights) and uncertainty windows (orange) along the lap's own GPS trace,
+  breaking at coverage holes. This static layer is repainted only when the
+  review changes, never on playback.
+
+`TrackSegmentReviewTests` covers state derivation, overlap including
+wrap-around, ordering, configuration mixing, revocation and discard, revision
+stamps, malformed edits and stored data, the segment bound, and approving
+every stadium proposal. `TelemetryTests::reviewsSegmentProposalsForTheOpenLap`
+drives the controller on the synthetic elliptical route. It covers an
+unavailable non-lap section, stale-result rejection after closing the lap,
+finite map layers, QML panel/map loading, approve/reject/edit/supersede/revoke,
+dirty state, revision changes, and save/reopen matching of the approved segment.
+Synthetic only; no real track has been reviewed. Rejections and edits are not
+persisted, and the approval state beyond the stored segments belongs to KAN-50.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

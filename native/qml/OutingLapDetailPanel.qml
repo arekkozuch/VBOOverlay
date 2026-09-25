@@ -24,6 +24,9 @@ Rectangle {
     signal seekRequested(real milliseconds)
     readonly property var lap: appController.selectedOutingLap
     readonly property bool ready: appController.outingLapDetailState === "ready"
+    // KAN-48: swaps the charts for the segment-proposal review of this lap.
+    property bool reviewingSegments: false
+    onLapChanged: if (!root.lap.reference) root.reviewingSegments = false
     function duration(seconds) {
         return Math.floor(seconds / 60) + ":" + (seconds % 60).toFixed(3).padStart(6, "0");
     }
@@ -112,6 +115,12 @@ Rectangle {
                     color: "#91a0b2"
                     font.pixelSize: 11
                 }
+            }
+            FeButton {
+                objectName: "toggleSegmentReview"
+                visible: root.ready && root.lap.type === "LAP"
+                text: root.reviewingSegments ? qsTr("Show charts") : qsTr("Review segments")
+                onClicked: root.reviewingSegments = !root.reviewingSegments
             }
         }
         RowLayout {
@@ -214,16 +223,28 @@ Rectangle {
                 }
                 TrackMapPanel {
                     lapDetail: true
+                    segmentReview: root.reviewingSegments
+                    selectedSegmentIndex: segmentReviewLoader.item ? segmentReviewLoader.item.selectedIndex : -1
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                 }
             }
             AnalysisPanel {
                 objectName: "outingLapCharts"
+                visible: !root.reviewingSegments
                 lapDetail: true
                 mediaDuration: 0
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+            }
+            // Created on demand: proposals are computed only when a review is opened.
+            Loader {
+                id: segmentReviewLoader
+                active: root.reviewingSegments && root.ready
+                visible: active
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                sourceComponent: SegmentReviewPanel { objectName: "segmentReviewPanel" }
             }
         }
         RowLayout {

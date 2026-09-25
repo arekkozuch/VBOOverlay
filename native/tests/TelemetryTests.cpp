@@ -33,6 +33,7 @@
 #include "telemetry/VboParser.h"
 #include "RczFixture.h"
 #include "EventProjectFixture.h"
+#include "telemetry/TrackSegmentReview.h"
 #include "project/EventProjectCodec.h"
 #include "widgets/WidgetModel.h"
 #include "project/ProjectWriter.h"
@@ -142,6 +143,7 @@ private slots:
     void preservesComparisonSlotAcrossFailuresAndReplacement();
     void comparesTwoLapsFromTheSameRun();
     void overlaysComparisonLapsOnASharedProgressAxis();
+    void reviewsSegmentProposalsForTheOpenLap();
     void showsComparisonSlotCompatibilityAndCoverageContext();
     void sharesComparisonCacheAndRevalidatesSources();
     void rejectsComparisonBeyondSharedBudget();
@@ -3311,6 +3313,180 @@ void TelemetryTests::comparesTwoLapsFromTheSameRun()
         a.value("endTime").toDouble(), 200).isEmpty());
     QVERIFY(!controller.comparisonLapSeries(1, "latitude", b.value("startTime").toDouble(),
         b.value("endTime").toDouble(), 200).isEmpty());
+}
+
+void TelemetryTests::reviewsSegmentProposalsForTheOpenLap()
+{
+    // KAN-48: proposals for the open lap are review input only; approval writes
+    // the run's persisted segments, whose revision identifies what results use.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto path = directory.filePath("session.vbo");
+    QVERIFY(writeBytes(path, EventProjectFixture::routeVbo()));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Segments", {QUrl::fromLocalFile(path)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    int lapIndex = -1, otherIndex = -1;
+    const auto rows = controller.outingLaps();
+    for (int i = 0; i < rows.size(); ++i) {
+        const auto row = rows[i].toMap();
+        if (row.value("type") == "LAP" && lapIndex < 0 && !row.value("compatibilityGroupId").toString().isEmpty()) lapIndex = i;
+        if (row.value("type") != "LAP" && otherIndex < 0) otherIndex = i;
+    }
+    QVERIFY(lapIndex >= 0);
+
+    // A section that is not a complete timed lap cannot anchor proposals.
+    if (otherIndex >= 0) {
+        QVERIFY(controller.selectOutingLap(otherIndex));
+        QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+        controller.requestSegmentReview();
+        QCOMPARE(controller.segmentReviewState(), QString("unavailable"));
+        QVERIFY(!controller.segmentReviewMessage().isEmpty());
+        QVERIFY(controller.segmentReviewItems().isEmpty());
+    }
+
+    // A result arriving after the lap closed must not mutate review state.
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    controller.requestSegmentReview();
+    QCOMPARE(controller.segmentReviewState(), QString("loading"));
+    controller.closeOutingLap();
+    QCOMPARE(controller.segmentReviewState(), QString("idle"));
+    QTRY_VERIFY(!controller.m_segmentReviewWatcher.isRunning());
+    QCoreApplication::processEvents();
+    QCOMPARE(controller.segmentReviewState(), QString("idle"));
+    QVERIFY(controller.segmentReviewItems().isEmpty());
+
+    QVERIFY(controller.selectOutingLap(lapIndex));
+    QTRY_COMPARE(controller.outingLapDetailState(), QString("ready"));
+    const auto runId = controller.selectedOutingLap().value("runId").toString();
+    const auto configuration = controller.selectedOutingLap().value("compatibilityGroupId").toString();
+    controller.requestSegmentReview();
+    QTRY_VERIFY(controller.segmentReviewState() != "loading");
+    QVERIFY2(controller.segmentReviewState() == "ready", qPrintable(controller.segmentReviewMessage()));
+    QVERIFY(controller.segmentReviewAxisLength() > 0.0);
+    auto items = controller.segmentReviewItems();
+    QVERIFY2(items.size() >= 2, "the elliptical route splits into corners and straights");
+    for (const auto &value : items) QCOMPARE(value.toMap().value("state").toString(), QString("proposed"));
+    QCOMPARE(controller.segmentReviewApproved().value("count").toInt(), 0);
+    QVERIFY(controller.segmentReviewApproved().value("revision").toString().isEmpty());
+
+    // Proposals and uncertainty windows are drawn from the lap's own GPS trace.
+    const auto layers = controller.segmentReviewMapLayers();
+    QVERIFY(!layers.isEmpty());
+    for (const auto &layer : layers) {
+        for (const auto &polyline : layer.toMap().value("polylines").toList()) {
+            for (const auto &point : polyline.toList()) {
+                QVERIFY(std::isfinite(point.toMap().value("x").toDouble()));
+                QVERIFY(std::isfinite(point.toMap().value("y").toDouble()));
+            }
+        }
+    }
+
+    {
+        // The review panel and the map's static segment layer load against the live controller.
+        QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick\nItem { width: 900; height: 700\n"
+            "SegmentReviewPanel { objectName: \"panel\"; width: 560; height: 700 }\n"
+            "TrackMapPanel { x: 580; lapDetail: true; segmentReview: true; width: 300; height: 300 } }",
+            QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *list = root->findChild<QObject *>("segmentProposalList");
+        QVERIFY(list);
+        QTRY_COMPARE(list->property("count").toInt(), static_cast<int>(items.size()));
+        auto *mapLayer = root->findChild<QObject *>("segmentReviewMapLayer");
+        QVERIFY(mapLayer);
+        QCOMPARE(mapLayer->property("layers").toList().size(), static_cast<int>(layers.size()));
+        QCOMPARE(controller.segmentReviewState(), QString("ready")); // opening the panel keeps the review
+    }
+
+    const auto storedSegments = [&] {
+        for (const auto &run : controller.currentProjectObject().value("event").toObject().value("runs").toArray())
+            if (run.toObject().value("id").toString() == runId) return run.toObject().value("trackSegments").toArray();
+        return QJsonArray{};
+    };
+    QVERIFY(!controller.dirty() || controller.saveProject(QUrl::fromLocalFile(directory.filePath("before.fetproject"))));
+    QVERIFY(!controller.dirty());
+    QCOMPARE(controller.approveSegmentProposal(0), QString());
+    QVERIFY(controller.dirty());
+    QCOMPARE(storedSegments().size(), 1);
+    QCOMPARE(storedSegments().first().toObject().value("trackConfigurationReference").toString(), configuration);
+    const auto firstRevision = controller.segmentReviewApproved().value("revision").toString();
+    QVERIFY(firstRevision.startsWith("track-segments-v1:"));
+    QCOMPARE(firstRevision, approvedSegmentation(storedSegments(), configuration).revision);
+    items = controller.segmentReviewItems();
+    QCOMPARE(items[0].toMap().value("state").toString(), QString("approved"));
+    QCOMPARE(items[0].toMap().value("approvedSegmentId").toString(),
+        storedSegments().first().toObject().value("id").toString());
+    QVERIFY(controller.approveSegmentProposal(0).isEmpty()); // idempotent
+    QCOMPARE(storedSegments().size(), 1);
+
+    // Rejection is review-session state only; it never touches the document.
+    QVERIFY(controller.setSegmentProposalRejected(1, true));
+    QCOMPARE(controller.segmentReviewItems()[1].toMap().value("state").toString(), QString("rejected"));
+    QCOMPARE(storedSegments().size(), 1);
+    QVERIFY(controller.setSegmentProposalRejected(1, false));
+    QVERIFY(!controller.setSegmentProposalRejected(0, true)); // approved rows are revoked, not rejected
+    QVERIFY(!controller.setSegmentProposalRejected(99, true));
+
+    // Edits are validated, and an edit into approved territory cannot be approved.
+    const auto second = controller.segmentReviewItems()[1].toMap();
+    const double length = controller.segmentReviewAxisLength();
+    QVERIFY(!controller.editSegmentProposal(1, "Back", "straight", std::nan(""), 10.0).isEmpty());
+    QVERIFY(!controller.editSegmentProposal(1, "Back", "chicane", 10.0, 20.0).isEmpty());
+    QVERIFY(!controller.editSegmentProposal(1, " ", "straight", 10.0, 20.0).isEmpty());
+    QVERIFY(!controller.editSegmentProposal(1, "Back", "straight", 10.0, length + 1.0).isEmpty());
+    QVERIFY(!controller.editSegmentProposal(0, "Renamed", "corner", 10.0, 20.0).isEmpty());
+    const double first0 = items[0].toMap().value("startMeters").toDouble();
+    const double first1 = items[0].toMap().value("endMeters").toDouble();
+    const auto secondType = second.value("type").toString();
+    QCOMPARE(controller.editSegmentProposal(1, "Back section", secondType,
+        std::fmod(first0 + (first1 > first0 ? first1 - first0 : first1 + length - first0) / 2.0, length),
+        second.value("endMeters").toDouble()), QString());
+    auto edited = controller.segmentReviewItems()[1].toMap();
+    QVERIFY(edited.value("edited").toBool());
+    QCOMPARE(edited.value("name").toString(), QString("Back section"));
+    QCOMPARE(edited.value("state").toString(), QString("superseded"));
+    QVERIFY(controller.approveSegmentProposal(1).contains("Overlaps"));
+    QCOMPARE(storedSegments().size(), 1);
+    // Moving the start back onto the approved boundary makes it approvable again.
+    QCOMPARE(controller.editSegmentProposal(1, "Back section", secondType, first1, second.value("endMeters").toDouble()), QString());
+    QCOMPARE(controller.segmentReviewItems()[1].toMap().value("state").toString(), QString("proposed"));
+    QCOMPARE(controller.approveSegmentProposal(1), QString());
+    QCOMPARE(storedSegments().size(), 2);
+    const auto secondRevision = controller.segmentReviewApproved().value("revision").toString();
+    QVERIFY(secondRevision != firstRevision);
+    QVERIFY(!segmentationResultCurrent({configuration, firstRevision}, approvedSegmentation(storedSegments(), configuration)));
+
+    // Revoking restores the proposal and yields yet another revision.
+    QVERIFY(controller.revokeApprovedSegment(storedSegments().first().toObject().value("id").toString()));
+    QCOMPARE(storedSegments().size(), 1);
+    QCOMPARE(controller.segmentReviewItems()[0].toMap().value("state").toString(), QString("proposed"));
+    QVERIFY(controller.segmentReviewApproved().value("revision").toString() != secondRevision);
+    QVERIFY(!controller.revokeApprovedSegment("missing"));
+
+    // Save and reopen: the approved segment is recognized against fresh proposals.
+    const auto projectPath = directory.filePath("segments.fetproject");
+    QVERIFY(controller.saveProject(QUrl::fromLocalFile(projectPath)));
+    QVERIFY(!controller.dirty());
+    AppController reopened(nullptr, directory.filePath("recovery-reopened.json"));
+    reopened.requestOpenProject(QUrl::fromLocalFile(projectPath));
+    QTRY_COMPARE(reopened.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!reopened.outingLapsLoading());
+    QTRY_VERIFY(reopened.selectOutingLap(lapIndex));
+    QTRY_COMPARE(reopened.outingLapDetailState(), QString("ready"));
+    reopened.requestSegmentReview();
+    QTRY_COMPARE(reopened.segmentReviewState(), QString("ready"));
+    QCOMPARE(reopened.segmentReviewApproved().value("count").toInt(), 1);
+    // Matched on exact bounds and type; the reviewer's name is kept on the approved segment.
+    QCOMPARE(reopened.segmentReviewItems()[1].toMap().value("state").toString(), QString("approved"));
+    QCOMPARE(reopened.segmentReviewApproved().value("segments").toList().first().toMap().value("name").toString(),
+        QString("Back section"));
+    QCOMPARE(reopened.segmentReviewItems()[0].toMap().value("state").toString(), QString("proposed"));
 }
 
 void TelemetryTests::overlaysComparisonLapsOnASharedProgressAxis()
