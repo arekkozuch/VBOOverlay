@@ -13,6 +13,7 @@
 #include "telemetry/SectorTiming.h"
 #include "telemetry/TheoreticalBest.h"
 #include "telemetry/TimeLoss.h"
+#include "telemetry/Consistency.h"
 #include "telemetry/CornerSpeeds.h"
 #include "telemetry/BrakingMetrics.h"
 #include "telemetry/ExitMetrics.h"
@@ -148,6 +149,9 @@ class AppController final : public QObject {
     // KAN-60: the day's largest observed losses of each eligible lap against
     // the group's actual best, from the same calculation.
     Q_PROPERTY(QVariantMap outingTimeLossRanking READ outingTimeLossRanking NOTIFY outingTheoreticalBestChanged)
+    // KAN-62: lap-time consistency of the comparison group's eligible laps
+    // (median and interquartile range), for the day and for each run.
+    Q_PROPERTY(QVariantMap outingLapConsistency READ outingLapConsistency NOTIFY outingLapsChanged)
     // KAN-117: by default only each run's best lap is ranked; warm-up and
     // traffic laps otherwise dominate the list.
     Q_PROPERTY(bool outingTimeLossAllLaps READ outingTimeLossAllLaps WRITE setOutingTimeLossAllLaps NOTIFY outingTheoreticalBestChanged)
@@ -266,6 +270,7 @@ public:
     [[nodiscard]] QVariantMap outingProgression() const;
     [[nodiscard]] QVariantMap outingTheoreticalBest() const;
     [[nodiscard]] QVariantMap outingTimeLossRanking() const;
+    [[nodiscard]] QVariantMap outingLapConsistency() const;
     [[nodiscard]] bool outingTimeLossAllLaps() const { return m_timeLossAllLaps; }
     void setOutingTimeLossAllLaps(bool allLaps);
     Q_INVOKABLE void requestOutingTheoreticalBest();

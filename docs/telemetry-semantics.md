@@ -138,6 +138,11 @@ When the Corner Analyzer is opened from a theoretical-best sector, it
 compares the donor lap with the actual best using that canonical
 segmentation, and says so.
 
+Timing consistency (KAN-62) reports the median ("typical") and the
+interquartile range ("spread", seconds, the middle half of the laps) with the
+sample count. It uses the ranking's eligibility and needs at least 3 samples.
+There is no percentage score.
+
 Time-loss observations (KAN-59) use one window per approved segment. A
 window's increment is A's time through it minus B's (positive: A lost time
 there). The running A-minus-B delta at its entry and exit is reported

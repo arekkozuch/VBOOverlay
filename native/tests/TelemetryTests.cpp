@@ -157,6 +157,7 @@ private slots:
     void derivesTimeLossObservationsForComparisonPair();
     void ranksTimeLossesAndRecalculatesOnExclusion();
     void navigatesFromRankedLossToCornerEvidence();
+    void reportsLapAndSectorConsistency();
     void formatsElapsedTimes();
     void analyzesPrivateTrackDayCorners();
     void reviewsSegmentProposalsForTheOpenLap();
@@ -4743,6 +4744,63 @@ void TelemetryTests::navigatesFromRankedLossToCornerEvidence()
     QCOMPARE(warnings.size(), 0);
 }
 
+void TelemetryTests::reportsLapAndSectorConsistency()
+{
+    // KAN-62: every lap of both runs takes exactly 48 s, so the lap spread is
+    // ~0, while sectors differ between the runs' quick halves. Excluding laps
+    // below the minimum makes lap consistency unavailable, not a guess.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("fastfirst.vbo"), second = directory.filePath("fastsecond.vbo");
+    QVERIFY(writeBytes(first, warpedRouteVbo(true)));
+    QVERIFY(writeBytes(second, warpedRouteVbo(false)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Consistency", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+
+    auto laps = controller.outingLapConsistency();
+    QCOMPARE(laps.value("algorithm").toString(), QString("consistency-iqr-v1"));
+    const auto day = laps.value("day").toMap();
+    const auto eligible = controller.outingRanking().value("eligibleLapCount").toInt();
+    QCOMPARE(day.value("count").toInt(), eligible); // the ranking's own population
+    QVERIFY(day.value("available").toBool());
+    QVERIFY(std::abs(day.value("median").toDouble() - 48.0) < 0.05);
+    QVERIFY(day.value("interquartileRange").toDouble() < 0.05);
+    QCOMPARE(laps.value("runs").toList().size(), 2);
+
+    QVERIFY(!approveAllSegmentsOnRun(controller, "Session 1").isEmpty());
+    controller.requestOutingTheoreticalBest();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingTheoreticalBest().value("state").toString(), QString("ready"), 30000);
+    bool someSpread = false;
+    for (const auto &value : controller.outingTheoreticalBest().value("sectors").toList()) {
+        const auto consistency = value.toMap().value("consistency").toMap();
+        QVERIFY2(consistency.value("available").toBool(), qPrintable(value.toMap().value("name").toString()));
+        QCOMPARE(consistency.value("count").toInt(), eligible);
+        QVERIFY(consistency.value("q1").toDouble() <= consistency.value("median").toDouble());
+        QVERIFY(consistency.value("median").toDouble() <= consistency.value("q3").toDouble());
+        someSpread |= consistency.value("interquartileRange").toDouble() > 0.1;
+    }
+    QVERIFY(someSpread); // the runs' opposite quick halves show up per sector
+
+    // Exclude laps until fewer than the minimum remain.
+    int remaining = eligible;
+    for (const auto &value : controller.outingLaps()) {
+        if (remaining <= 2) break;
+        const auto row = value.toMap();
+        if (row.value("type") != "LAP" || !row.value("referenceEligible").toBool()) continue;
+        QVERIFY(controller.setOutingLapExcluded(row.value("reference").toMap(), true, "Test"));
+        --remaining;
+    }
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_COMPARE(controller.outingLapConsistency().value("day").toMap().value("count").toInt(), 2);
+    laps = controller.outingLapConsistency();
+    QVERIFY(!laps.value("day").toMap().value("available").toBool());
+    QCOMPARE(laps.value("day").toMap().value("unavailableReason").toString(), QString("tooFewSamples"));
+    QVERIFY(!laps.value("day").toMap().contains("median"));
+}
+
 void TelemetryTests::formatsElapsedTimes()
 {
     QCOMPARE(AppController::formatElapsedTime(100.838), QString("1:40.838"));
@@ -4815,6 +4873,22 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
             .arg(sector.value("actualSeconds").toDouble(), 7, 'f', 3).arg(sector.value("lossSeconds").toDouble(), 6, 'f', 3);
         if (sameLapSector.isEmpty() && sector.value("sourceLapReference").toMap() == actual.value("reference").toMap())
             sameLapSector = sector.value("segmentId").toString();
+    }
+    const auto lapConsistency = controller.outingLapConsistency();
+    const auto dayLaps = lapConsistency.value("day").toMap();
+    qInfo().noquote() << "Lap consistency: n" << dayLaps.value("count").toInt() << "median"
+        << AppController::formatElapsedTime(dayLaps.value("median").toDouble()) << "IQR" << dayLaps.value("interquartileRange").toDouble();
+    for (const auto &value : lapConsistency.value("runs").toList()) {
+        const auto run = value.toMap(); const auto summary = run.value("laps").toMap();
+        qInfo().noquote() << "  " << run.value("runName").toString() << "n" << summary.value("count").toInt()
+            << "median" << (summary.value("available").toBool() ? AppController::formatElapsedTime(summary.value("median").toDouble()) : QString("-"))
+            << "IQR" << summary.value("interquartileRange").toDouble();
+    }
+    for (const auto &value : best.value("sectors").toList()) {
+        const auto sector = value.toMap(); const auto consistency = sector.value("consistency").toMap();
+        qInfo().noquote() << QString("  %1 typical %2 spread %3 n %4").arg(sector.value("name").toString(), -14)
+            .arg(consistency.value("median").toDouble(), 7, 'f', 3).arg(consistency.value("interquartileRange").toDouble(), 6, 'f', 3)
+            .arg(consistency.value("count").toInt());
     }
     const auto ranking = controller.outingTimeLossRanking();
     qInfo().noquote() << "Losses:" << ranking.value("observationCount").toInt() << "observed over"

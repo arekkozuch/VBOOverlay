@@ -23,6 +23,16 @@ Dialog {
     readonly property var mapData: root.theoretical.map || ({})
     readonly property real maximumGain: Math.max(0.001, ...root.gains.map(gain => Number(gain.lossSeconds || 0)))
     property string selectedSegmentId: ""
+    readonly property var lapConsistency: appController.outingLapConsistency.day || ({})
+    // KAN-62: "typical" is the median, "spread" the interquartile range.
+    function consistencyText(consistency, unitLabel) {
+        if (!consistency || consistency.count === undefined) return "";
+        if (!consistency.available)
+            return qsTr("%1 %2 · too few for consistency (minimum %3)").arg(consistency.count).arg(unitLabel)
+                .arg(appController.outingLapConsistency.minimumSamples || 3);
+        return qsTr("typical %1 · spread %2 s · %3 %4").arg(appController.formatElapsedTime(Number(consistency.median)))
+            .arg(Number(consistency.interquartileRange).toFixed(3)).arg(consistency.count).arg(unitLabel);
+    }
 
     function calculateIfNeeded() {
         if (root.visible && ["idle", "error"].indexOf(root.theoretical.state) >= 0) appController.requestOutingTheoreticalBest();
@@ -104,6 +114,15 @@ Dialog {
                         objectName: "theoreticalBestTotal"
                         text: appController.formatElapsedTime(Number(root.theoretical.totalSeconds))
                         color: "#55e6a5"; font.pixelSize: 22; font.weight: Font.DemiBold
+                    }
+                }
+                ColumnLayout {
+                    spacing: 0
+                    Label { text: qsTr("LAPS TODAY"); color: "#8d9aaa"; font.pixelSize: 10; font.letterSpacing: 1 }
+                    Label {
+                        objectName: "theoreticalBestLapConsistency"
+                        text: root.consistencyText(root.lapConsistency, qsTr("laps"))
+                        color: "#dce4ee"; font.pixelSize: 14
                     }
                 }
                 ColumnLayout {
@@ -253,7 +272,7 @@ Dialog {
                             required property int index
                             objectName: "theoreticalBestSector" + sectorRow.index
                             width: sectors.width - 12
-                            height: 46
+                            height: 60
                             highlighted: sectorRow.modelData.segmentId === root.selectedSegmentId
                             enabled: sectorRow.modelData.seconds !== undefined
                             onClicked: root.openSegment(sectorRow.modelData.segmentId)
@@ -290,6 +309,14 @@ Dialog {
                                         elide: Text.ElideRight
                                         color: "#91a0b2"; font.pixelSize: 11
                                     }
+                                    Label {
+                                        objectName: "theoreticalBestConsistency" + sectorRow.index
+                                        Layout.fillWidth: true
+                                        text: root.consistencyText(sectorRow.modelData.consistency, qsTr("laps"))
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        color: "#657386"; font.pixelSize: 11
+                                    }
                                 }
                                 Label {
                                     objectName: "theoreticalBestLoss" + sectorRow.index
@@ -307,8 +334,9 @@ Dialog {
                 objectName: "theoreticalBestExplanation"
                 Layout.fillWidth: true
                 visible: root.theoretical.state === "ready"
-                text: qsTr("Algorithm: %1. The fastest recorded time for each approved segment across the eligible laps of this group, every lap timed on one shared track axis. It combines fragments of different laps and does not show that the whole lap can be driven that fast.")
-                    .arg(root.theoretical.algorithm || "")
+                text: qsTr("Algorithm: %1. The fastest recorded time for each approved segment across the eligible laps of this group, every lap timed on one shared track axis. It combines fragments of different laps and does not show that the whole lap can be driven that fast. Typical is the median; spread is the interquartile range, the time between the 25th and 75th percentile (the middle half of the laps), so one slow lap does not dominate it (%2, at least %3 laps).")
+                    .arg(root.theoretical.algorithm || "").arg(root.theoretical.consistencyAlgorithm || "")
+                    .arg(appController.outingLapConsistency.minimumSamples || 3)
                     + (root.actualBest && !root.actualBest.coversWholeLap
                         ? " " + qsTr("The approved segments do not cover the whole lap, so your best lap above is the sum of its own times over the same segments, not its lap time.")
                         : "")
