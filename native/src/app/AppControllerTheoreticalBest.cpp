@@ -149,6 +149,67 @@ QVariantMap AppController::outingLapConsistency() const
     return result;
 }
 
+QVariantMap AppController::outingSectorProgression() const
+{
+    QVariantMap result{{"state", m_theoreticalBestState}, {"message", m_theoreticalBestMessage},
+        {"algorithm", QString::fromLatin1(consistencyAlgorithm)}, {"minimumSamples", minimumConsistencySamples}};
+    if (m_theoreticalBestState != "ready") return result;
+    QHash<QString, QVector<const TimedLapSectors *>> byRun;
+    for (const auto &lap : m_theoreticalBestPopulation) byRun[lap.times.lapReference.value("runId").toString()].append(&lap);
+    // Sessions in the progression's chronological order, with their context.
+    QVariantList sessions;
+    QStringList order;
+    for (const auto &value : m_outingProgression.value("runs").toList()) {
+        const auto run = value.toMap();
+        const auto runId = run.value("runId").toString();
+        if (!byRun.contains(runId)) continue;
+        QVector<double> lapTimes;
+        for (const auto *lap : byRun.value(runId)) lapTimes.append(lap->times.lapSeconds);
+        order.append(runId);
+        sessions.append(QVariantMap{{"runId", runId}, {"runName", run.value("runName")}, {"clock", run.value("clock")},
+            {"notes", run.value("notes")}, {"conditions", run.value("conditions")}, {"setupChanges", run.value("setupChanges")},
+            {"laps", consistencyMap(summarizeConsistency(lapTimes))}});
+    }
+    QVector<QJsonObject> segments;
+    for (const auto &value : m_theoreticalBestApproved.segments) segments.append(value.toObject());
+    std::stable_sort(segments.begin(), segments.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        return a.value("startProgressMeters").toDouble() < b.value("startProgressMeters").toDouble();
+    });
+    QVariantList rows;
+    for (const auto &segment : segments) {
+        const auto segmentId = segment.value("id").toString();
+        QVariantList cells;
+        std::optional<double> fastestTypical;
+        for (const auto &runId : order) {
+            QVector<double> times;
+            QVector<std::pair<double, QJsonObject>> laps;
+            for (const auto *lap : byRun.value(runId)) {
+                if (lap->times.stamp.revision != m_theoreticalBestApproved.revision) continue;
+                for (const auto &sector : lap->times.sectors) {
+                    if (sector.segmentId != segmentId || !sector.seconds) continue;
+                    times.append(*sector.seconds);
+                    laps.append({*sector.seconds, lap->times.lapReference});
+                }
+            }
+            std::sort(laps.begin(), laps.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+            QVariantList lapRows;
+            for (const auto &[seconds, reference] : laps)
+                lapRows.append(QVariantMap{{"seconds", seconds}, {"reference", reference.toVariantMap()},
+                    {"label", outingLapLabel(reference)}});
+            const auto summary = summarizeConsistency(times);
+            if (summary.available && (!fastestTypical || *summary.median < *fastestTypical)) fastestTypical = summary.median;
+            cells.append(QVariantMap{{"runId", runId}, {"summary", consistencyMap(summary)}, {"laps", lapRows}});
+        }
+        QVariantMap row{{"segmentId", segmentId}, {"name", segment.value("name").toString()},
+            {"type", segment.value("type").toString()}, {"cells", cells}};
+        if (fastestTypical) row.insert("fastestTypical", *fastestTypical);
+        rows.append(row);
+    }
+    result.insert("sessions", sessions);
+    result.insert("segments", rows);
+    return result;
+}
+
 QString AppController::outingLapLabel(const QJsonObject &reference) const
 {
     const auto resolved = resolveOutingLapReference(reference.toVariantMap());
