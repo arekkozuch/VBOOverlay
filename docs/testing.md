@@ -929,6 +929,36 @@ accuracy, and no speed or braking samples. On the private day, GPS accuracy
 is about 0.15 m and line spreads are 0.7–8.1 m. The gate-crossing final chain
 has line data only, because its speed and braking metrics are unavailable.
 
+## Sector progression between sessions (KAN-64)
+
+Day results → **Progression…** has two tabs: **Laps** (the KAN-25 per-run
+distributions) and **By section** (`SectionProgressionView.qml`). In
+**By section**, rows are the approved sections in track order and columns
+are sessions in the progression's chronological order. Each column header
+shows the session's lap typical time and spread, conditions and setup, with
+notes in a tooltip.
+
+Each cell shows that session's **typical** time (median) and **spread**
+(interquartile range, seconds) in the section, with the lap count; fewer than
+3 laps shows no statistics. The cell colour is relative within the row: green
+is the session with the quickest typical time, and the brighter the orange,
+the slower. Together, typical time and spread distinguish fast/variable from
+slower/repeatable. Each cell is a button: it lists the laps behind the
+figure, quickest first, and choosing a lap opens it.
+
+`AppController::outingSectorProgression` builds this from the laps the
+theoretical best timed on the canonical axis. It uses the same eligibility,
+invalidation and minimum as KAN-62.
+
+`TelemetryTests::showsSectionProgressionBetweenSessions` opens the dialog on
+the two-run fixture and switches to **By section**. It checks two sessions in
+order, one row per approved section, cell lap lists that match their counts,
+and sessions whose typical times differ. It then opens a cell with the
+keyboard and chooses its quickest lap, which opens, with no QML warnings.
+On the private Jastrząb day every section's typical time improves from the
+morning sessions to the afternoon. For example, Corners 2–3 go from 11.9 s
+(spread 2.7 s) to 8.9 s (0.3 s).
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

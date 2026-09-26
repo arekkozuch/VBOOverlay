@@ -159,6 +159,7 @@ private slots:
     void navigatesFromRankedLossToCornerEvidence();
     void reportsLapAndSectorConsistency();
     void reportsCornerVariabilityWithGpsLimits();
+    void showsSectionProgressionBetweenSessions();
     void formatsElapsedTimes();
     void analyzesPrivateTrackDayCorners();
     void reviewsSegmentProposalsForTheOpenLap();
@@ -4843,6 +4844,85 @@ void TelemetryTests::reportsCornerVariabilityWithGpsLimits()
     QVERIFY(corners > 0);
 }
 
+void TelemetryTests::showsSectionProgressionBetweenSessions()
+{
+    // KAN-64: sections x sessions, each cell the typical time and spread of
+    // that session's laps in the section; a cell lists its laps, and choosing
+    // one opens it. The two sessions are quick in opposite halves, so their
+    // typical times differ per section.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("fastfirst.vbo"), second = directory.filePath("fastsecond.vbo");
+    QVERIFY(writeBytes(first, warpedRouteVbo(true)));
+    QVERIFY(writeBytes(second, warpedRouteVbo(false)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Progression", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    const auto approved = approveAllSegmentsOnRun(controller, "Session 1");
+    QVERIFY(!approved.isEmpty());
+
+    QQmlEngine engine; engine.rootContext()->setContextProperty("appController", &controller);
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\nWindow { width: 1200; height: 800; visible: true; "
+        "OutingProgressionDialog { objectName: \"dialog\" } }", QUrl::fromLocalFile(QStringLiteral(ANALYSIS_PANEL_QML_PATH)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create()); QVERIFY2(object, qPrintable(component.errorString()));
+    auto *window = qobject_cast<QQuickWindow *>(object.get()); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto *dialog = window->findChild<QObject *>("dialog"); QVERIFY(dialog);
+    QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+    auto *tabs = window->findChild<QObject *>("progressionTabs"); QVERIFY(tabs);
+    QTRY_VERIFY(dialog->property("visible").toBool());
+    tabs->setProperty("currentIndex", 1);
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingSectorProgression().value("state").toString(), QString("ready"), 30000);
+
+    const auto progression = controller.outingSectorProgression();
+    const auto sessions = progression.value("sessions").toList();
+    QCOMPARE(sessions.size(), 2);
+    QCOMPARE(sessions[0].toMap().value("runName").toString(), QString("Session 1"));
+    const auto segments = progression.value("segments").toList();
+    QCOMPARE(segments.size(), approved.size());
+    bool sessionsDiffer = false;
+    for (const auto &value : segments) {
+        const auto row = value.toMap();
+        const auto cells = row.value("cells").toList();
+        QCOMPARE(cells.size(), 2);
+        for (const auto &cellValue : cells) {
+            const auto cell = cellValue.toMap();
+            QCOMPARE(cell.value("laps").toList().size(), cell.value("summary").toMap().value("count").toInt());
+        }
+        const auto a = cells[0].toMap().value("summary").toMap(), b = cells[1].toMap().value("summary").toMap();
+        if (a.value("available").toBool() && b.value("available").toBool())
+            sessionsDiffer |= std::abs(a.value("median").toDouble() - b.value("median").toDouble()) > 0.3;
+    }
+    QVERIFY(sessionsDiffer);
+
+    // A cell lists its laps; choosing one opens it.
+    const auto findVisual = [](auto &&self, QQuickItem *item, const QString &name) -> QQuickItem * {
+        if (item->objectName() == name) return item;
+        for (auto *child : item->childItems()) if (auto *found = self(self, child, name)) return found;
+        return nullptr;
+    };
+    auto *grid = window->findChild<QQuickItem *>("sectionProgressionGrid"); QVERIFY(grid);
+    QQuickItem *cell = nullptr;
+    QTRY_VERIFY((cell = findVisual(findVisual, grid, "sectionCell-0-0")) && cell->isVisible());
+    cell->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    auto *popup = window->findChild<QObject *>("sectionCellLaps"); QVERIFY(popup);
+    QTRY_VERIFY2(popup->property("visible").toBool(), "cell click did not open the lap list");
+    auto *lapList = window->findChild<QQuickItem *>("sectionCellLapList"); QVERIFY(lapList);
+    QTRY_VERIFY2(lapList->property("count").toInt() > 0, qPrintable(QString::number(lapList->property("count").toInt())));
+    QQuickItem *lap = nullptr;
+    QTRY_VERIFY(QMetaObject::invokeMethod(lapList, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, lap), Q_ARG(int, 0)) && lap);
+    const auto expected = segments[0].toMap().value("cells").toList()[0].toMap().value("laps").toList()[0].toMap().value("reference").toMap();
+    lap->forceActiveFocus(); QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QTRY_COMPARE(controller.selectedOutingLap().value("reference").toMap(), expected);
+    QCOMPARE(warnings.size(), 0);
+}
+
 void TelemetryTests::formatsElapsedTimes()
 {
     QCOMPARE(AppController::formatElapsedTime(100.838), QString("1:40.838"));
@@ -5023,6 +5103,15 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
             if (value.toMap().value("type") == "corner") { theoretical->setProperty("selectedSegmentId", value.toMap().value("segmentId")); break; }
         QTest::qWait(800);
         QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("theoretical-best.png")));
+        QVERIFY(QMetaObject::invokeMethod(theoretical, "close"));
+    }
+    auto *progressionDialog = window->findChild<QObject *>("outingProgressionDialog");
+    auto *progressionTabs = window->findChild<QObject *>("progressionTabs");
+    if (progressionDialog && progressionTabs) {
+        QVERIFY(QMetaObject::invokeMethod(progressionDialog, "open"));
+        progressionTabs->setProperty("currentIndex", 1);
+        QTest::qWait(1200);
+        QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("section-progression.png")));
     }
     for (const auto &warning : warnings) qInfo() << "QML warning" << warning;
 }

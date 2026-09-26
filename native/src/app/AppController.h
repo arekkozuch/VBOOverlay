@@ -153,6 +153,9 @@ class AppController final : public QObject {
     // KAN-62: lap-time consistency of the comparison group's eligible laps
     // (median and interquartile range), for the day and for each run.
     Q_PROPERTY(QVariantMap outingLapConsistency READ outingLapConsistency NOTIFY outingLapsChanged)
+    // KAN-64: each approved segment's typical time and spread per session, in
+    // chronological order, with the laps behind every figure.
+    Q_PROPERTY(QVariantMap outingSectorProgression READ outingSectorProgression NOTIFY outingTheoreticalBestChanged)
     // KAN-117: by default only each run's best lap is ranked; warm-up and
     // traffic laps otherwise dominate the list.
     Q_PROPERTY(bool outingTimeLossAllLaps READ outingTimeLossAllLaps WRITE setOutingTimeLossAllLaps NOTIFY outingTheoreticalBestChanged)
@@ -272,6 +275,7 @@ public:
     [[nodiscard]] QVariantMap outingTheoreticalBest() const;
     [[nodiscard]] QVariantMap outingTimeLossRanking() const;
     [[nodiscard]] QVariantMap outingLapConsistency() const;
+    [[nodiscard]] QVariantMap outingSectorProgression() const;
     [[nodiscard]] bool outingTimeLossAllLaps() const { return m_timeLossAllLaps; }
     void setOutingTimeLossAllLaps(bool allLaps);
     Q_INVOKABLE void requestOutingTheoreticalBest();
