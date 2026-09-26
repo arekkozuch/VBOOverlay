@@ -130,6 +130,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TimeLoss.h
     src/telemetry/Consistency.cpp
     src/telemetry/Consistency.h
+    src/telemetry/GgPairs.cpp
+    src/telemetry/GgPairs.h
     src/telemetry/DrivingVariability.cpp
     src/telemetry/DrivingVariability.h
     src/telemetry/CornerSpeeds.cpp
@@ -230,6 +232,7 @@ qt_add_qml_module(flappedear_native
         qml/ComparisonOverlayChart.qml
         qml/ComparisonOverlayMap.qml
         qml/ComparisonSegmentPanel.qml
+        qml/ComparisonGgPanel.qml
         qml/ComparisonLapDialog.qml
         qml/LapTimingPanel.qml
         qml/FeButton.qml
