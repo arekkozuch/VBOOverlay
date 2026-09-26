@@ -101,6 +101,49 @@ QByteArray AppController::theoreticalBestInputKey() const
     return QCryptographicHash::hash(QJsonDocument(key).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256);
 }
 
+namespace {
+QVariantMap consistencyMap(const ConsistencySummary &summary)
+{
+    QVariantMap map{{"count", summary.count}, {"available", summary.available}};
+    if (!summary.available) { map.insert("unavailableReason", summary.unavailableReason); return map; }
+    map.insert("minimum", *summary.minimum); map.insert("q1", *summary.q1); map.insert("median", *summary.median);
+    map.insert("q3", *summary.q3); map.insert("maximum", *summary.maximum);
+    map.insert("interquartileRange", *summary.interquartileRange);
+    return map;
+}
+}
+
+QVariantMap AppController::outingLapConsistency() const
+{
+    QVariantMap result{{"algorithm", QString::fromLatin1(consistencyAlgorithm)},
+        {"minimumSamples", minimumConsistencySamples}};
+    if (m_outingComparisonGroupId.isEmpty() || outingLapsLoading()) return result;
+    QVector<const OutingLapRow *> eligible;
+    try {
+        eligible = eligibleOutingLaps(m_outingRawLapRows, m_outingComparisonGroupId, m_outingRunConfigurations,
+            currentProjectObject().value("event").toObject().value("lapExclusions").toArray(), m_outingStaleRunIds);
+    } catch (const std::exception &) {
+        return result;
+    }
+    QVector<double> day;
+    QStringList runOrder;
+    QHash<QString, QVector<double>> byRun;
+    QHash<QString, QString> runNames;
+    for (const auto *row : eligible) {
+        day.append(row->end - row->start);
+        if (!byRun.contains(row->runId)) runOrder.append(row->runId);
+        byRun[row->runId].append(row->end - row->start);
+        runNames.insert(row->runId, row->runName);
+    }
+    result.insert("day", consistencyMap(summarizeConsistency(day)));
+    QVariantList runs;
+    for (const auto &runId : runOrder)
+        runs.append(QVariantMap{{"runId", runId}, {"runName", runNames.value(runId)},
+            {"laps", consistencyMap(summarizeConsistency(byRun.value(runId)))}});
+    result.insert("runs", runs);
+    return result;
+}
+
 QString AppController::outingLapLabel(const QJsonObject &reference) const
 {
     const auto resolved = resolveOutingLapReference(reference.toVariantMap());
@@ -141,6 +184,15 @@ QVariantMap AppController::outingTheoreticalBest() const
         }
         sectors.append(row);
     }
+    // KAN-62: how repeatable each segment is across the same population.
+    const auto consistency = computeSectorConsistency(m_theoreticalBestApproved, m_theoreticalBestPopulation);
+    for (auto &value : sectors) {
+        auto row = value.toMap();
+        for (const auto &sector : consistency)
+            if (sector.segmentId == row.value("segmentId").toString()) row.insert("consistency", consistencyMap(sector.summary));
+        value = row;
+    }
+    result.insert("consistencyAlgorithm", QString::fromLatin1(consistencyAlgorithm));
     result.insert("sectors", sectors);
     if (m_theoreticalBestBest.totalSeconds) result.insert("totalSeconds", *m_theoreticalBestBest.totalSeconds);
     if (actual) {

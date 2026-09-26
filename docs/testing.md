@@ -849,6 +849,46 @@ unsplit set already sums to the lap time. On the private day (approving
 every proposal without splitting), the result is 1:47.905 theoretical
 against a 1:49.898 best, with 1.993 s available.
 
+## Timing consistency (KAN-62)
+
+`summarizeConsistency` (`native/src/telemetry/Consistency.h/.cpp`, tag
+`consistency-iqr-v1`) reports, for a set of times:
+
+- the sample count;
+- **typical** = median;
+- **spread** = interquartile range (Q3 − Q1, in seconds): the width of the
+  middle half of the laps. It ignores the quickest and slowest quarter, so a
+  warm-up or traffic lap does not dominate it. No percentage score is used.
+- minimum, Q1, Q3 and maximum.
+
+Quantiles interpolate linearly between ordered samples, the same definition
+as the ranking's lap distributions. Fewer than **3** finite samples
+(`minimumConsistencySamples`) is `tooFewSamples`, with the count but no
+statistics.
+
+- **Laps:** `AppController::outingLapConsistency` uses `eligibleOutingLaps`,
+  the ranking's own eligibility (compatibility group, exclusions, GPS issues,
+  stale sources), for the whole day and per run. It is updated with the
+  outing laps.
+- **Sectors:** each segment in `outingTheoreticalBest` carries `consistency`,
+  computed from the laps the theoretical best timed on the canonical axis.
+  Laps without a time in that segment are left out.
+- **Theoretical best…** shows the day's lap consistency in its headline and
+  each segment's typical time and spread in the list.
+
+On the private Jastrząb day the whole-day spread is 24.5 s (23 laps). The
+day's progression from about 2:23 in the morning to 1:54 in the afternoon
+dominates it, so per-run statistics (a spread of 1.7–9 s) are the meaningful
+driver measure; KAN-64 presents them as progression.
+
+`ConsistencyTests` covers exact quantiles (including interpolation), the
+minimum, non-finite samples, robustness to one slow lap, and per-sector
+filtering (timed laps only, other revisions ignored).
+`TelemetryTests::reportsLapAndSectorConsistency` uses the two-run fixture.
+Laps all take 48 s, so the lap spread is about 0 and the count equals the
+ranking's eligible laps. Sectors show spread. After excluding laps down to 2,
+lap consistency is unavailable.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings

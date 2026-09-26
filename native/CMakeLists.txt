@@ -128,6 +128,8 @@ qt_add_library(flappedear_core STATIC
     src/telemetry/TheoreticalBest.h
     src/telemetry/TimeLoss.cpp
     src/telemetry/TimeLoss.h
+    src/telemetry/Consistency.cpp
+    src/telemetry/Consistency.h
     src/telemetry/CornerSpeeds.cpp
     src/telemetry/CornerSpeeds.h
     src/telemetry/BrakingMetrics.cpp
