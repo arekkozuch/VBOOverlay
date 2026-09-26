@@ -99,6 +99,7 @@ private slots:
     void missingCoverageCreatesNoDistanceOrPeak();
     void reportsWhyNoBrakingPointExists();
     void comparesOnlyLikeWithLike();
+    void stopsTheApproachAtThePreviousCorner();
 };
 
 void BrakingMetricsTests::measuresBrakingPointDistanceAndDeceleration()
@@ -249,6 +250,35 @@ void BrakingMetricsTests::comparesOnlyLikeWithLike()
     const auto other = computeBrakingMetrics(lapLength, otherRevision, idOf(otherRevision), lap,
         sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))}}), std::nullopt, std::nullopt);
     QVERIFY(!compareBrakingMetrics(measuredA, other).valid);
+}
+
+void BrakingMetricsTests::stopsTheApproachAtThePreviousCorner()
+{
+    // KAN-63: a corner ending at 450 m precedes T2 (500-600 m). Braking that
+    // starts at 440 m is that corner's; the 200 m approach stops at 450 m.
+    const QJsonArray segments{makeTrackSegment(TrackSegmentType::Corner, "T1", 300.0, 450.0, configuration()),
+        makeTrackSegment(TrackSegmentType::Corner, "T2", 500.0, 600.0, configuration())};
+    const auto approved = approvedSegmentation(segments, configuration());
+    const auto id = segments[1].toObject().value("id").toString();
+    const auto earlier = sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(440))}});
+    auto metrics = computeBrakingMetrics(lapLength, approved, id, projectedLap(), earlier, std::nullopt, std::nullopt);
+    QVERIFY(metrics.valid);
+    QCOMPARE(metrics.intervalStartMeters, 450.0);
+    QVERIFY(metrics.limitations.contains(brakingApproachClippedAtCorner));
+    QVERIFY(!metrics.brakingPointMeters || *metrics.brakingPointMeters >= 450.0);
+    // Braking that starts after the previous corner is still found.
+    const auto later = sessionWith({{"brake", makeChannel("brake_pos", "%", brakeFrom(470))}});
+    metrics = computeBrakingMetrics(lapLength, approved, id, projectedLap(), later, std::nullopt, std::nullopt);
+    QVERIFY(metrics.brakingPointMeters);
+    QVERIFY(std::abs(*metrics.brakingPointMeters - 470.5) < 0.05);
+    // A straight in between does not clip the approach.
+    const QJsonArray withStraight{makeTrackSegment(TrackSegmentType::Straight, "S", 300.0, 500.0, configuration()),
+        makeTrackSegment(TrackSegmentType::Corner, "T2", 500.0, 600.0, configuration())};
+    const auto straightApproved = approvedSegmentation(withStraight, configuration());
+    metrics = computeBrakingMetrics(lapLength, straightApproved, withStraight[1].toObject().value("id").toString(),
+        projectedLap(), earlier, std::nullopt, std::nullopt);
+    QCOMPARE(metrics.intervalStartMeters, 300.0);
+    QVERIFY(!metrics.limitations.contains(brakingApproachClippedAtCorner));
 }
 
 QTEST_GUILESS_MAIN(BrakingMetricsTests)

@@ -138,6 +138,12 @@ When the Corner Analyzer is opened from a theoretical-best sector, it
 compares the donor lap with the actual best using that canonical
 segmentation, and says so.
 
+Driving variability (KAN-63) summarizes each corner's braking point, apex,
+minimum and exit speed, throttle pickup and line offset at the apex across
+the eligible laps. Measured and inferred values are never mixed. The line
+spread is reported with the recording's typical GPS accuracy and is called
+resolvable only when it exceeds that accuracy.
+
 Timing consistency (KAN-62) reports the median ("typical") and the
 interquartile range ("spread", seconds, the middle half of the laps) with the
 sample count. It uses the ranking's eligibility and needs at least 3 samples.
@@ -157,7 +163,8 @@ the minimum where the lap was slowest. The apex is never taken as the minimum,
 and no speed is derived from GPS positions.
 
 Braking metrics (KAN-53) use shared-axis progress with an explicit interval
-(200 m before the segment start through its end). Measured and inferred braking
+(200 m before the segment start through its end, but never earlier than the
+end of the previous approved corner; KAN-63). Measured and inferred braking
 points keep their provenance and are never compared with each other; distance
 and deceleration are reported only with continuous coverage of the braking
 episode. An interval bound on the gate (an approach clipped at the gate, or a

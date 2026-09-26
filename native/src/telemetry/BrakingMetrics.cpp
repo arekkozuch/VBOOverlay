@@ -1,4 +1,5 @@
 #include "telemetry/BrakingMetrics.h"
+#include "telemetry/TrackSegments.h"
 
 #include <QJsonObject>
 
@@ -40,6 +41,21 @@ BrakingMetrics computeBrakingMetrics(const double axisLengthMeters, const Approv
     result.intervalStartMeters = std::max(0.0, start - options.approachMeters);
     result.intervalEndMeters = end;
     if (start - options.approachMeters < 0.0) result.limitations.append(brakingApproachClipped);
+    // KAN-63: the approach never reaches back into the previous approved
+    // corner; braking there belongs to that corner, not to this one.
+    bool clippedByCorner = false;
+    for (const auto &value : approved.segments) {
+        const auto other = value.toObject();
+        if (other.value("id").toString() == segmentId
+            || other.value("type").toString() != trackSegmentTypeName(TrackSegmentType::Corner))
+            continue;
+        const double otherEnd = other.value("endProgressMeters").toDouble();
+        if (otherEnd <= start + 1e-6 && otherEnd > result.intervalStartMeters) {
+            result.intervalStartMeters = otherEnd;
+            clippedByCorner = true;
+        }
+    }
+    if (clippedByCorner) result.limitations.append(brakingApproachClippedAtCorner);
 
     // Without a brake or deceleration channel no coverage makes a braking point possible.
     const auto hasChannel = [&session](const char *alias) {

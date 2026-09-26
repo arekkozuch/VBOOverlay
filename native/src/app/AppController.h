@@ -14,6 +14,7 @@
 #include "telemetry/TheoreticalBest.h"
 #include "telemetry/TimeLoss.h"
 #include "telemetry/Consistency.h"
+#include "telemetry/DrivingVariability.h"
 #include "telemetry/CornerSpeeds.h"
 #include "telemetry/BrakingMetrics.h"
 #include "telemetry/ExitMetrics.h"
@@ -734,6 +735,8 @@ private:
         FlappedEar::ApprovedSegmentation approved;
         double axisLengthMeters = 0.0;
         FlappedEar::ProgressAxis axis; // KAN-120: drawn as the track map
+        // KAN-63: each lap's corner metrics, by corner segment id.
+        QHash<QString, QVector<FlappedEar::CornerLapObservation>> cornerObservations;
     };
     static TheoreticalBestResult computeOutingTheoreticalBest(QVector<FlappedEar::OutingLapRow> population,
         QHash<QString, QJsonObject> sourcesByRunId, QString projectPath, FlappedEar::ApprovedSegmentation approved,
@@ -760,6 +763,7 @@ private:
     FlappedEar::ApprovedSegmentation m_theoreticalBestApproved;
     double m_theoreticalBestAxisLength = 0.0;
     FlappedEar::ProgressAxis m_theoreticalBestAxis;
+    QHash<QString, QVector<FlappedEar::CornerLapObservation>> m_theoreticalBestCornerObservations;
     QString m_comparisonFocusSegmentId;
     // KAN-57: set when the comparison is opened from a theoretical-best
     // sector. The pair is then measured against the canonical run's approved

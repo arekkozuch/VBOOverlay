@@ -52,6 +52,39 @@ Dialog {
         const t = Math.max(0, Math.min(1, Number(gain.lossSeconds) / root.maximumGain));
         return Qt.rgba(0.30 + 0.70 * t, 0.36 + 0.24 * t, 0.42 - 0.22 * t, 1);
     }
+    readonly property var selectedGain: root.gains.find(gain => gain.segmentId === root.selectedSegmentId) || null
+    // KAN-63: one line per metric; empty when the metric has no samples.
+    function spreadLine(label, summary, unit, provenance) {
+        if (!summary || !summary.count) return "";
+        const tail = qsTr("%1 laps").arg(summary.count) + (provenance ? " · " + provenance : "");
+        if (!summary.available) return qsTr("%1: too few laps (%2)").arg(label).arg(tail);
+        return qsTr("%1: spread %2%3 · %4").arg(label).arg(Number(summary.interquartileRange).toFixed(1)).arg(unit).arg(tail);
+    }
+    function speedLine(label, summary) {
+        if (!summary || !summary.count) return "";
+        if (!summary.available) return qsTr("%1: too few laps (%2)").arg(label).arg(summary.count);
+        return qsTr("%1: typical %2 · spread %3 · %4 laps").arg(label).arg(Number(summary.median).toFixed(1))
+            .arg(Number(summary.interquartileRange).toFixed(1)).arg(summary.count);
+    }
+    function variabilityLines(gain) {
+        if (!gain || !gain.variability) return [];
+        const v = gain.variability;
+        const lines = [
+            root.spreadLine(qsTr("Braking point"), v.brakingPointMeasured, " m", qsTr("measured")),
+            root.spreadLine(qsTr("Braking point"), v.brakingPointInferred, " m", qsTr("inferred")),
+            root.speedLine(qsTr("Apex speed"), v.apexSpeed),
+            root.speedLine(qsTr("Minimum speed"), v.minimumSpeed),
+            root.speedLine(qsTr("Exit speed"), v.exitSpeed),
+            root.spreadLine(qsTr("Throttle pickup"), v.pickupMeasured, " m", qsTr("measured")),
+            root.spreadLine(qsTr("Throttle pickup"), v.pickupInferred, " m", qsTr("inferred"))];
+        if (v.lineOffset && v.lineOffset.available) {
+            const accuracy = v.typicalGpsAccuracyMeters !== undefined
+                ? qsTr("GPS accuracy about %1 m").arg(Number(v.typicalGpsAccuracyMeters).toFixed(v.typicalGpsAccuracyMeters < 1 ? 2 : 1)) : qsTr("GPS accuracy not recorded");
+            lines.push(qsTr("Line: spread %1 m · %2%3").arg(Number(v.lineOffset.interquartileRange).toFixed(1)).arg(accuracy)
+                .arg(v.lineSpreadResolvable ? "" : qsTr(" · not distinguishable from GPS error")));
+        }
+        return lines.filter(line => line.length > 0);
+    }
     function openSegment(segmentId) {
         if (appController.openTheoreticalBestSector(segmentId)) root.close();
     }
@@ -219,6 +252,40 @@ Dialog {
                             onDoubleClicked: mouse => {
                                 const id = segmentAt(mouse.x, mouse.y);
                                 if (id.length > 0) root.openSegment(id);
+                            }
+                        }
+                    }
+                    // KAN-63: how repeatable the selected corner is.
+                    Rectangle {
+                        objectName: "theoreticalBestVariability"
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.margins: 10
+                        width: Math.min(parent.width - 20, variabilityColumn.implicitWidth + 20)
+                        height: variabilityColumn.implicitHeight + 16
+                        visible: root.variabilityLines(root.selectedGain).length > 0
+                        color: "#dd0b1119"
+                        border.color: "#253244"
+                        radius: 6
+                        ColumnLayout {
+                            id: variabilityColumn
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.margins: 8
+                            spacing: 2
+                            Label {
+                                text: root.selectedGain ? qsTr("%1 · lap to lap").arg(root.selectedGain.name) : ""
+                                textFormat: Text.PlainText
+                                color: "#f2f6fb"; font.pixelSize: 12; font.weight: Font.DemiBold
+                            }
+                            Repeater {
+                                model: root.variabilityLines(root.selectedGain)
+                                Label {
+                                    required property string modelData
+                                    text: modelData
+                                    textFormat: Text.PlainText
+                                    color: "#b5c1d0"; font.pixelSize: 11
+                                }
                             }
                         }
                     }
