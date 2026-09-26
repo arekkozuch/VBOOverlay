@@ -14,21 +14,22 @@ namespace FlappedEar {
 // Braking metrics for one approved segment on one lap (KAN-53).
 //
 // Spatial reference: shared-axis progress. The search interval runs from
-// `approachMeters` before the segment's start boundary (clipped at the gate)
-// to its end boundary. The braking point is the first braking-onset candidate
+// `approachMeters` before the segment's start boundary (clipped at the gate,
+// and since v2 at the end of the previous approved corner) to its end boundary. The braking point is the first braking-onset candidate
 // (KAN-47) inside that interval; its time and distance run from the onset to
 // the end of that braking episode. Deceleration is read only from the recorded
 // longitudinal-acceleration channel over the same episode. An interval bound
 // that lies on the gate (a clipped approach, or a segment ending at the lap
 // length) takes the lap's timed start or end: a lap's projection never lands
 // on the gate exactly.
-inline constexpr auto brakingMetricsAlgorithm = "braking-metrics-v1";
+inline constexpr auto brakingMetricsAlgorithm = "braking-metrics-v2";
 
 inline constexpr auto brakingNoneDetected = "noBrakingDetected";
 inline constexpr auto brakingIncompleteCoverage = "incompleteCoverage";
 inline constexpr auto brakingSegmentCrossesGate = "crossesGate";
 inline constexpr auto brakingDecelerationChannelMissing = "decelerationChannelMissing";
 inline constexpr auto brakingApproachClipped = "approachClippedAtGate";
+inline constexpr auto brakingApproachClippedAtCorner = "approachClippedAtPreviousCorner";
 inline constexpr auto brakingMixedProvenance = "mixedProvenance";
 
 struct BrakingMetricsOptions {

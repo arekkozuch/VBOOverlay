@@ -158,6 +158,7 @@ private slots:
     void ranksTimeLossesAndRecalculatesOnExclusion();
     void navigatesFromRankedLossToCornerEvidence();
     void reportsLapAndSectorConsistency();
+    void reportsCornerVariabilityWithGpsLimits();
     void formatsElapsedTimes();
     void analyzesPrivateTrackDayCorners();
     void reviewsSegmentProposalsForTheOpenLap();
@@ -4801,6 +4802,47 @@ void TelemetryTests::reportsLapAndSectorConsistency()
     QVERIFY(!laps.value("day").toMap().contains("median"));
 }
 
+void TelemetryTests::reportsCornerVariabilityWithGpsLimits()
+{
+    // KAN-63: both runs drive the identical path with no speed, brake,
+    // throttle or GPS-accuracy channel. The line spread is ~0 but never
+    // claimed resolvable (no stated accuracy); speed and braking metrics
+    // have no samples rather than being derived from GPS.
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    QSettings settings; settings.clear(); settings.sync();
+    const auto first = directory.filePath("fastfirst.vbo"), second = directory.filePath("fastsecond.vbo");
+    QVERIFY(writeBytes(first, warpedRouteVbo(true)));
+    QVERIFY(writeBytes(second, warpedRouteVbo(false)));
+    AppController controller(nullptr, directory.filePath("recovery.json"));
+    QVERIFY(controller.importAnalysisRuns("Variability", {QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)}));
+    QTRY_COMPARE(controller.vboLoadState(), QString("ready"));
+    QTRY_VERIFY(!controller.outingLapsLoading());
+    QTRY_VERIFY(!controller.outingComparisonGroupId().isEmpty());
+    QVERIFY(!approveAllSegmentsOnRun(controller, "Session 1").isEmpty());
+    controller.requestOutingTheoreticalBest();
+    QTRY_COMPARE_WITH_TIMEOUT(controller.outingTheoreticalBest().value("state").toString(), QString("ready"), 30000);
+    const auto best = controller.outingTheoreticalBest();
+    QCOMPARE(best.value("variabilityAlgorithm").toString(), QString("driving-variability-v1"));
+    const auto eligible = controller.outingRanking().value("eligibleLapCount").toInt();
+    int corners = 0;
+    for (const auto &value : best.value("sectors").toList()) {
+        const auto sector = value.toMap();
+        if (sector.value("type") != "corner") { QVERIFY(!sector.contains("variability")); continue; }
+        ++corners;
+        const auto variability = sector.value("variability").toMap();
+        const auto line = variability.value("lineOffset").toMap();
+        QVERIFY2(line.value("available").toBool(), qPrintable(sector.value("name").toString()));
+        QCOMPARE(line.value("count").toInt(), eligible);
+        QVERIFY(std::abs(line.value("median").toDouble()) < 1.0);
+        QVERIFY(line.value("interquartileRange").toDouble() < 0.5);
+        QVERIFY(!variability.contains("typicalGpsAccuracyMeters"));
+        QVERIFY(!variability.value("lineSpreadResolvable").toBool());
+        for (const auto *metric : {"apexSpeed", "minimumSpeed", "exitSpeed", "brakingPointMeasured", "brakingPointInferred"})
+            QCOMPARE(variability.value(metric).toMap().value("count").toInt(), 0);
+    }
+    QVERIFY(corners > 0);
+}
+
 void TelemetryTests::formatsElapsedTimes()
 {
     QCOMPARE(AppController::formatElapsedTime(100.838), QString("1:40.838"));
@@ -4885,6 +4927,15 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
             << "IQR" << summary.value("interquartileRange").toDouble();
     }
     for (const auto &value : best.value("sectors").toList()) {
+        const auto sector = value.toMap(); const auto v = sector.value("variability").toMap();
+        if (v.isEmpty()) continue;
+        const auto spread = [&v](const char *key) { const auto m = v.value(key).toMap();
+            return m.value("available").toBool() ? QString::number(m.value("interquartileRange").toDouble(), 'f', 1) + " (n" + m.value("count").toString() + ")" : QString("-"); };
+        qInfo().noquote() << QString("  %1 brake %2 min %3 exit %4 pickup %5 line %6 gps %7 resolvable %8").arg(sector.value("name").toString(), -14)
+            .arg(spread("brakingPointMeasured"), spread("minimumSpeed"), spread("exitSpeed"), spread("pickupMeasured"), spread("lineOffset"))
+            .arg(v.value("typicalGpsAccuracyMeters").toDouble(), 0, 'f', 2).arg(v.value("lineSpreadResolvable").toBool());
+    }
+    for (const auto &value : best.value("sectors").toList()) {
         const auto sector = value.toMap(); const auto consistency = sector.value("consistency").toMap();
         qInfo().noquote() << QString("  %1 typical %2 spread %3 n %4").arg(sector.value("name").toString(), -14)
             .arg(consistency.value("median").toDouble(), 7, 'f', 3).arg(consistency.value("interquartileRange").toDouble(), 6, 'f', 3)
@@ -4967,7 +5018,10 @@ void TelemetryTests::analyzesPrivateTrackDayCorners()
     auto *theoretical = window->findChild<QObject *>("theoreticalBestDialog");
     if (theoretical) {
         QVERIFY(QMetaObject::invokeMethod(theoretical, "open"));
-        QTest::qWait(1500);
+        QTest::qWait(1000);
+        for (const auto &value : controller.outingTheoreticalBest().value("gains").toList())
+            if (value.toMap().value("type") == "corner") { theoretical->setProperty("selectedSegmentId", value.toMap().value("segmentId")); break; }
+        QTest::qWait(800);
         QVERIFY(window->grabWindow().save(QDir(reviewDirectory).filePath("theoretical-best.png")));
     }
     for (const auto &warning : warnings) qInfo() << "QML warning" << warning;

@@ -889,6 +889,46 @@ Laps all take 48 s, so the lap spread is about 0 and the count equals the
 ranking's eligible laps. Sectors show spread. After excluding laps down to 2,
 lap consistency is unavailable.
 
+## Braking, apex, exit and line variability (KAN-63)
+
+The theoretical-best worker computes, for every eligible lap and every
+approved corner, the same Corner Analyzer metrics on the canonical axis:
+braking point (KAN-53), apex, minimum and exit speed (KAN-52) and throttle
+pickup (KAN-54). It also computes the lap's **lateral offset** from the
+reference line at the corner's geometric apex (mid-corner for a chain with
+several apexes), and the recording's own `accuracy` value at that point.
+`summarizeCornerVariability` (`DrivingVariability.h/.cpp`, tag
+`driving-variability-v1`) summarizes each metric with the KAN-62 statistics
+(median, IQR, count, minimum 3):
+
+- Measured and inferred braking points and throttle pickups are summarized
+  separately and never mixed.
+- Speeds come only from the recorded speed channel, in its units (VBO units
+  are not recorded; see KAN-117).
+- The line spread (IQR of the lateral offset, metres) is shown next to the
+  typical (median) GPS accuracy. It counts as resolvable only when it
+  exceeds that accuracy. Without a stated accuracy it is never claimed
+  resolvable.
+
+**Theoretical best…** shows the selected corner's variability ("lap to lap")
+in a box on the map.
+
+Real-data correction to KAN-53 (tag `braking-metrics-v2`): the 200 m braking
+approach now stops at the end of the previous approved corner
+(`approachClippedAtPreviousCorner`). On the Jastrząb day, Corner 7 follows an
+82 m straight, so the approach reached into Corners 5–6 and picked up their
+braking on some laps. Its braking-point spread fell from 170.5 m to 8.0 m.
+
+`DrivingVariabilityTests` covers per-metric counts, measured and inferred
+kept apart, line spread against GPS accuracy (resolvable, noisy, unknown)
+and signed lateral offset. `BrakingMetricsTests::stopsTheApproachAtThePreviousCorner`
+covers the clip, braking after the previous corner, and an intervening
+straight that does not clip. `TelemetryTests::reportsCornerVariabilityWithGpsLimits`
+covers identical paths: line spread about 0 but not resolvable without
+accuracy, and no speed or braking samples. On the private day, GPS accuracy
+is about 0.15 m and line spreads are 0.7–8.1 m. The gate-crossing final chain
+has line data only, because its speed and braking metrics are unavailable.
+
 ## Video-free day-result states (KAN-27)
 
 `presentsDayResultStatesWithoutVideo` uses two distinct synthetic route recordings
